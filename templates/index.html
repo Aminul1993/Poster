@@ -1296,7 +1296,7 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
 
       <section class="settings-section" id="settings-media" aria-labelledby="set-media-title">
         <h3 id="set-media-title"><svg class="icon"><use href="#i-image"/></svg>Media hosting</h3>
-        <p class="section-desc">Buffer has no upload endpoint: images are attached from public URLs. When a media host is configured on the server (for example a Cloudinary unsigned preset), Poster uploads each image there and uses the returned URL. You can also paste a public URL for each image in the editor.</p>
+        <p class="section-desc">Buffer has no upload endpoint: images are attached from public URLs. When a media host is configured on the server (Vercel Blob, or for example a Cloudinary unsigned preset), Poster uploads each image there and uses the returned URL. You can also paste a public URL for each image in the editor.</p>
         <dl class="server-info" id="media-server-info" aria-label="Media host server configuration"></dl>
         <label class="checkbox"><input type="checkbox" id="set-require-media"><span>Require an image on every post (fail instead of posting text only)</span></label>
       </section>
@@ -1466,6 +1466,9 @@ const API_CONFIG = Object.freeze({
 const LIMITS = Object.freeze({
   maxImages: 25,
   maxImageBytes: 20 * 1024 * 1024,
+  /** Largest upload the server accepts (4 MB on Vercel); bigger images are re-encoded to fit. */
+  maxUploadBytes: Number(SERVER.limits.maxUploadBytes) || 20 * 1024 * 1024,
+  uploadMaxEdges: Object.freeze([4096, 3072, 2048, 1600]),
   allowedTypes: Object.freeze(['image/jpeg', 'image/png', 'image/webp']),
   allowedExtensions: Object.freeze(['jpg', 'jpeg', 'png', 'webp']),
   minHashtags: 10,
@@ -2929,6 +2932,30 @@ async function prepareAnalysisImage(item) {
   }
 }
 
+/**
+ * The image to send to the media host. Files over the server's upload limit
+ * are re-encoded as JPEG, at smaller sizes until one fits.
+ * @param {object} item @returns {Promise<{blob: Blob, name: string}>}
+ */
+async function prepareUploadImage(item) {
+  if (item.file.size <= LIMITS.maxUploadBytes) return { blob: item.file, name: item.name };
+  const source = await decodeImage(item.file);
+  try {
+    const longest = Math.max(source.naturalWidth || source.width, source.naturalHeight || source.height);
+    const edges = [...new Set(LIMITS.uploadMaxEdges.map((edge) => Math.min(edge, longest)))];
+    for (const edge of edges) {
+      const canvas = drawScaled(source, edge);
+      for (const quality of [0.9, 0.8]) {
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+        if (blob && blob.size <= LIMITS.maxUploadBytes) return { blob, name: `${item.name.replace(/\.[^.]+$/, '')}.jpg` };
+      }
+    }
+  } finally {
+    if (typeof source.close === 'function') source.close();
+  }
+  throw new ApiError(`"${item.name}" could not be shrunk below the ${formatBytes(LIMITS.maxUploadBytes)} upload limit.`, { kind: 'validation', service: 'Media host' });
+}
+
 /** 32-bit FNV-1a hash of a string (stable pseudo-randomness for Demo mode). */
 function hashString(text) {
   let hash = 0x811c9dc5;
@@ -3339,8 +3366,9 @@ class BufferService {
     }
     if (item.uploadedUrl) return item.uploadedUrl;
     if (SERVER.media.configured) {
+      const upload = await prepareUploadImage(item);
       const form = new FormData();
-      form.append(API_CONFIG.mediaFileField, item.file, item.name);
+      form.append(API_CONFIG.mediaFileField, upload.blob, upload.name);
       const data = await retryRequest(() => this.api.call(API_CONFIG.routes.mediaUpload, {
         form, timeoutMs: API_CONFIG.timeouts.mediaMs, signal, service: 'Media host', onRetry
       }), { signal, onRetry });
@@ -3350,7 +3378,7 @@ class BufferService {
       return data.url;
     }
     if (s.requireMedia) {
-      throw new ApiError(`"${item.name}" has no public image URL. Buffer attaches images from public URLs: paste one in the editor, or set MEDIA_UPLOAD_ENDPOINT on the server.`, { kind: 'validation', service: 'Buffer' });
+      throw new ApiError(`"${item.name}" has no public image URL. Buffer attaches images from public URLs: paste one in the editor, or set BLOB_READ_WRITE_TOKEN (Vercel Blob) or MEDIA_UPLOAD_ENDPOINT on the server.`, { kind: 'validation', service: 'Buffer' });
     }
     return null;
   }

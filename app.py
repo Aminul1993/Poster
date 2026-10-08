@@ -6,7 +6,8 @@ This file does three jobs:
 * talks to Ollama: one image in; a caption, an alternative caption, hashtags,
   a category and an engagement score out,
 * talks to Buffer's GraphQL API (token check, channels, scheduled posts) and,
-  optionally, to a media host that turns uploads into public image URLs.
+  optionally, to a media host that turns uploads into public image URLs
+  (Vercel Blob, or an upload endpoint such as a Cloudinary unsigned preset).
 
 Credentials stay on the server, in environment variables or a ``.env`` file
 next to this one, and the browser never sees them. The browser only calls this
@@ -36,7 +37,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import requests
 from flask import Flask, g, jsonify, render_template, request
@@ -101,6 +102,9 @@ CONFIG: dict[str, Any] = {
     "BUFFER_API_URL": _env("BUFFER_API_URL", "https://api.buffer.com"),
     "MEDIA_UPLOAD_ENDPOINT": _env("MEDIA_UPLOAD_ENDPOINT"),
     "MEDIA_UPLOAD_PRESET": _env("MEDIA_UPLOAD_PRESET"),
+    "BLOB_READ_WRITE_TOKEN": _env("BLOB_READ_WRITE_TOKEN"),
+    "BLOB_STORE_ID": _env("BLOB_STORE_ID"),
+    "BLOB_API_URL": _env("VERCEL_BLOB_API_URL", "https://vercel.com/api/blob"),
     "OLLAMA_TIMEOUT": _env_int("OLLAMA_TIMEOUT", 120, 10, 600),
     "BUFFER_TIMEOUT": _env_int("BUFFER_TIMEOUT", 30, 5, 120),
     "MEDIA_TIMEOUT": _env_int("MEDIA_TIMEOUT", 120, 10, 600),
@@ -135,6 +139,9 @@ API: dict[str, Any] = {
         "file_field": "file",
         "preset_field": "upload_preset",
         "url_paths": ("secure_url", "url", "data.url", "data.link", "link", "data.display_url", "image.url", "result.url"),
+        # Vercel Blob REST API, as called by @vercel/blob's put().
+        "blob_api_version": "12",
+        "blob_folder": "poster",
     },
     "retry": {
         "max_retries": 3,
@@ -146,6 +153,8 @@ API: dict[str, Any] = {
 
 LIMITS = {
     "max_image_bytes": 20 * 1024 * 1024,
+    # Vercel Functions reject request bodies over 4.5 MB, so there the browser shrinks larger uploads to fit.
+    "max_upload_bytes": (4 if _env("VERCEL") else 20) * 1024 * 1024,
     "max_analysis_bytes": 8 * 1024 * 1024,
     "max_text_chars": 10_000,
     "max_channels": 25,
@@ -920,18 +929,34 @@ class BufferService:
 # =============================================================================
 
 class MediaService:
-    """Uploads an image to a host that returns a public URL (e.g. a Cloudinary unsigned preset)."""
+    """Uploads an image to a host that returns a public URL.
+
+    Vercel Blob when BLOB_READ_WRITE_TOKEN is set, otherwise MEDIA_UPLOAD_ENDPOINT
+    (e.g. a Cloudinary unsigned preset).
+    """
 
     service = "Media host"
 
     def __init__(self, http: HttpClient, config: dict[str, Any]) -> None:
         self.http = http
+        self.blob_token = config["BLOB_READ_WRITE_TOKEN"]
+        token_parts = self.blob_token.split("_")  # vercel_blob_rw_<store id>_<secret>
+        self.blob_store_id = config["BLOB_STORE_ID"].removeprefix("store_") or (token_parts[3] if len(token_parts) > 4 else "")
+        self.blob_api_url = config["BLOB_API_URL"].rstrip("/")
         self.endpoint = config["MEDIA_UPLOAD_ENDPOINT"]
         self.preset = config["MEDIA_UPLOAD_PRESET"]
         self.timeout = config["MEDIA_TIMEOUT"]
         self.problem = self._check_config()
 
+    @property
+    def uses_blob(self) -> bool:
+        return bool(self.blob_token)
+
     def _check_config(self) -> str | None:
+        if self.uses_blob:
+            if not self.blob_token.startswith("vercel_blob_rw_"):
+                return "BLOB_READ_WRITE_TOKEN is not a Vercel Blob read-write token (vercel_blob_rw_...)."
+            return check_url(self.blob_api_url, "VERCEL_BLOB_API_URL", https_only=True)
         if not self.endpoint:
             return "MEDIA_UPLOAD_ENDPOINT is not set."
         if self.preset and not re.fullmatch(r"[\w.\-]{1,100}", self.preset):
@@ -944,18 +969,23 @@ class MediaService:
 
     def public_info(self) -> dict[str, Any]:
         retry = API["retry"]
-        return {"configured": self.configured, "problem": self.problem,
-                "host": urlparse(self.endpoint).netloc if self.endpoint else "",
+        host = "Vercel Blob" if self.uses_blob else urlparse(self.endpoint).netloc if self.endpoint else ""
+        return {"configured": self.configured, "problem": self.problem, "host": host,
                 "requestTimeout": self.timeout * (retry["max_retries"] + 1) + sum(retry["delays"]) + 10}
 
     def upload(self, filename: str, data: bytes, mimetype: str, on_retry: RetryCallback) -> str:
         if self.problem:
             raise ServiceError(f"No media host is configured on the server: {self.problem}", kind="config", service=self.service,
-                               hint="Set MEDIA_UPLOAD_ENDPOINT (and MEDIA_UPLOAD_PRESET), or paste a public image URL in the editor.")
-        form = {API["media"]["preset_field"]: self.preset} if self.preset else {}
+                               hint="Set BLOB_READ_WRITE_TOKEN (Vercel Blob) or MEDIA_UPLOAD_ENDPOINT, or paste a public image URL in the editor.")
+        if self.uses_blob:
+            method, url = "PUT", f"{self.blob_api_url}/?{urlencode({'pathname': API['media']['blob_folder'] + '/' + filename})}"
+            options: dict[str, Any] = {"data": data, "headers": self.blob_headers(mimetype)}
+        else:
+            form = {API["media"]["preset_field"]: self.preset} if self.preset else {}
+            method, url = "POST", self.endpoint
+            options = {"files": {API["media"]["file_field"]: (filename, data, mimetype)}, "data": form}
         _, payload, text = retry_request(
-            lambda: self.http.request("POST", self.endpoint, service=self.service, timeout=self.timeout,
-                                      files={API["media"]["file_field"]: (filename, data, mimetype)}, data=form),
+            lambda: self.http.request(method, url, service=self.service, timeout=self.timeout, **options),
             on_retry=on_retry,
         )
         for path in API["media"]["url_paths"]:
@@ -969,6 +999,20 @@ class MediaService:
                 return value
         raise ServiceError("The media host accepted the upload but did not return a public URL.", kind="parse",
                            service=self.service, details=truncate(text, 300))
+
+    def blob_headers(self, mimetype: str) -> dict[str, str]:
+        """Headers for a Vercel Blob put. Public access, because Buffer fetches the image without credentials;
+        a random suffix keeps every upload at its own URL."""
+        headers = {
+            "Authorization": f"Bearer {self.blob_token}",
+            "x-api-version": API["media"]["blob_api_version"],
+            "x-vercel-blob-access": "public",
+            "x-content-type": mimetype,
+            "x-add-random-suffix": "1",
+        }
+        if self.blob_store_id:
+            headers["x-vercel-blob-store-id"] = self.blob_store_id
+        return headers
 
 
 # =============================================================================
@@ -1113,7 +1157,8 @@ def server_config() -> dict[str, Any]:
         "ollama": ollama.public_info(),
         "buffer": buffer.public_info(),
         "media": media.public_info(),
-        "limits": {"maxImageBytes": LIMITS["max_image_bytes"], "maxChannels": LIMITS["max_channels"]},
+        "limits": {"maxImageBytes": LIMITS["max_image_bytes"], "maxUploadBytes": LIMITS["max_upload_bytes"],
+                   "maxChannels": LIMITS["max_channels"]},
     }
 
 

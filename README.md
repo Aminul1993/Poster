@@ -18,6 +18,7 @@ Without credentials, Poster starts in **Demo mode**, where AI and scheduling are
 
 ## Notes
 
-- Buffer attaches images only from public URLs. Configure a media host (for example a Cloudinary unsigned upload preset), or paste a public image URL per post in the editor.
+- Buffer attaches images only from public URLs. Set `BLOB_READ_WRITE_TOKEN` to upload them to a public Vercel Blob store, or configure another media host (for example a Cloudinary unsigned upload preset), or paste a public image URL per post in the editor.
+- On Vercel, request bodies are capped at 4.5 MB, so the browser re-encodes images over 4 MB as smaller JPEGs before uploading them.
 - Server-side calls retry timeouts, network errors and HTTP 429/5xx three times (1 s, 2 s, 4 s). Buffer post creation is retried only on 429/503, so a post is never created twice.
 - Keep `POSTER_HOST=127.0.0.1` unless you put authentication in front of the server: anyone who can reach it can use your Buffer and Ollama credentials.
