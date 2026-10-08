@@ -5,10 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#f5f6f8">
-<meta name="description" content="Poster — generate social media captions and hashtags with AI and schedule posts through Buffer, entirely in your browser.">
+<meta name="description" content="Poster — generate social media captions and hashtags with AI and schedule posts through Buffer.">
 <title>Poster — AI Social Publishing</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M23 9 14.5 17.5M23 9l-5.5 15-3-6.5L8 14.5z' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
-<script>
+<!-- Non-secret server configuration (credentials never leave the server). -->
+<script type="application/json" id="server-config">{{ server_config | tojson }}</script>
+<script nonce="{{ csp_nonce }}">
   /* Apply the saved (or system) theme before first paint to avoid a flash. */
   (function () {
     var theme = null;
@@ -708,6 +710,17 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
 .mode-option input { margin-top: 2px; }
 .mode-option strong { display: block; font-size: 13.5px; }
 .mode-option span { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.server-info {
+  display: grid; gap: 6px; margin: 0; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface-2); font-size: 12.5px;
+}
+.server-info > div { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
+.server-info dt { color: var(--muted); flex: none; }
+.server-info dd { margin: 0; font-weight: 600; text-align: right; min-width: 0; word-break: break-word; }
+.server-info dd.is-ok { color: var(--success); }
+.server-info dd.is-missing { color: var(--warning); }
+.server-info .server-note { display: block; grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.server-info code, .section-desc code { font-family: var(--mono); font-size: 11.5px; background: var(--surface-3); padding: 1px 5px; border-radius: 4px; }
 .test-result { font-size: 12.5px; display: flex; gap: 8px; align-items: flex-start; }
 .test-result .icon { width: 16px; height: 16px; margin-top: 1px; }
 .test-result.is-ok { color: var(--success); }
@@ -1208,7 +1221,7 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
     <header class="drawer-header">
       <div>
         <h2 id="settings-title">Settings</h2>
-        <p class="card-sub" id="settings-source">Using embedded configuration</p>
+        <p class="card-sub" id="settings-source">Using the server defaults</p>
       </div>
       <button type="button" class="btn btn-ghost btn-icon" id="close-settings" aria-label="Close settings"><svg class="icon"><use href="#i-x"/></svg></button>
     </header>
@@ -1223,27 +1236,14 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
         <h3 id="set-mode-title"><svg class="icon"><use href="#i-zap"/></svg>Mode</h3>
         <div class="mode-options" role="radiogroup" aria-labelledby="set-mode-title">
           <label class="mode-option"><input type="radio" name="mode" value="demo"><div><strong>Demo</strong><span>Simulated AI and scheduling. No credentials or network needed.</span></div></label>
-          <label class="mode-option"><input type="radio" name="mode" value="live"><div><strong>Live</strong><span>Calls Ollama and Buffer directly from this browser.</span></div></label>
+          <label class="mode-option"><input type="radio" name="mode" value="live"><div><strong>Live</strong><span>Generates and schedules for real through the Poster server.</span></div></label>
         </div>
       </section>
 
       <section class="settings-section" id="settings-ollama" aria-labelledby="set-ollama-title">
         <h3 id="set-ollama-title"><svg class="icon"><use href="#i-cpu"/></svg>Ollama · AI generation</h3>
-        <p class="section-desc">Images are resized, converted to Base64 and sent to <code>{endpoint}/api/chat</code>. The endpoint must allow requests from this page (CORS).</p>
-        <div class="field">
-          <label class="label" for="set-ollama-endpoint">Endpoint URL</label>
-          <input class="input" id="set-ollama-endpoint" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://ollama.com" aria-describedby="set-ollama-endpoint-hint set-ollama-endpoint-error">
-          <p class="hint" id="set-ollama-endpoint-hint">Base URL (for example https://ollama.com or http://localhost:11434), or a full …/api/chat or …/v1/chat/completions URL.</p>
-          <p class="error-text" id="set-ollama-endpoint-error" hidden></p>
-        </div>
-        <div class="field">
-          <label class="label" for="set-ollama-key">API key</label>
-          <div class="input-group">
-            <input class="input" id="set-ollama-key" type="password" autocomplete="off" spellcheck="false" placeholder="Required for Ollama Cloud" aria-describedby="set-ollama-key-error">
-            <button type="button" class="btn btn-icon" data-toggle-secret="set-ollama-key" aria-label="Show API key" aria-pressed="false"><svg class="icon"><use href="#i-eye"/></svg></button>
-          </div>
-          <p class="error-text" id="set-ollama-key-error" hidden></p>
-        </div>
+        <p class="section-desc">Images are resized in the browser, sent to the Poster server as Base64, and analysed with Ollama's <code>/api/chat</code>. The endpoint and API key are set on the server.</p>
+        <dl class="server-info" id="ollama-server-info" aria-label="Ollama server configuration"></dl>
         <div class="field-row">
           <div class="field">
             <label class="label" for="set-model">Model</label>
@@ -1264,11 +1264,6 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
         </div>
         <div class="field-row">
           <div class="field">
-            <label class="label" for="set-ollama-timeout">Request timeout (seconds)</label>
-            <input class="input" id="set-ollama-timeout" type="number" min="10" max="600" step="1" inputmode="numeric" aria-describedby="set-ollama-timeout-error">
-            <p class="error-text" id="set-ollama-timeout-error" hidden></p>
-          </div>
-          <div class="field">
             <label class="label" for="set-ai-concurrency">Parallel requests</label>
             <input class="input" id="set-ai-concurrency" type="number" min="1" max="4" step="1" inputmode="numeric" aria-describedby="set-ai-concurrency-error">
             <p class="error-text" id="set-ai-concurrency-error" hidden></p>
@@ -1287,27 +1282,8 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
 
       <section class="settings-section" id="settings-buffer" aria-labelledby="set-buffer-title">
         <h3 id="set-buffer-title"><svg class="icon"><use href="#i-layers"/></svg>Buffer · scheduling</h3>
-        <p class="section-desc">Uses a personal API key with Buffer's GraphQL API. Connect to load your channels, then choose where posts go.</p>
-        <div class="field">
-          <label class="label" for="set-buffer-token">Personal access token</label>
-          <div class="input-group">
-            <input class="input" id="set-buffer-token" type="password" autocomplete="off" spellcheck="false" placeholder="Buffer API key" aria-describedby="set-buffer-token-error">
-            <button type="button" class="btn btn-icon" data-toggle-secret="set-buffer-token" aria-label="Show access token" aria-pressed="false"><svg class="icon"><use href="#i-eye"/></svg></button>
-          </div>
-          <p class="error-text" id="set-buffer-token-error" hidden></p>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label class="label" for="set-buffer-api">API URL</label>
-            <input class="input" id="set-buffer-api" type="url" inputmode="url" autocomplete="off" spellcheck="false" aria-describedby="set-buffer-api-error">
-            <p class="error-text" id="set-buffer-api-error" hidden></p>
-          </div>
-          <div class="field">
-            <label class="label" for="set-buffer-timeout">Request timeout (seconds)</label>
-            <input class="input" id="set-buffer-timeout" type="number" min="5" max="120" step="1" inputmode="numeric" aria-describedby="set-buffer-timeout-error">
-            <p class="error-text" id="set-buffer-timeout-error" hidden></p>
-          </div>
-        </div>
+        <p class="section-desc">The server uses your Buffer personal access token with Buffer's GraphQL API. Connect to load your channels, then choose where posts go.</p>
+        <dl class="server-info" id="buffer-server-info" aria-label="Buffer server configuration"></dl>
         <div class="row-actions">
           <button type="button" class="btn btn-sm" id="connect-buffer"><svg class="icon"><use href="#i-link"/></svg><span id="connect-buffer-label">Connect &amp; load channels</span></button>
         </div>
@@ -1320,17 +1296,8 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
 
       <section class="settings-section" id="settings-media" aria-labelledby="set-media-title">
         <h3 id="set-media-title"><svg class="icon"><use href="#i-image"/></svg>Media hosting</h3>
-        <p class="section-desc">Buffer has no upload endpoint: images are attached from public URLs. Poster can upload each image to a host that accepts browser uploads (such as a Cloudinary unsigned preset) and use the returned URL. You can also paste a public URL for each image in the editor.</p>
-        <div class="field">
-          <label class="label" for="set-media-endpoint">Upload endpoint <span class="optional">optional</span></label>
-          <input class="input" id="set-media-endpoint" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.cloudinary.com/v1_1/<cloud-name>/image/upload" aria-describedby="set-media-endpoint-error">
-          <p class="error-text" id="set-media-endpoint-error" hidden></p>
-        </div>
-        <div class="field">
-          <label class="label" for="set-media-preset">Upload preset <span class="optional">optional</span></label>
-          <input class="input" id="set-media-preset" type="text" autocomplete="off" spellcheck="false" placeholder="unsigned_preset_name" aria-describedby="set-media-preset-error">
-          <p class="error-text" id="set-media-preset-error" hidden></p>
-        </div>
+        <p class="section-desc">Buffer has no upload endpoint: images are attached from public URLs. When a media host is configured on the server (for example a Cloudinary unsigned preset), Poster uploads each image there and uses the returned URL. You can also paste a public URL for each image in the editor.</p>
+        <dl class="server-info" id="media-server-info" aria-label="Media host server configuration"></dl>
         <label class="checkbox"><input type="checkbox" id="set-require-media"><span>Require an image on every post (fail instead of posting text only)</span></label>
       </section>
 
@@ -1374,12 +1341,11 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
 
       <section class="settings-section" aria-labelledby="set-data-title">
         <h3 id="set-data-title"><svg class="icon"><use href="#i-database"/></svg>Import, export &amp; reset</h3>
-        <p class="section-desc">Settings, theme, drafts, schedules and the activity log are stored in this browser's localStorage. Credentials are stored as plain text, so only save them on a device you trust.</p>
-        <label class="checkbox"><input type="checkbox" id="export-credentials"><span>Include API keys and tokens in the export</span></label>
+        <p class="section-desc">Your preferences, theme, drafts, schedules and the activity log are stored in this browser's localStorage. API keys and endpoints live only on the server and are never exported.</p>
         <div class="data-actions">
           <button type="button" class="btn btn-sm" id="export-config"><svg class="icon"><use href="#i-download"/></svg>Export JSON</button>
           <button type="button" class="btn btn-sm" id="import-config"><svg class="icon"><use href="#i-upload"/></svg>Import JSON</button>
-          <button type="button" class="btn btn-sm" id="restore-defaults"><svg class="icon"><use href="#i-refresh"/></svg>Load embedded defaults</button>
+          <button type="button" class="btn btn-sm" id="restore-defaults"><svg class="icon"><use href="#i-refresh"/></svg>Load server defaults</button>
         </div>
         <div class="data-actions">
           <button type="button" class="btn btn-sm btn-danger" id="clear-drafts"><svg class="icon"><use href="#i-trash"/></svg>Clear saved drafts</button>
@@ -1412,76 +1378,88 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
 
 <input type="file" id="import-input" accept="application/json,.json" hidden>
 <div class="toast-region" id="toast-region" aria-live="polite" aria-relevant="additions"></div>
-<script>
+<script nonce="{{ csp_nonce }}">
+{% raw %}
 /* ==========================================================================
- * Poster — AI social media publishing, in one HTML file.
+ * Poster — AI social media publishing (browser side of the Flask app).
  *
- * Architecture (all plain ES2020+ classes, no dependencies):
+ * The Flask server (app.py) holds the credentials and talks to Ollama, Buffer
+ * and the media host. This script only calls the server's /api/* routes, so
+ * no API key ever reaches the browser and CORS rules of those services do
+ * not apply.
+ *
+ * Architecture (plain ES2020+ classes, no dependencies):
  *   StorageService       safe localStorage wrapper (quota + unavailable storage)
  *   NotificationService  toasts, banners and the activity log
  *   ValidationService    images, captions, hashtags, schedules, settings, imports
- *   ApiService           fetch with timeouts, cancellation and error classification
- *   OllamaService        image → caption/hashtags/category/score via /api/chat
- *   BufferService        token check, channels, media URLs, scheduled posts
+ *   ApiService           fetch to the Poster server: timeouts, cancellation, errors
+ *   OllamaService        image → caption/hashtags/category/score (/api/ollama/*)
+ *   BufferService        token check, channels, media URLs, posts (/api/buffer/*)
  *   SchedulerService     bulk runs with progress, cancellation and statistics
  *   UIController         DOM rendering and event wiring
- * Demo mode swaps OllamaService/BufferService for simulated subclasses.
+ * Demo mode swaps OllamaService/BufferService for simulated subclasses that
+ * never contact the server.
  * ========================================================================== */
 'use strict';
 
 /**
- * Embedded configuration. These values are the defaults: anything saved from
- * the Settings panel (localStorage) takes precedence, and "Load embedded
- * defaults" restores them. Values starting with "YOUR_" count as not set.
+ * Non-secret configuration rendered by Flask into #server-config: which
+ * services are configured on the server, the default model and mode, and
+ * timeouts. Falls back to "nothing configured" when it is missing.
  */
-const CONFIG = {
-  OLLAMA_ENDPOINT: "https://ollama.com",
-  OLLAMA_API_KEY: "YOUR_OLLAMA_API_KEY",
-  BUFFER_ACCESS_TOKEN: "YOUR_BUFFER_ACCESS_TOKEN",
-  MODEL: "gemma4:31b",
-
-  /* Optional extras (safe to leave as they are). */
-  BUFFER_API_URL: "https://api.buffer.com",
-  MEDIA_UPLOAD_ENDPOINT: "",   // e.g. https://api.cloudinary.com/v1_1/<cloud>/image/upload
-  MEDIA_UPLOAD_PRESET: "",     // e.g. an unsigned Cloudinary upload preset
-  TIMEZONE: "",                // IANA zone such as "Europe/London"; empty = this browser's zone
-  MODE: "auto"                 // "auto" (live when credentials are set), "demo" or "live"
-};
+const SERVER = (() => {
+  const missing = 'Server configuration unavailable.';
+  const fallback = {
+    version: '',
+    mode: 'demo',
+    ollama: { configured: false, problem: missing, model: 'gemma4:31b', host: '', timeout: 120, requestTimeout: 1000 },
+    buffer: { configured: false, problem: missing, tokenId: '', host: '', timeout: 30, requestTimeout: 160 },
+    media: { configured: false, problem: missing, host: '', requestTimeout: 500 },
+    limits: {}
+  };
+  try {
+    const parsed = JSON.parse(document.getElementById('server-config')?.textContent || 'null');
+    if (!parsed || typeof parsed !== 'object') return fallback;
+    return {
+      ...fallback,
+      ...parsed,
+      ollama: { ...fallback.ollama, ...parsed.ollama },
+      buffer: { ...fallback.buffer, ...parsed.buffer },
+      media: { ...fallback.media, ...parsed.media }
+    };
+  } catch {
+    return fallback;
+  }
+})();
 
 /**
- * Central API configuration. Every endpoint path, GraphQL document, timeout
- * and retry rule lives here so services never hardcode them.
+ * Central API configuration: every server route, timeout and retry rule.
+ * The server performs the retries towards Ollama and Buffer; the browser only
+ * retries when it cannot reach the Poster server itself.
  */
 const API_CONFIG = Object.freeze({
-  ollama: Object.freeze({
-    nativeChatPath: '/api/chat',
-    openAiChatPath: '/v1/chat/completions',
-    tagsPath: '/api/tags',
-    testTimeoutMs: 20000
+  routes: Object.freeze({
+    ollamaTest: '/api/ollama/test',
+    ollamaGenerate: '/api/ollama/generate',
+    bufferValidate: '/api/buffer/validate',
+    bufferConnect: '/api/buffer/connect',
+    bufferSchedule: '/api/buffer/schedule',
+    mediaUpload: '/api/media/upload'
   }),
-  buffer: Object.freeze({
-    defaultApiUrl: 'https://api.buffer.com',
-    docsUrl: 'https://developers.buffer.com/guides/getting-started',
-    queries: Object.freeze({
-      account: 'query PosterAccount { account { id email organizations { id name } } }',
-      channels: 'query PosterChannels($organizationId: OrganizationId!) { channels(input: { organizationId: $organizationId }) { id name displayName service timezone isDisconnected isLocked isQueuePaused } }',
-      createPost: 'mutation PosterCreatePost($input: CreatePostInput!) { createPost(input: $input) { __typename ... on PostActionSuccess { post { id dueAt status } } ... on MutationError { message } } }'
-    })
-  }),
-  media: Object.freeze({
-    fileField: 'file',
-    presetField: 'upload_preset',
-    timeoutMs: 120000,
-    /** Response paths that may hold the public URL, in order of preference. */
-    urlPaths: Object.freeze(['secure_url', 'url', 'data.url', 'data.link', 'link', 'data.display_url', 'image.url', 'result.url'])
+  /** Multipart field the server reads the image from. */
+  mediaFileField: 'file',
+  timeouts: Object.freeze({
+    testMs: 90000,
+    generateMs: SERVER.ollama.requestTimeout * 1000,
+    bufferMs: SERVER.buffer.requestTimeout * 1000,
+    mediaMs: SERVER.media.requestTimeout * 1000
   }),
   retry: Object.freeze({
     maxRetries: 3,
     delaysMs: Object.freeze([1000, 2000, 4000]),
     retryableStatus: Object.freeze([429, 500, 502, 503, 504]),
     retryableKinds: Object.freeze(['timeout', 'network', 'rate_limit'])
-  }),
-  diagnostics: Object.freeze({ probeTimeoutMs: 5000 })
+  })
 });
 
 /** Hard limits and tunables. */
@@ -1511,7 +1489,7 @@ const STORAGE_KEYS = Object.freeze({
   connection: 'connection'
 });
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = SERVER.version || '2.0.0';
 
 /** Tone presets offered in Settings, with the wording sent to the model. */
 const TONES = Object.freeze({
@@ -1648,16 +1626,6 @@ function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-/**
- * True for empty values and the template placeholders shipped in CONFIG.
- * @param {*} value
- * @returns {boolean}
- */
-function isPlaceholder(value) {
-  const text = String(value ?? '').trim();
-  return !text || /^YOUR_/i.test(text) || /your-[a-z0-9-]*endpoint/i.test(text);
-}
-
 /** @param {string} text @param {number} max @returns {string} */
 function truncate(text, max) {
   const value = String(text ?? '');
@@ -1672,14 +1640,6 @@ function pluralize(count, singular, plural = `${singular}s`) {
 /** Number of user-perceived characters (code points). */
 function charCount(text) {
   return [...String(text ?? '')].length;
-}
-
-/**
- * Reads a nested property by dotted path, e.g. "data.url".
- * @param {*} object @param {string} path @returns {*}
- */
-function getPath(object, path) {
-  return path.split('.').reduce((acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined), object);
 }
 
 /**
@@ -1857,8 +1817,13 @@ const TimeZoneUtil = {
  * Settings model (defaults, normalisation, field metadata)
  * ========================================================================== */
 const SettingsModel = {
-  /** Keys that hold credentials (excluded from exports unless requested). */
-  credentialKeys: Object.freeze(['ollamaApiKey', 'bufferToken']),
+  /**
+   * Keys from older exports and CONFIG blocks that are now set only on the
+   * server. Imports skip them and report them as ignored.
+   */
+  serverOnlyKeys: Object.freeze(['ollamaEndpoint', 'ollamaApiKey', 'ollamaTimeoutSec', 'bufferToken', 'bufferApiUrl',
+    'bufferTimeoutSec', 'mediaEndpoint', 'mediaPreset', 'OLLAMA_ENDPOINT', 'OLLAMA_API_KEY', 'BUFFER_ACCESS_TOKEN',
+    'BUFFER_API_URL', 'MEDIA_UPLOAD_ENDPOINT', 'MEDIA_UPLOAD_PRESET']),
 
   /** Demo channels, always available in Demo mode. */
   demoChannels: Object.freeze([
@@ -1868,36 +1833,18 @@ const SettingsModel = {
     { id: 'demo-twitter', name: 'Poster', handle: 'posterapp', service: 'twitter', organizationName: 'Demo workspace', usable: true }
   ]),
 
-  /** @returns {boolean} whether the embedded CONFIG carries real credentials */
-  embeddedCredentialsPresent() {
-    return !isPlaceholder(CONFIG.OLLAMA_API_KEY) || !isPlaceholder(CONFIG.BUFFER_ACCESS_TOKEN);
-  },
-
-  /** @returns {object} settings derived from the embedded CONFIG */
+  /** @returns {object} default preferences, derived from the server configuration */
   defaults() {
-    const zone = TimeZoneUtil.isValid(CONFIG.TIMEZONE) ? CONFIG.TIMEZONE : TimeZoneUtil.browserZone();
-    const configuredMode = String(CONFIG.MODE || 'auto').toLowerCase();
-    const mode = configuredMode === 'live' || configuredMode === 'demo'
-      ? configuredMode
-      : (this.embeddedCredentialsPresent() ? 'live' : 'demo');
     return {
-      version: 1,
-      mode,
-      ollamaEndpoint: isPlaceholder(CONFIG.OLLAMA_ENDPOINT) ? '' : String(CONFIG.OLLAMA_ENDPOINT).trim(),
-      ollamaApiKey: isPlaceholder(CONFIG.OLLAMA_API_KEY) ? '' : String(CONFIG.OLLAMA_API_KEY).trim(),
-      model: String(CONFIG.MODEL || 'gemma4:31b').trim(),
-      ollamaTimeoutSec: 120,
+      version: 2,
+      mode: SERVER.mode === 'live' ? 'live' : 'demo',
+      model: String(SERVER.ollama.model || 'gemma4:31b').trim(),
       aiConcurrency: 2,
       tone: 'friendly',
       extraInstructions: '',
-      bufferToken: isPlaceholder(CONFIG.BUFFER_ACCESS_TOKEN) ? '' : String(CONFIG.BUFFER_ACCESS_TOKEN).trim(),
-      bufferApiUrl: String(CONFIG.BUFFER_API_URL || API_CONFIG.buffer.defaultApiUrl).trim(),
-      bufferTimeoutSec: 30,
       channelIds: { live: [], demo: ['demo-instagram', 'demo-linkedin'] },
-      mediaEndpoint: String(CONFIG.MEDIA_UPLOAD_ENDPOINT || '').trim(),
-      mediaPreset: String(CONFIG.MEDIA_UPLOAD_PRESET || '').trim(),
       requireMedia: true,
-      timezone: zone,
+      timezone: TimeZoneUtil.browserZone(),
       intervalMinutes: 60,
       minLeadMinutes: 5,
       descMin: 10,
@@ -1923,21 +1870,13 @@ const SettingsModel = {
     const ids = (list, fallback) => (Array.isArray(list) ? [...new Set(list.filter((v) => typeof v === 'string' && v.trim()).map((v) => v.trim()))] : fallback);
     const channelSrc = isPlainObject(src.channelIds) ? src.channelIds : {};
     return {
-      version: 1,
+      version: 2,
       mode: src.mode === 'live' || src.mode === 'demo' ? src.mode : d.mode,
-      ollamaEndpoint: str('ollamaEndpoint'),
-      ollamaApiKey: str('ollamaApiKey'),
-      model: str('model'),
-      ollamaTimeoutSec: int('ollamaTimeoutSec'),
+      model: str('model') || d.model,
       aiConcurrency: int('aiConcurrency'),
       tone: Object.prototype.hasOwnProperty.call(TONES, src.tone) ? src.tone : d.tone,
       extraInstructions: typeof src.extraInstructions === 'string' ? src.extraInstructions.trim() : d.extraInstructions,
-      bufferToken: str('bufferToken'),
-      bufferApiUrl: str('bufferApiUrl'),
-      bufferTimeoutSec: int('bufferTimeoutSec'),
       channelIds: { live: ids(channelSrc.live, d.channelIds.live), demo: ids(channelSrc.demo, d.channelIds.demo) },
-      mediaEndpoint: str('mediaEndpoint'),
-      mediaPreset: str('mediaPreset'),
       requireMedia: bool('requireMedia'),
       timezone: str('timezone'),
       intervalMinutes: int('intervalMinutes'),
@@ -1948,19 +1887,15 @@ const SettingsModel = {
   },
 
   /**
-   * Maps a CONFIG-shaped object (OLLAMA_ENDPOINT, …) to settings keys, so a
-   * copy of the embedded CONFIG block can be imported directly.
+   * Maps a CONFIG-shaped object (MODEL, TIMEZONE, MODE …) to settings keys.
+   * Credential and endpoint keys are ignored: they belong on the server.
    * @param {object} source @returns {object}
    */
   fromConfigShape(source) {
-    const map = {
-      OLLAMA_ENDPOINT: 'ollamaEndpoint', OLLAMA_API_KEY: 'ollamaApiKey', BUFFER_ACCESS_TOKEN: 'bufferToken',
-      MODEL: 'model', BUFFER_API_URL: 'bufferApiUrl', MEDIA_UPLOAD_ENDPOINT: 'mediaEndpoint',
-      MEDIA_UPLOAD_PRESET: 'mediaPreset', TIMEZONE: 'timezone', MODE: 'mode'
-    };
+    const map = { MODEL: 'model', TIMEZONE: 'timezone', MODE: 'mode' };
     const out = {};
     for (const [from, to] of Object.entries(map)) {
-      if (from in source) out[to] = isPlaceholder(source[from]) && to !== 'mode' ? '' : source[from];
+      if (from in source && typeof source[from] === 'string' && source[from].trim()) out[to] = source[from].trim();
     }
     if (out.mode === 'auto') delete out.mode;
     return out;
@@ -2471,11 +2406,12 @@ class ValidationService {
     const cleanCaption = (value) => {
       if (typeof value !== 'string') return '';
       let text = value.replace(/\r\n/g, '\n').split('\n').map((line) => line.replace(/[ \t]+/g, ' ').trim()).join('\n').trim();
-      text = text.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
+      const stripQuotes = (s) => s.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
+      text = stripQuotes(text);
       const trailing = /(?:\s*#[\p{L}\p{N}_]+)+\s*$/u.exec(text);
       if (trailing && trailing.index > 0) {
         inlineTags.push(...trailing[0].trim().split(/\s+/));
-        text = text.slice(0, trailing.index).trim();
+        text = stripQuotes(text.slice(0, trailing.index).trim());
       }
       return [...text].slice(0, settings.descMax).join('');
     };
@@ -2550,27 +2486,9 @@ class ValidationService {
   /* -------------------------------------------------------------- settings */
 
   /**
-   * Validates a URL field.
-   * @param {string} value @param {{required?: boolean, httpsOnly?: boolean, label: string, example: string}} options
-   * @returns {string|null}
-   */
-  validateUrl(value, { required = false, httpsOnly = false, label, example }) {
-    const text = String(value ?? '').trim();
-    if (!text || isPlaceholder(text)) return required ? `${label} is required (for example ${example}).` : null;
-    let url;
-    try { url = new URL(text); } catch { return `${label} must be a full URL starting with https:// (for example ${example}).`; }
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return `${label} must use http:// or https://.`;
-    if (httpsOnly && url.protocol !== 'https:' && !isLocalHost(url.hostname)) return `${label} must use https:// (http:// is only allowed for localhost).`;
-    if (url.username || url.password) return `${label} must not contain a username or password; use the API key field instead.`;
-    if (url.protocol === 'http:' && window.location.protocol === 'https:' && !isLocalHost(url.hostname)) {
-      return `${label} uses http://, which browsers block on https:// pages (mixed content). Use https:// or open Poster as a local file.`;
-    }
-    return null;
-  }
-
-  /**
-   * Validates settings. Formats are always checked; credentials are required
-   * only for Live mode (or when `requireCredentials` is set).
+   * Validates preferences. In Live mode (or with `requireCredentials`) the
+   * server must also have the relevant service configured, because the
+   * credentials and endpoints live there.
    * @param {object} settings
    * @param {{scope?: 'all'|'ollama'|'buffer', requireCredentials?: boolean}} [options]
    * @returns {{valid: boolean, errors: Object<string,string>, warnings: string[]}}
@@ -2585,31 +2503,19 @@ class ValidationService {
     };
 
     if (scope === 'all' || scope === 'ollama') {
-      const endpointError = this.validateUrl(s.ollamaEndpoint, { required: true, label: 'Ollama endpoint', example: 'https://ollama.com' });
-      if (endpointError) errors.ollamaEndpoint = endpointError;
-      let host = '';
-      try { host = new URL(s.ollamaEndpoint).hostname.toLowerCase(); } catch { host = ''; }
-      const isCloud = host === 'ollama.com' || host.endsWith('.ollama.com');
-      if (/\s/.test(s.ollamaApiKey)) errors.ollamaApiKey = 'The API key must not contain spaces.';
-      else if (live && isCloud && isPlaceholder(s.ollamaApiKey)) errors.ollamaApiKey = 'An API key is required for Ollama Cloud (ollama.com → Settings → Keys).';
+      if (live && !SERVER.ollama.configured) {
+        errors.serverOllama = `Ollama is not set up on the server: ${SERVER.ollama.problem} Add it to the .env file next to app.py and restart Poster.`;
+      }
       if (!s.model) errors.model = 'Enter a model name, for example gemma4:31b.';
-      else if (!/^[\w.\-/:]+$/.test(s.model)) errors.model = 'Model names contain only letters, numbers and . - _ / : characters.';
-      inRange('ollamaTimeoutSec', 10, 600, 'Ollama timeout');
+      else if (!/^[\w.\-/:]{1,100}$/.test(s.model)) errors.model = 'Model names contain only letters, numbers and . - _ / : characters.';
       inRange('aiConcurrency', 1, 4, 'Parallel requests');
       if (charCount(s.extraInstructions) > LIMITS.maxExtraInstructions) errors.extraInstructions = `Extra instructions are limited to ${LIMITS.maxExtraInstructions} characters.`;
     }
 
-    if (scope === 'all' || scope === 'buffer') {
-      if (/\s/.test(s.bufferToken)) errors.bufferToken = 'The access token must not contain spaces.';
-      else if (!isPlaceholder(s.bufferToken) && s.bufferToken.length < 10) errors.bufferToken = 'This access token looks too short. Paste the full key from Buffer.';
-      else if (live && scope === 'buffer' && isPlaceholder(s.bufferToken)) errors.bufferToken = 'A Buffer personal access token is required to schedule posts.';
-      else if (live && isPlaceholder(s.bufferToken)) warnings.push('No Buffer token yet: AI generation works, but scheduling needs a token.');
-      const apiError = this.validateUrl(s.bufferApiUrl, { required: true, httpsOnly: true, label: 'Buffer API URL', example: API_CONFIG.buffer.defaultApiUrl });
-      if (apiError) errors.bufferApiUrl = apiError;
-      inRange('bufferTimeoutSec', 5, 120, 'Buffer timeout');
-      const mediaError = this.validateUrl(s.mediaEndpoint, { required: false, httpsOnly: true, label: 'Media upload endpoint', example: 'https://api.cloudinary.com/v1_1/demo/image/upload' });
-      if (mediaError) errors.mediaEndpoint = mediaError;
-      if (s.mediaPreset && !/^[\w.\-]{1,100}$/.test(s.mediaPreset)) errors.mediaPreset = 'Upload presets contain only letters, numbers, dots, dashes and underscores.';
+    if ((scope === 'all' || scope === 'buffer') && live && !SERVER.buffer.configured) {
+      const message = `Buffer is not set up on the server: ${SERVER.buffer.problem} Add it to the .env file next to app.py and restart Poster.`;
+      if (scope === 'buffer') errors.serverBuffer = message;
+      else warnings.push(`${message} Until then AI generation works, but scheduling does not.`);
     }
 
     if (scope === 'all') {
@@ -2626,8 +2532,9 @@ class ValidationService {
   /**
    * Validates an imported JSON document before anything is applied.
    * Accepts a Poster export, a bare settings object or a CONFIG-shaped object.
+   * Credential and endpoint keys are ignored: they belong on the server.
    * @param {*} json
-   * @param {object} currentSettings credentials are kept when the import has none
+   * @param {object} currentSettings values kept for keys the import lacks
    * @returns {{valid: boolean, errors: string[], settings?: object, ignored: string[]}}
    */
   validateImportPayload(json, currentSettings) {
@@ -2636,15 +2543,25 @@ class ValidationService {
     if (isPlainObject(json.settings)) {
       if (json.app && json.app !== 'Poster') return { valid: false, errors: [`This file was exported by "${String(json.app)}", not Poster.`], ignored: [] };
       source = json.settings;
-    } else if ('OLLAMA_ENDPOINT' in json || 'MODEL' in json || 'BUFFER_ACCESS_TOKEN' in json || 'OLLAMA_API_KEY' in json) {
-      source = SettingsModel.fromConfigShape(json);
+    } else if (['MODEL', 'TIMEZONE', 'MODE', 'OLLAMA_ENDPOINT', 'OLLAMA_API_KEY', 'BUFFER_ACCESS_TOKEN'].some((key) => key in json)) {
+      source = { ...SettingsModel.fromConfigShape(json) };
+      for (const key of Object.keys(json)) if (SettingsModel.serverOnlyKeys.includes(key)) source[key] = json[key];
     } else {
       source = json;
     }
     const known = Object.keys(SettingsModel.defaults());
-    const ignored = Object.keys(source).filter((key) => !known.includes(key));
-    const recognised = Object.keys(source).filter((key) => known.includes(key));
-    if (!recognised.length) return { valid: false, errors: ['No Poster settings were found in this file.'], ignored };
+    const ignored = Object.keys(source).filter((key) => !known.includes(key) && key !== 'version');
+    const recognised = Object.keys(source).filter((key) => known.includes(key) && key !== 'version');
+    if (!recognised.length) {
+      const serverOnly = ignored.filter((key) => SettingsModel.serverOnlyKeys.includes(key));
+      return {
+        valid: false,
+        errors: [serverOnly.length
+          ? 'This file only contains credentials or endpoints, which are now configured on the server (.env), not in the browser.'
+          : 'No Poster settings were found in this file.'],
+        ignored
+      };
+    }
 
     const typeErrors = [];
     const defaults = SettingsModel.defaults();
@@ -2656,10 +2573,8 @@ class ValidationService {
     }
     if (typeErrors.length) return { valid: false, errors: typeErrors, ignored };
 
-    const merged = SettingsModel.normalize({ ...currentSettings, ...source });
-    for (const key of SettingsModel.credentialKeys) {
-      if (!(key in source) || isPlaceholder(source[key])) merged[key] = currentSettings[key] || '';
-    }
+    const imported = Object.fromEntries(recognised.map((key) => [key, source[key]]));
+    const merged = SettingsModel.normalize({ ...currentSettings, ...imported });
     const result = this.validateSettings(merged, { requireCredentials: false });
     if (!result.valid) return { valid: false, errors: Object.values(result.errors), ignored };
     return { valid: true, errors: [], settings: merged, ignored };
@@ -2674,10 +2589,13 @@ class ValidationService {
 class ApiError extends Error {
   /**
    * @param {string} message user-facing message
-   * @param {{kind?: string, status?: number, service?: string, details?: string, hint?: string, cause?: *}} [options]
-   *   kind: cancelled | timeout | network | offline | cors | auth | rate_limit | server | client | not_found | parse | config | validation
+   * @param {{kind?: string, status?: number, service?: string, details?: string, hint?: string,
+   *          fromServer?: boolean, retries?: Array<object>, cause?: *}} [options]
+   *   kind: cancelled | timeout | network | offline | auth | rate_limit | server | client | not_found | parse | config | validation
+   *   fromServer: the Poster server classified this error (after its own retries)
+   *   retries: retries the server performed before giving up
    */
-  constructor(message, { kind = 'unknown', status = 0, service = '', details = '', hint = '', cause } = {}) {
+  constructor(message, { kind = 'unknown', status = 0, service = '', details = '', hint = '', fromServer = false, retries = [], cause } = {}) {
     super(message);
     this.name = 'ApiError';
     this.kind = kind;
@@ -2685,27 +2603,34 @@ class ApiError extends Error {
     this.service = service;
     this.details = details;
     this.hint = hint;
+    this.fromServer = fromServer;
+    this.retries = retries;
     if (cause !== undefined) this.cause = cause;
   }
 
-  /** Whether retryRequest() should try again. */
+  /**
+   * Whether retryRequest() should try again. Errors reported by the Poster
+   * server are final, because the server already retried Ollama or Buffer.
+   */
   get retryable() {
+    if (this.fromServer) return false;
     return API_CONFIG.retry.retryableKinds.includes(this.kind) || API_CONFIG.retry.retryableStatus.includes(this.status);
   }
 
   /**
    * Errors that will affect every following item, so bulk runs stop early.
-   * A network error is only seen here after its retries are used up, which
-   * means the host is unreachable rather than briefly flaky.
+   * A network error is only seen here after retries are used up, which means
+   * the host is unreachable rather than briefly flaky.
    */
   get fatal() {
-    return ['auth', 'cors', 'offline', 'config', 'network'].includes(this.kind);
+    return ['auth', 'offline', 'config', 'network'].includes(this.kind);
   }
 }
 
 /**
  * Default retry predicate: timeouts, temporary network failures and HTTP
- * 429/500/502/503/504. Never 400/401/403 or validation errors.
+ * 429/500/502/503/504. Never 400/401/403, validation errors or errors the
+ * Poster server already retried.
  * @param {*} error @returns {boolean}
  */
 function isRetryableError(error) {
@@ -2747,47 +2672,66 @@ async function retryRequest(operation, options = {}) {
   }
 }
 
-/** User-facing messages for CORS failures, per service. */
-const CORS_MESSAGES = Object.freeze({
-  Ollama: {
-    message: 'Ollama endpoint blocked browser access via CORS.',
-    hint: 'The server answered, but it does not allow requests from this page. Ollama Cloud (ollama.com) may not accept direct browser requests; a self-hosted Ollama started with OLLAMA_ORIGINS="*" does. You can also keep working in Demo mode.'
-  },
-  Buffer: {
-    message: 'Buffer API rejected direct browser requests.',
-    hint: 'Buffer did not grant this page cross-origin (CORS) access, so the browser blocked the response. Use Demo mode, or open Poster from an origin that Buffer allows.'
-  },
-  'Media host': {
-    message: 'The media host blocked browser uploads via CORS.',
-    hint: 'Use a host that supports direct browser uploads (for example a Cloudinary unsigned upload preset), or paste a public image URL for each post.'
+/**
+ * Replays the retries the server performed into the caller's onRetry
+ * callback, so they show up in the activity log and operation statistics.
+ * @param {Array<object>} retries @param {Function} [onRetry]
+ */
+function relayRetries(retries, onRetry) {
+  if (typeof onRetry !== 'function' || !Array.isArray(retries)) return;
+  for (const retry of retries) {
+    try {
+      onRetry({
+        attempt: Number(retry.attempt) || 0,
+        maxRetries: Number(retry.maxRetries) || API_CONFIG.retry.maxRetries,
+        delayMs: Number(retry.delayMs) || 0,
+        error: { message: String(retry.message || '') },
+        server: true
+      });
+    } catch { /* a logging failure must not break the request */ }
   }
-});
+}
 
 /**
- * Thin fetch wrapper: timeouts, cancellation, offline/CORS/network diagnosis,
- * HTTP error classification and JSON parsing. Never bypasses browser security.
+ * fetch() wrapper for the Poster server's /api routes: JSON or multipart in,
+ * JSON out, timeouts, cancellation, the CSRF header, and conversion of the
+ * server's classified errors into ApiError. All requests are same-origin.
  */
 class ApiService {
   /**
-   * @param {string} url
-   * @param {{method?: string, headers?: Object<string,string>, body?: BodyInit, timeoutMs?: number,
-   *          signal?: AbortSignal, service?: string}} [options]
-   * @returns {Promise<{status: number, headers: Headers, data: *, text: string}>}
+   * POSTs to a server route and relays the server's retries to `onRetry`.
+   * @param {string} path a route from API_CONFIG.routes
+   * @param {{json?: object, form?: FormData, timeoutMs?: number, signal?: AbortSignal, service?: string, onRetry?: Function}} [options]
+   * @returns {Promise<object>} parsed JSON response
    * @throws {ApiError}
    */
-  async request(url, { method = 'GET', headers = {}, body, timeoutMs = 30000, signal, service = 'Server' } = {}) {
+  async call(path, { onRetry, ...options } = {}) {
+    try {
+      const data = await this.post(path, options);
+      relayRetries(data.retries, onRetry);
+      return data;
+    } catch (error) {
+      if (error instanceof ApiError) relayRetries(error.retries, onRetry);
+      throw error;
+    }
+  }
+
+  /**
+   * @param {string} path
+   * @param {{json?: object, form?: FormData, timeoutMs?: number, signal?: AbortSignal, service?: string}} [options]
+   * @returns {Promise<object>}
+   * @throws {ApiError}
+   */
+  async post(path, { json, form, timeoutMs = 60000, signal, service = 'Poster server' } = {}) {
     throwIfAborted(signal);
     if (navigator.onLine === false) {
       throw new ApiError('You are offline. Reconnect to the internet and try again.', { kind: 'offline', service });
     }
-    let parsedUrl;
-    try { parsedUrl = new URL(url); } catch {
-      throw new ApiError(`The ${service} URL "${url}" is not valid. Check it in Settings.`, { kind: 'config', service });
-    }
-    if (parsedUrl.protocol === 'http:' && window.location.protocol === 'https:' && !isLocalHost(parsedUrl.hostname)) {
-      throw new ApiError(`${service} uses http://, which browsers block on https:// pages (mixed content).`, {
-        kind: 'config', service, hint: 'Use an https:// endpoint, or open Poster as a local file.'
-      });
+    const headers = { Accept: 'application/json', 'X-Poster-Request': '1' };
+    let body = form;
+    if (json !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      body = JSON.stringify(json);
     }
 
     const controller = new AbortController();
@@ -2799,18 +2743,15 @@ class ApiService {
     try {
       let response;
       try {
-        response = await fetch(parsedUrl.href, {
-          method, headers, body,
-          signal: controller.signal,
-          cache: 'no-store',
-          credentials: 'omit',
-          referrerPolicy: 'no-referrer',
-          redirect: 'follow'
+        response = await fetch(path, {
+          method: 'POST', headers, body, signal: controller.signal, cache: 'no-store', credentials: 'same-origin'
         });
       } catch (error) {
         if (timedOut) throw this.#timeoutError(service, timeoutMs);
         if (signal?.aborted) throw cancelledError();
-        throw await this.#networkError(parsedUrl, service, error);
+        throw new ApiError('Cannot reach the Poster server. Make sure "python app.py" is still running.', {
+          kind: 'network', service: 'Poster server', hint: 'Start or restart the server, then try again.', cause: error
+        });
       }
 
       let text = '';
@@ -2819,14 +2760,17 @@ class ApiService {
       } catch (error) {
         if (timedOut) throw this.#timeoutError(service, timeoutMs);
         if (signal?.aborted) throw cancelledError();
-        throw new ApiError(`The connection to ${service} was interrupted while reading the response.`, { kind: 'network', service, cause: error });
+        throw new ApiError('The connection to the Poster server was interrupted while reading the response.', { kind: 'network', service: 'Poster server', cause: error });
       }
       let data = null;
       if (text) {
         try { data = JSON.parse(text); } catch { data = null; }
       }
-      if (!response.ok) throw this.#httpError(response, data, text, service);
-      return { status: response.status, headers: response.headers, data, text };
+      if (!response.ok) throw ApiService.errorFromResponse(response.status, data, service);
+      if (!isPlainObject(data)) {
+        throw new ApiError('The Poster server returned an unexpected response.', { kind: 'parse', service: 'Poster server', details: truncate(text, 300) });
+      }
+      return data;
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener('abort', forwardAbort);
@@ -2834,96 +2778,34 @@ class ApiService {
   }
 
   #timeoutError(service, timeoutMs) {
-    return new ApiError(`${service} did not respond within ${Math.round(timeoutMs / 1000)} seconds.`, {
-      kind: 'timeout', service, hint: 'The server may be busy. Try again, or raise the timeout in Settings.'
+    return new ApiError(`${service} did not finish within ${formatDuration(timeoutMs)}.`, {
+      kind: 'timeout', service, hint: 'The server may be busy. Try again in a moment.'
     });
   }
 
   /**
-   * fetch() rejects with the same TypeError for CORS and network failures.
-   * A follow-up "no-cors" probe tells them apart: if the host answers an
-   * opaque request it is reachable, so the original failure was CORS.
+   * Rebuilds the server's classified error, or classifies a bare HTTP failure
+   * (for example from a reverse proxy in front of the server).
+   * @param {number} status @param {*} data @param {string} service
+   * @returns {ApiError}
    */
-  async #networkError(url, service, cause) {
-    if (navigator.onLine === false) {
-      return new ApiError('You are offline. Reconnect to the internet and try again.', { kind: 'offline', service, cause });
+  static errorFromResponse(status, data, service) {
+    const error = isPlainObject(data) && isPlainObject(data.error) ? data.error : null;
+    if (error && typeof error.message === 'string') {
+      return new ApiError(error.message, {
+        kind: typeof error.kind === 'string' ? error.kind : 'server',
+        status: Number(error.status) || 0,
+        service: typeof error.service === 'string' && error.service ? error.service : service,
+        hint: typeof error.hint === 'string' ? error.hint : '',
+        details: typeof error.details === 'string' ? error.details : '',
+        retries: Array.isArray(error.retries) ? error.retries : [],
+        fromServer: true
+      });
     }
-    const reachable = await ApiService.probeReachable(url);
-    if (reachable) {
-      const copy = CORS_MESSAGES[service] || { message: `${service} blocked browser access via CORS.`, hint: 'The server does not allow requests from this page.' };
-      return new ApiError(copy.message, { kind: 'cors', service, hint: copy.hint, cause });
-    }
-    return new ApiError(`Network connection failed: could not reach ${url.host}.`, {
-      kind: 'network', service, cause,
-      hint: 'Check your internet connection, the URL in Settings, and any VPN, proxy or firewall.'
-    });
-  }
-
-  /**
-   * @param {URL} url @returns {Promise<boolean>} whether the host answers at all
-   */
-  static async probeReachable(url) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), API_CONFIG.diagnostics.probeTimeoutMs);
-    try {
-      await fetch(`${url.origin}/`, { mode: 'no-cors', cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: controller.signal });
-      return true;
-    } catch {
-      return false;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  /** Builds a classified ApiError from a non-2xx response. */
-  #httpError(response, data, text, service) {
-    const status = response.status;
-    const detail = ApiService.extractErrorDetail(data) || (text && text.length <= 300 && !/<html/i.test(text) ? text.trim() : '');
-    const said = detail ? ` ${service} said: "${truncate(detail, 240)}"` : '';
-    const options = { status, service, details: detail };
-    if (status === 401) {
-      return new ApiError(`Authentication failed. ${service} rejected the API key (HTTP 401).${said}`, { ...options, kind: 'auth', hint: `Check the ${service} key in Settings.` });
-    }
-    if (status === 403) {
-      return new ApiError(`Access denied (HTTP 403): the ${service} credentials lack permission for this action.${said}`, { ...options, kind: 'auth', hint: `Check the ${service} key and its permissions.` });
-    }
-    if (status === 404) {
-      const extra = service === 'Ollama' ? ' Check the endpoint URL and that the model name exists.' : ' Check the URL in Settings.';
-      return new ApiError(`${service} endpoint not found (HTTP 404).${extra}${said}`, { ...options, kind: 'not_found' });
-    }
-    if (status === 408) {
-      return new ApiError(`${service} timed out (HTTP 408).`, { ...options, kind: 'timeout' });
-    }
-    if (status === 402) {
-      return new ApiError(`${service} requires a paid plan for this request (HTTP 402).${said}`, { ...options, kind: 'client' });
-    }
-    if (status === 413) {
-      return new ApiError(`The request was too large for ${service} (HTTP 413).${said}`, { ...options, kind: 'client' });
-    }
-    if (status === 429) {
-      const retryAfter = response.headers.get('Retry-After');
-      return new ApiError(`${service} rate limit reached (HTTP 429).${retryAfter ? ` Retry after ${retryAfter}s.` : ''}${said}`, { ...options, kind: 'rate_limit', hint: 'Too many requests. Wait a minute, or lower "Parallel requests" in Settings.' });
-    }
-    if (status >= 500) {
-      return new ApiError(`${service} server error (HTTP ${status}).${said}`, { ...options, kind: 'server', hint: 'This is usually temporary. Try again shortly.' });
-    }
-    return new ApiError(`${service} rejected the request (HTTP ${status}).${said}`, { ...options, kind: 'client' });
-  }
-
-  /** Pulls a human readable message out of common error body shapes. */
-  static extractErrorDetail(data) {
-    if (!data) return '';
-    if (typeof data === 'string') return data;
-    if (typeof data.error === 'string') return data.error;
-    if (isPlainObject(data.error) && typeof data.error.message === 'string') return data.error.message;
-    if (typeof data.message === 'string') return data.message;
-    if (Array.isArray(data.errors) && data.errors.length) {
-      const first = data.errors[0];
-      return typeof first === 'string' ? first : (typeof first?.message === 'string' ? first.message : '');
-    }
-    if (typeof data.detail === 'string') return data.detail;
-    if (typeof data.error_description === 'string') return data.error_description;
-    return '';
+    if (status === 413) return new ApiError('The upload is larger than the Poster server accepts.', { kind: 'validation', status, service });
+    if (status === 404 || status === 405) return new ApiError('The Poster server does not provide this API. Make sure app.py is up to date.', { kind: 'config', status, service });
+    if (status >= 500) return new ApiError(`The Poster server failed (HTTP ${status}).`, { kind: 'server', status, service, hint: 'Check the server log.' });
+    return new ApiError(`The Poster server rejected the request (HTTP ${status}).`, { kind: 'client', status, service });
   }
 }
 
@@ -3058,15 +2940,14 @@ function hashString(text) {
 }
 
 /* ==========================================================================
- * OllamaService — image analysis and copywriting via /api/chat
+ * OllamaService — image analysis and copywriting through the Poster server
  * ========================================================================== */
 
-const OLLAMA_SYSTEM_PROMPT = 'You are an expert social media strategist and copywriter. You write engaging, authentic captions ' +
-  'and choose hashtags people actually search for. You always answer with one valid JSON object and nothing else: no markdown, no commentary.';
-
-const OLLAMA_REPAIR_PROMPT = 'Your previous reply could not be parsed. Reply again with ONLY one JSON object with the keys ' +
-  '"description", "alternative_description", "hashtags", "category" and "engagement_score". No markdown, no code fences, no commentary.';
-
+/**
+ * Sends the resized image and the user's preferences to /api/ollama/generate.
+ * The server builds the prompt, calls Ollama with retries, and validates and
+ * normalises the JSON reply (including one automatic "repair" turn).
+ */
 class OllamaService {
   /**
    * @param {{api: ApiService, validation: ValidationService, notifier: NotificationService, getSettings: () => object}} deps
@@ -3081,206 +2962,80 @@ class OllamaService {
   /** @returns {boolean} */
   get isDemo() { return false; }
 
+  /** @throws {ApiError} kind "config" when the server has no Ollama setup */
+  assertConfigured() {
+    if (!SERVER.ollama.configured) {
+      throw new ApiError(`Ollama is not set up on the server: ${SERVER.ollama.problem}`, {
+        kind: 'config', service: 'Ollama', hint: 'Add it to the .env file next to app.py and restart Poster.'
+      });
+    }
+  }
+
   /**
-   * Works out the chat URL and API style from the configured endpoint.
-   * A base URL gets /api/chat appended; full native or OpenAI-compatible
-   * chat URLs are used as they are.
-   * @param {string} endpoint
-   * @returns {{url: string, style: 'native'|'openai', base: string}}
+   * The preferences the server needs to build the prompt.
+   * @param {object} settings @returns {object}
    */
-  resolveEndpoint(endpoint) {
-    let url;
-    try { url = new URL(String(endpoint).trim()); } catch {
-      throw new ApiError('The Ollama endpoint is not a valid URL. Check it in Settings.', { kind: 'config', service: 'Ollama' });
-    }
-    const path = url.pathname.replace(/\/+$/, '');
-    const { nativeChatPath, openAiChatPath } = API_CONFIG.ollama;
-    if (path.endsWith(nativeChatPath)) return { url: `${url.origin}${path}`, style: 'native', base: `${url.origin}${path.slice(0, -nativeChatPath.length)}` };
-    if (path.endsWith(openAiChatPath)) return { url: `${url.origin}${path}`, style: 'openai', base: `${url.origin}${path.slice(0, -openAiChatPath.length)}` };
-    return { url: `${url.origin}${path}${nativeChatPath}`, style: 'native', base: `${url.origin}${path}` };
-  }
-
-  /** @param {object} settings @returns {Object<string,string>} */
-  headers(settings) {
-    const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
-    if (!isPlaceholder(settings.ollamaApiKey)) headers.Authorization = `Bearer ${settings.ollamaApiKey.trim()}`;
-    return headers;
-  }
-
-  /** @param {object} settings @throws {ApiError} kind "config" */
-  assertConfigured(settings) {
-    const result = this.validation.validateSettings(settings, { scope: 'ollama', requireCredentials: true });
-    if (!result.valid) {
-      throw new ApiError(`Ollama is not configured: ${Object.values(result.errors)[0]}`, { kind: 'config', service: 'Ollama', hint: 'Open Settings → Ollama.' });
-    }
+  options(settings) {
+    return {
+      model: settings.model,
+      tone: settings.tone,
+      extraInstructions: settings.extraInstructions,
+      descMin: settings.descMin,
+      descMax: settings.descMax
+    };
   }
 
   /**
-   * Checks connectivity and credentials by listing the endpoint's models.
+   * Asks the server to list the endpoint's models and check the chosen one.
    * @param {{settings?: object, signal?: AbortSignal, onRetry?: Function}} [ctx]
    * @returns {Promise<{models: string[], modelAvailable: boolean|null, host: string}>}
    */
   async testConnection({ settings, signal, onRetry } = {}) {
     const s = settings ?? this.getSettings();
-    this.assertConfigured(s);
-    const { base } = this.resolveEndpoint(s.ollamaEndpoint);
-    const host = new URL(base).host;
-    try {
-      const response = await retryRequest(() => this.api.request(`${base}${API_CONFIG.ollama.tagsPath}`, {
-        headers: this.headers(s), timeoutMs: API_CONFIG.ollama.testTimeoutMs, signal, service: 'Ollama'
-      }), { signal, onRetry });
-      const models = Array.isArray(response.data?.models)
-        ? response.data.models.map((m) => String(m?.name || m?.model || '')).filter(Boolean)
-        : [];
-      const wanted = s.model.toLowerCase();
-      const modelAvailable = models.length
-        ? models.some((name) => { const n = name.toLowerCase(); return n === wanted || n.startsWith(`${wanted}-`) || n === `${wanted}:latest` || n.split(':')[0] === wanted; })
-        : null;
-      return { models, modelAvailable, host };
-    } catch (error) {
-      if (error instanceof ApiError && error.kind === 'not_found') return { models: [], modelAvailable: null, host };
-      throw error;
-    }
-  }
-
-  /** Builds the user prompt from the required brief plus settings. */
-  buildPrompt(settings) {
-    const min = settings.descMin;
-    const max = Math.max(min + 20, Math.min(settings.descMax, 300));
-    const lines = [
-      'Analyze the uploaded image and generate:',
-      '1. Engaging social media caption',
-      '2. Alternative caption',
-      '3. 10-15 hashtags',
-      '4. Content category',
-      '5. Estimated engagement score',
-      '',
-      'Return ONLY JSON in exactly this shape:',
-      '{"description": "...", "alternative_description": "...", "hashtags": ["#tag1"], "category": "...", "engagement_score": 87}',
-      '',
-      'Rules:',
-      `- "description": an engaging caption of ${min}-${max} characters, without hashtags.`,
-      `- "alternative_description": a different take on the caption, ${min}-${max} characters, without hashtags.`,
-      '- "hashtags": 10 to 15 unique, relevant hashtags, each starting with # and containing no spaces.',
-      '- "category": a short content category such as Travel, Food, Fashion, Lifestyle, Nature, Pets, Fitness, Technology, Product or Art.',
-      '- "engagement_score": an integer from 1 to 100 estimating how well the post will perform.',
-      `- Tone of voice: ${TONES[settings.tone] || TONES.friendly}.`,
-      '- Describe only what is visible. Do not invent brand names, places or people.'
-    ];
-    if (settings.extraInstructions) lines.push(`- Context from the account owner: ${settings.extraInstructions}`);
-    return lines.join('\n');
-  }
-
-  /**
-   * @param {object} settings @param {string} imageBase64 @param {'native'|'openai'} style
-   * @returns {Array<object>} chat messages in the endpoint's format
-   */
-  buildMessages(settings, imageBase64, style) {
-    const prompt = this.buildPrompt(settings);
-    if (style === 'native') {
-      return [
-        { role: 'system', content: OLLAMA_SYSTEM_PROMPT },
-        { role: 'user', content: prompt, images: [imageBase64] }
-      ];
-    }
-    return [
-      { role: 'system', content: OLLAMA_SYSTEM_PROMPT },
-      { role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }] }
-    ];
-  }
-
-  /**
-   * Sends one chat request (with retries) and returns the reply text.
-   * @returns {Promise<string>}
-   */
-  async chat(settings, messages, { signal, onRetry }) {
-    const { url, style } = this.resolveEndpoint(settings.ollamaEndpoint);
-    const body = style === 'native'
-      ? { model: settings.model, messages, stream: false, format: 'json', options: { temperature: 0.7 } }
-      : { model: settings.model, messages, stream: false, temperature: 0.7, response_format: { type: 'json_object' } };
-    const response = await retryRequest(() => this.api.request(url, {
-      method: 'POST',
-      headers: this.headers(settings),
-      body: JSON.stringify(body),
-      timeoutMs: settings.ollamaTimeoutSec * 1000,
-      signal,
-      service: 'Ollama'
+    this.assertConfigured();
+    const data = await retryRequest(() => this.api.call(API_CONFIG.routes.ollamaTest, {
+      json: this.options(s), timeoutMs: API_CONFIG.timeouts.testMs, signal, service: 'Ollama', onRetry
     }), { signal, onRetry });
-    if (!isPlainObject(response.data)) {
-      throw new ApiError('Ollama returned a response that is not JSON.', { kind: 'parse', service: 'Ollama', details: truncate(response.text, 300) });
-    }
-    const text = style === 'native' ? response.data.message?.content : response.data.choices?.[0]?.message?.content;
-    if (typeof text !== 'string' || !text.trim()) {
-      const reason = response.data.error ? ` (${ApiService.extractErrorDetail(response.data)})` : '';
-      throw new ApiError(`Ollama returned an empty reply${reason}.`, { kind: 'parse', service: 'Ollama', details: truncate(response.text, 300) });
-    }
-    return text;
+    return {
+      models: Array.isArray(data.models) ? data.models.map(String) : [],
+      modelAvailable: typeof data.modelAvailable === 'boolean' ? data.modelAvailable : null,
+      host: String(data.host || SERVER.ollama.host || '')
+    };
   }
 
   /**
    * Analyses one image and returns normalised social content.
-   * Malformed JSON gets one automatic "repair" turn before failing.
    * @param {object} item image item with a `file`
    * @param {{signal?: AbortSignal, onRetry?: Function, settings?: object}} [ctx]
    * @returns {Promise<{content: object, issues: string[], model: string, repaired: boolean}>}
    */
   async generateContent(item, { signal, onRetry, settings } = {}) {
     const s = settings ?? this.getSettings();
-    this.assertConfigured(s);
-    const { style } = this.resolveEndpoint(s.ollamaEndpoint);
-    let imageBase64;
+    this.assertConfigured();
+    let image;
     try {
-      imageBase64 = await prepareAnalysisImage(item);
+      image = await prepareAnalysisImage(item);
     } catch (error) {
       throw new ApiError(`"${item.name}" could not be prepared for analysis: ${error.message}`, { kind: 'validation', service: 'Ollama' });
     }
     throwIfAborted(signal);
-    const messages = this.buildMessages(s, imageBase64, style);
-    const raw = await this.chat(s, messages, { signal, onRetry });
-    try {
-      return { ...this.parseContent(raw, s), model: s.model, repaired: false };
-    } catch (error) {
-      if (!(error instanceof ApiError) || error.kind !== 'parse') throw error;
-      this.notifier.log('warn', 'ai', `Malformed AI reply for "${item.name}"; asking the model to correct it.`, truncate(raw, 300));
-      const repairMessages = [...messages, { role: 'assistant', content: raw }, { role: 'user', content: OLLAMA_REPAIR_PROMPT }];
-      const repairedRaw = await this.chat(s, repairMessages, { signal, onRetry });
-      return { ...this.parseContent(repairedRaw, s), model: s.model, repaired: true };
+    const data = await retryRequest(() => this.api.call(API_CONFIG.routes.ollamaGenerate, {
+      json: { ...this.options(s), image, fileName: item.name },
+      timeoutMs: API_CONFIG.timeouts.generateMs,
+      signal,
+      service: 'Ollama',
+      onRetry
+    }), { signal, onRetry });
+    if (!isPlainObject(data.content)) {
+      throw new ApiError('The Poster server returned no content.', { kind: 'parse', service: 'Ollama' });
     }
-  }
-
-  /**
-   * Extracts and validates the JSON object from a model reply.
-   * @param {string} raw @param {object} settings
-   * @returns {{content: object, issues: string[]}}
-   * @throws {ApiError} kind "parse"
-   */
-  parseContent(raw, settings) {
-    const text = String(raw).replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```(?:json)?/gi, '').trim();
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start === -1 || end <= start) {
-      throw new ApiError('The AI reply was not valid JSON.', { kind: 'parse', service: 'Ollama', details: truncate(text, 300) });
+    // The server already validated the reply; normalising again guarantees the editor's exact shape.
+    const result = this.validation.normalizeGeneratedContent(data.content, s);
+    const issues = [...new Set([...(Array.isArray(data.issues) ? data.issues.map(String) : []), ...result.issues])];
+    if (data.repaired) {
+      this.notifier.log('warn', 'ai', `Malformed AI reply for "${item.name}"; the server asked the model to correct it.`);
     }
-    const candidate = text.slice(start, end + 1);
-    let data = OllamaService.tryParse(candidate);
-    if (data === undefined) data = OllamaService.tryParse(OllamaService.repairJson(candidate));
-    if (!isPlainObject(data)) {
-      throw new ApiError('The AI reply was not valid JSON.', { kind: 'parse', service: 'Ollama', details: truncate(candidate, 300) });
-    }
-    return this.validation.normalizeGeneratedContent(data, settings);
-  }
-
-  /** @param {string} text @returns {*} parsed value or undefined */
-  static tryParse(text) {
-    try { return JSON.parse(text); } catch { return undefined; }
-  }
-
-  /** Fixes the most common model JSON slips: smart quotes and trailing commas. */
-  static repairJson(text) {
-    return text
-      .replace(/[“”]/g, '"')
-      .replace(/[‘’]/g, "'")
-      .replace(/,\s*([}\]])/g, '$1');
+    return { content: result.content, issues, model: String(data.model || s.model), repaired: Boolean(data.repaired) };
   }
 }
 
@@ -3419,7 +3174,7 @@ class DemoOllamaService extends OllamaService {
 }
 
 /* ==========================================================================
- * BufferService — Buffer GraphQL API (personal access token)
+ * BufferService — Buffer scheduling through the Poster server
  * ========================================================================== */
 
 /** Display names and colours for Buffer services. */
@@ -3438,12 +3193,11 @@ function serviceMeta(service) {
 }
 
 /**
- * createPost is not idempotent: a timeout or 5xx may still have created the
- * post. To avoid duplicates, only failures that guarantee nothing was created
- * (rate limiting and 503 "unavailable") are retried for this call.
+ * Buffer through the Poster server. The server holds the personal access
+ * token and talks to Buffer's GraphQL API; the browser caches the account and
+ * channels (keyed by a fingerprint of the server's token) so the channel
+ * picker works without reconnecting.
  */
-const BUFFER_CREATE_RETRY = (error) => error instanceof ApiError && (error.kind === 'rate_limit' || error.status === 429 || error.status === 503);
-
 class BufferService {
   /**
    * @param {{api: ApiService, validation: ValidationService, notifier: NotificationService,
@@ -3463,29 +3217,33 @@ class BufferService {
   /* ----------------------------------------------------- connection cache */
 
   /**
-   * Cached account and channels from the last successful connect, valid only
-   * for the token it was loaded with.
-   * @param {object} [settings]
-   * @returns {{account: object, channels: object[], connectedAt: string, tokenTail: string}|null}
+   * Cached account and channels from the last successful connect. Ignored
+   * when the server's token has changed since then.
+   * @returns {{account: object, channels: object[], connectedAt: string, tokenId: string}|null}
    */
-  getConnection(settings = this.getSettings()) {
+  getConnection() {
     const all = this.storage.get(STORAGE_KEYS.connection, null);
     const live = isPlainObject(all) && isPlainObject(all.live) ? all.live : null;
     if (!live || !Array.isArray(live.channels)) return null;
-    if (live.tokenTail !== String(settings.bufferToken || '').slice(-4)) return null;
+    if (!SERVER.buffer.tokenId || live.tokenId !== SERVER.buffer.tokenId) return null;
     return live;
   }
 
-  /** @param {{account: object, channels: object[]}} connection @param {object} settings */
-  saveConnection(connection, settings) {
+  /** @param {{account: object, channels: object[], tokenId?: string}} connection */
+  saveConnection(connection) {
     this.storage.set(STORAGE_KEYS.connection, {
-      live: { ...connection, connectedAt: new Date().toISOString(), tokenTail: String(settings.bufferToken || '').slice(-4) }
+      live: {
+        account: connection.account,
+        channels: connection.channels,
+        connectedAt: new Date().toISOString(),
+        tokenId: connection.tokenId || SERVER.buffer.tokenId
+      }
     });
   }
 
   /** @returns {object[]} known channels */
-  channels(settings = this.getSettings()) {
-    return this.getConnection(settings)?.channels || [];
+  channels() {
+    return this.getConnection()?.channels || [];
   }
 
   /** @returns {string[]} channel ids selected for this mode */
@@ -3494,22 +3252,22 @@ class BufferService {
   }
 
   /** @param {string} id @returns {string} */
-  channelName(id, settings = this.getSettings()) {
-    const channel = this.channels(settings).find((c) => c.id === id);
+  channelName(id) {
+    const channel = this.channels().find((c) => c.id === id);
     return channel ? `${channel.name} (${serviceMeta(channel.service).label})` : `Channel ${truncate(id, 12)}`;
   }
 
   /** @param {string} id @returns {string} */
-  channelService(id, settings = this.getSettings()) {
-    return this.channels(settings).find((c) => c.id === id)?.service || '';
+  channelService(id) {
+    return this.channels().find((c) => c.id === id)?.service || '';
   }
 
   /**
    * Detects selected channels that are unknown, disconnected or locked.
    * @param {string[]} ids @returns {string|null} problem description
    */
-  checkChannels(ids, settings = this.getSettings()) {
-    const known = this.channels(settings);
+  checkChannels(ids) {
+    const known = this.channels();
     if (!known.length) return null;
     for (const id of ids) {
       const channel = known.find((c) => c.id === id);
@@ -3519,126 +3277,45 @@ class BufferService {
     return null;
   }
 
-  /* --------------------------------------------------------------- GraphQL */
-
-  /** @param {object} settings @throws {ApiError} kind "config" */
-  assertConfigured(settings) {
-    const result = this.validation.validateSettings(settings, { scope: 'buffer', requireCredentials: true });
-    if (!result.valid) {
-      throw new ApiError(`Buffer is not configured: ${Object.values(result.errors)[0]}`, { kind: 'config', service: 'Buffer', hint: 'Open Settings → Buffer.' });
-    }
-  }
-
-  /**
-   * Executes a GraphQL document. GraphQL-level errors (which Buffer may send
-   * with HTTP 200) are mapped inside the retried function, so rate limits and
-   * transient server errors are retried like HTTP failures.
-   * @param {string} query
-   * @param {object} variables
-   * @param {{action: string, settings?: object, signal?: AbortSignal, onRetry?: Function, shouldRetry?: Function}} options
-   * @returns {Promise<object>} the `data` object
-   */
-  async graphql(query, variables, { action, settings, signal, onRetry, shouldRetry }) {
-    const s = settings ?? this.getSettings();
-    this.assertConfigured(s);
-    const execute = async () => {
-      const response = await this.api.request(s.bufferApiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${s.bufferToken.trim()}` },
-        body: JSON.stringify({ query, variables }),
-        timeoutMs: s.bufferTimeoutSec * 1000,
-        signal,
-        service: 'Buffer'
+  /** @throws {ApiError} kind "config" when the server has no Buffer token */
+  assertConfigured() {
+    if (!SERVER.buffer.configured) {
+      throw new ApiError(`Buffer is not set up on the server: ${SERVER.buffer.problem}`, {
+        kind: 'config', service: 'Buffer', hint: 'Add BUFFER_ACCESS_TOKEN to the .env file next to app.py and restart Poster.'
       });
-      const payload = response.data;
-      if (!isPlainObject(payload)) {
-        throw new ApiError(`Buffer returned an invalid response while trying to ${action}.`, { kind: 'parse', service: 'Buffer', details: truncate(response.text, 300) });
-      }
-      if (Array.isArray(payload.errors) && payload.errors.length) throw this.mapGraphqlError(payload.errors[0], action);
-      if (!isPlainObject(payload.data)) {
-        throw new ApiError(`Buffer returned no data while trying to ${action}.`, { kind: 'parse', service: 'Buffer', details: truncate(response.text, 300) });
-      }
-      return payload.data;
-    };
-    return retryRequest(execute, { signal, onRetry, shouldRetry });
-  }
-
-  /** Maps a GraphQL `errors[0]` entry to a classified ApiError. */
-  mapGraphqlError(error, action) {
-    const code = String(error?.extensions?.code || '').toUpperCase();
-    const message = typeof error?.message === 'string' && error.message ? error.message : 'unknown error';
-    switch (code) {
-      case 'UNAUTHORIZED':
-      case 'UNAUTHENTICATED':
-        return new ApiError(`Authentication failed. Buffer rejected the access token (${message}).`, { kind: 'auth', status: 401, service: 'Buffer', hint: 'Create a personal API key in Buffer and paste it in Settings → Buffer.' });
-      case 'FORBIDDEN':
-        return new ApiError(`Buffer denied access while trying to ${action}: ${message}.`, { kind: 'auth', status: 403, service: 'Buffer', hint: 'Check that the channel and organization belong to this account.' });
-      case 'NOT_FOUND':
-        return new ApiError(`Buffer could not find what was needed to ${action}: ${message}. The channel or organization may have been removed.`, { kind: 'not_found', service: 'Buffer' });
-      case 'RATE_LIMIT_EXCEEDED':
-        return new ApiError(`Buffer rate limit reached while trying to ${action}.`, { kind: 'rate_limit', status: 429, service: 'Buffer', hint: 'Wait a minute and try again.' });
-      case 'UNEXPECTED':
-        return new ApiError(`Buffer had a temporary problem while trying to ${action}: ${message}.`, { kind: 'server', status: 500, service: 'Buffer' });
-      default:
-        return new ApiError(`Buffer could not ${action}: ${message}.`, { kind: 'client', service: 'Buffer' });
     }
   }
 
   /* ---------------------------------------------------------- public API */
 
   /**
-   * Verifies the personal access token by reading the account.
-   * @param {{settings?: object, signal?: AbortSignal, onRetry?: Function}} [ctx]
+   * Verifies the server's personal access token by reading the account.
+   * @param {{signal?: AbortSignal, onRetry?: Function}} [ctx]
    * @returns {Promise<{id: string, email: string, organizations: Array<{id: string, name: string}>}>}
    */
-  async validateBufferToken({ settings, signal, onRetry } = {}) {
-    const data = await this.graphql(API_CONFIG.buffer.queries.account, {}, { action: 'verify the access token', settings, signal, onRetry });
-    const account = data.account;
-    if (!isPlainObject(account) || !Array.isArray(account.organizations)) {
-      throw new ApiError('Buffer returned unexpected account data.', { kind: 'parse', service: 'Buffer', details: truncate(JSON.stringify(data), 300) });
-    }
-    return {
-      id: String(account.id || ''),
-      email: String(account.email || ''),
-      organizations: account.organizations.filter((o) => isPlainObject(o) && o.id).map((o) => ({ id: String(o.id), name: String(o.name || 'Organization') }))
-    };
+  async validateBufferToken({ signal, onRetry } = {}) {
+    this.assertConfigured();
+    const data = await retryRequest(() => this.api.call(API_CONFIG.routes.bufferValidate, {
+      json: {}, timeoutMs: API_CONFIG.timeouts.bufferMs, signal, service: 'Buffer', onRetry
+    }), { signal, onRetry });
+    if (!isPlainObject(data.account)) throw new ApiError('Buffer returned unexpected account data.', { kind: 'parse', service: 'Buffer' });
+    return data.account;
   }
 
   /**
    * Validates the token and loads every channel of every organization.
-   * @param {{settings?: object, signal?: AbortSignal, onRetry?: Function}} [ctx]
-   * @returns {Promise<{account: object, channels: object[]}>}
+   * @param {{signal?: AbortSignal, onRetry?: Function}} [ctx]
+   * @returns {Promise<{account: object, channels: object[], tokenId: string}>}
    */
-  async connectToBuffer({ settings, signal, onRetry } = {}) {
-    const s = settings ?? this.getSettings();
-    const account = await this.validateBufferToken({ settings: s, signal, onRetry });
-    if (!account.organizations.length) {
-      throw new ApiError('This Buffer account has no organizations, so there are no channels to post to.', { kind: 'client', service: 'Buffer' });
+  async connectToBuffer({ signal, onRetry } = {}) {
+    this.assertConfigured();
+    const data = await retryRequest(() => this.api.call(API_CONFIG.routes.bufferConnect, {
+      json: {}, timeoutMs: API_CONFIG.timeouts.bufferMs * 3, signal, service: 'Buffer', onRetry
+    }), { signal, onRetry });
+    if (!isPlainObject(data.account) || !Array.isArray(data.channels)) {
+      throw new ApiError('Buffer returned an unexpected channel list.', { kind: 'parse', service: 'Buffer' });
     }
-    const channels = [];
-    for (const organization of account.organizations) {
-      const data = await this.graphql(API_CONFIG.buffer.queries.channels, { organizationId: organization.id }, { action: 'load channels', settings: s, signal, onRetry });
-      if (!Array.isArray(data.channels)) {
-        throw new ApiError('Buffer returned an unexpected channel list.', { kind: 'parse', service: 'Buffer' });
-      }
-      for (const channel of data.channels) {
-        if (!isPlainObject(channel) || !channel.id) continue;
-        channels.push({
-          id: String(channel.id),
-          name: String(channel.displayName || channel.name || channel.id),
-          handle: String(channel.name || ''),
-          service: String(channel.service || ''),
-          timezone: String(channel.timezone || ''),
-          organizationId: organization.id,
-          organizationName: organization.name,
-          isDisconnected: Boolean(channel.isDisconnected),
-          isLocked: Boolean(channel.isLocked),
-          isQueuePaused: Boolean(channel.isQueuePaused),
-          usable: !channel.isDisconnected && !channel.isLocked
-        });
-      }
-    }
-    return { account, channels };
+    return { account: data.account, channels: data.channels.filter(isPlainObject), tokenId: String(data.tokenId || '') };
   }
 
   /**
@@ -3646,7 +3323,7 @@ class BufferService {
    * endpoint, so the image must be publicly hosted:
    *   1. a URL the user pasted for this image, else
    *   2. a URL from an earlier upload of this image, else
-   *   3. upload to the configured media host and use the returned URL, else
+   *   3. the server uploads it to its media host and returns the URL, else
    *   4. null (text-only post) — or an error when images are required.
    * @param {object} item
    * @param {{settings?: object, signal?: AbortSignal, onRetry?: Function}} [ctx]
@@ -3661,39 +3338,34 @@ class BufferService {
       return manual;
     }
     if (item.uploadedUrl) return item.uploadedUrl;
-    if (s.mediaEndpoint) {
+    if (SERVER.media.configured) {
       const form = new FormData();
-      form.append(API_CONFIG.media.fileField, item.file, item.name);
-      if (s.mediaPreset) form.append(API_CONFIG.media.presetField, s.mediaPreset);
-      const response = await retryRequest(() => this.api.request(s.mediaEndpoint, {
-        method: 'POST', body: form, timeoutMs: API_CONFIG.media.timeoutMs, signal, service: 'Media host'
+      form.append(API_CONFIG.mediaFileField, item.file, item.name);
+      const data = await retryRequest(() => this.api.call(API_CONFIG.routes.mediaUpload, {
+        form, timeoutMs: API_CONFIG.timeouts.mediaMs, signal, service: 'Media host', onRetry
       }), { signal, onRetry });
-      const url = API_CONFIG.media.urlPaths.map((path) => getPath(response.data, path)).find((value) => typeof value === 'string' && /^https?:\/\//i.test(value));
-      if (!url) {
-        throw new ApiError('The media host accepted the upload but did not return a public URL.', { kind: 'parse', service: 'Media host', details: truncate(response.text, 300) });
+      if (typeof data.url !== 'string' || !data.url.startsWith('https://')) {
+        throw new ApiError('The media host did not return a public https:// URL.', { kind: 'parse', service: 'Media host' });
       }
-      if (!url.startsWith('https://')) {
-        throw new ApiError('The media host returned an http:// URL. Buffer needs https:// image URLs.', { kind: 'client', service: 'Media host' });
-      }
-      return url;
+      return data.url;
     }
     if (s.requireMedia) {
-      throw new ApiError(`"${item.name}" has no public image URL. Buffer attaches images from public URLs: paste one in the editor, or set an upload endpoint in Settings → Media hosting.`, { kind: 'validation', service: 'Buffer' });
+      throw new ApiError(`"${item.name}" has no public image URL. Buffer attaches images from public URLs: paste one in the editor, or set MEDIA_UPLOAD_ENDPOINT on the server.`, { kind: 'validation', service: 'Buffer' });
     }
     return null;
   }
 
   /**
    * Creates one scheduled post per channel (mode "customScheduled").
-   * Channels are independent: failures on some are reported while the others
-   * still go out. Throws only when nothing was scheduled.
+   * Channels are independent on the server: failures on some are reported
+   * while the others still go out. The browser does not retry this call,
+   * because a request that reached the server may already have created posts.
    * @param {{text: string, channelIds: string[], dueAt: Date, mediaUrl?: string|null}} post
    * @param {{settings?: object, onRetry?: Function}} [ctx]
    * @returns {Promise<{posts: Array<{channelId: string, postId: string, dueAt: string, status: string}>, failures: Array<{channelId: string, message: string}>}>}
    */
-  async schedulePost(post, { settings, onRetry } = {}) {
-    const s = settings ?? this.getSettings();
-    this.assertConfigured(s);
+  async schedulePost(post, { onRetry } = {}) {
+    this.assertConfigured();
     if (!Array.isArray(post.channelIds) || !post.channelIds.length) {
       throw new ApiError('No Buffer channels selected. Choose at least one in Settings → Buffer.', { kind: 'config', service: 'Buffer' });
     }
@@ -3701,42 +3373,22 @@ class BufferService {
       throw new ApiError('The publish time must be a valid future date.', { kind: 'validation', service: 'Buffer' });
     }
     if (!String(post.text || '').trim()) throw new ApiError('The post text is empty.', { kind: 'validation', service: 'Buffer' });
-    const channelProblem = this.checkChannels(post.channelIds, s);
+    const channelProblem = this.checkChannels(post.channelIds);
     if (channelProblem) throw new ApiError(channelProblem, { kind: 'config', service: 'Buffer' });
 
-    const posts = [];
-    const failures = [];
-    for (const channelId of post.channelIds) {
-      const input = {
-        channelId,
-        text: post.text,
-        schedulingType: 'automatic',
-        mode: 'customScheduled',
-        dueAt: post.dueAt.toISOString(),
-        aiAssisted: true
-      };
-      if (post.mediaUrl) input.assets = [{ image: { url: post.mediaUrl } }];
-      try {
-        const data = await this.graphql(API_CONFIG.buffer.queries.createPost, { input }, {
-          action: 'create the post', settings: s, onRetry, shouldRetry: BUFFER_CREATE_RETRY
-        });
-        const result = data.createPost;
-        if (isPlainObject(result) && isPlainObject(result.post) && result.post.id) {
-          posts.push({ channelId, postId: String(result.post.id), dueAt: String(result.post.dueAt || input.dueAt), status: String(result.post.status || 'scheduled') });
-        } else {
-          const reason = isPlainObject(result) && result.message ? result.message : `Buffer returned ${result?.__typename || 'an unexpected response'}.`;
-          failures.push({ channelId, message: reason });
-        }
-      } catch (error) {
-        if (error instanceof ApiError && error.fatal && !posts.length) throw error;
-        failures.push({ channelId, message: error.message });
-      }
-    }
-    if (!posts.length) {
-      const summary = failures.map((f) => `${this.channelName(f.channelId, s)}: ${f.message}`).join(' · ');
-      throw new ApiError(`Buffer did not schedule the post. ${summary}`, { kind: 'client', service: 'Buffer' });
-    }
-    return { posts, failures };
+    const data = await this.api.call(API_CONFIG.routes.bufferSchedule, {
+      json: { text: post.text, channelIds: post.channelIds, dueAt: post.dueAt.toISOString(), mediaUrl: post.mediaUrl || null },
+      timeoutMs: API_CONFIG.timeouts.bufferMs * Math.max(1, post.channelIds.length),
+      service: 'Buffer',
+      onRetry
+    });
+    const posts = Array.isArray(data.posts) ? data.posts.filter((p) => isPlainObject(p) && p.postId) : [];
+    const failures = Array.isArray(data.failures) ? data.failures.filter(isPlainObject) : [];
+    if (!posts.length) throw new ApiError('Buffer did not confirm any scheduled post.', { kind: 'parse', service: 'Buffer' });
+    return {
+      posts: posts.map((p) => ({ channelId: String(p.channelId), postId: String(p.postId), dueAt: String(p.dueAt || post.dueAt.toISOString()), status: String(p.status || 'scheduled') })),
+      failures: failures.map((f) => ({ channelId: String(f.channelId), message: String(f.message || 'Unknown error') }))
+    };
   }
 }
 
@@ -3749,7 +3401,7 @@ class DemoBufferService extends BufferService {
       account: { id: 'demo-account', email: 'demo@poster.app', organizations: [{ id: 'demo-org', name: 'Demo workspace' }] },
       channels: SettingsModel.demoChannels.map((c) => ({ ...c })),
       connectedAt: new Date().toISOString(),
-      tokenTail: ''
+      tokenId: ''
     };
   }
 
@@ -4089,7 +3741,8 @@ class SchedulerService extends EventTarget {
 
   /**
    * Runs `worker` over `items` with bounded concurrency. Cancelling aborts
-   * in-flight requests where that is safe; a fatal error (auth, CORS, offline,
+   * in-flight requests where that is safe; a fatal error (auth, offline,
+   * unreachable host,
    * configuration) stops the remaining items automatically.
    * @param {{kind: 'generate'|'schedule', label: string, items: object[], concurrency?: number,
    *          worker: (item: object, ctx: {signal: AbortSignal, onRetry: Function}) => Promise<string>}} options
@@ -4170,9 +3823,10 @@ class SchedulerService extends EventTarget {
   }
 
   #retryLogger(op, item) {
-    return ({ attempt, maxRetries, delayMs, error }) => {
+    return ({ attempt, maxRetries, delayMs, error, server }) => {
       op.retries += 1;
-      this.notifier.log('warn', 'retry', `Retry ${attempt}/${maxRetries} for "${item.name}" in ${delayMs / 1000}s: ${error.message}`);
+      const who = server ? 'Server retry' : 'Retry';
+      this.notifier.log('warn', 'retry', `${who} ${attempt}/${maxRetries} for "${item.name}" after ${delayMs / 1000}s: ${error.message}`);
       this.#emit('progress', op);
     };
   }
@@ -4365,20 +4019,12 @@ function byId(id) {
   return document.getElementById(id);
 }
 
-/** Settings fields: [settings key, input id, type]. */
+/** Settings fields: [settings key, input id, type, label]. Credentials live on the server. */
 const SETTINGS_FIELDS = Object.freeze([
-  ['ollamaEndpoint', 'set-ollama-endpoint', 'text'],
-  ['ollamaApiKey', 'set-ollama-key', 'text'],
   ['model', 'set-model', 'text'],
   ['tone', 'set-tone', 'text'],
-  ['ollamaTimeoutSec', 'set-ollama-timeout', 'number', 'Ollama timeout'],
   ['aiConcurrency', 'set-ai-concurrency', 'number', 'Parallel requests'],
   ['extraInstructions', 'set-extra', 'text'],
-  ['bufferToken', 'set-buffer-token', 'text'],
-  ['bufferApiUrl', 'set-buffer-api', 'text'],
-  ['bufferTimeoutSec', 'set-buffer-timeout', 'number', 'Buffer timeout'],
-  ['mediaEndpoint', 'set-media-endpoint', 'text'],
-  ['mediaPreset', 'set-media-preset', 'text'],
   ['requireMedia', 'set-require-media', 'checkbox'],
   ['timezone', 'set-timezone', 'text'],
   ['intervalMinutes', 'set-interval', 'number', 'Planner interval'],
@@ -4404,7 +4050,7 @@ class UIController {
     this.opTicker = null;
     this.lastOp = null;
     this.logRenderQueued = false;
-    this.ui = { logFilter: 'all', plannerOpen: false, planInterval: null, exportCredentials: false };
+    this.ui = { logFilter: 'all', plannerOpen: false, planInterval: null };
   }
 
   get settings() { return this.app.settings; }
@@ -4464,12 +4110,10 @@ class UIController {
       if (['all', 'error', 'warn', 'success', 'user'].includes(stored.logFilter)) this.ui.logFilter = stored.logFilter;
       this.ui.plannerOpen = Boolean(stored.plannerOpen);
       if (Number.isInteger(stored.planInterval) && stored.planInterval > 0) this.ui.planInterval = stored.planInterval;
-      this.ui.exportCredentials = Boolean(stored.exportCredentials);
     }
     byId('log-filter').value = this.ui.logFilter;
     byId('planner').open = this.ui.plannerOpen;
     byId('plan-interval').value = String(this.ui.planInterval || this.settings.intervalMinutes);
-    byId('export-credentials').checked = this.ui.exportCredentials;
   }
 
   saveUiPrefs() {
@@ -4496,7 +4140,7 @@ class UIController {
     const badge = byId('mode-badge');
     badge.dataset.mode = s.mode;
     byId('mode-badge-label').textContent = demo ? 'Demo mode' : 'Live mode';
-    badge.title = demo ? 'Simulated AI and scheduling. Click to switch to Live mode.' : 'Calling Ollama and Buffer. Click to switch to Demo mode.';
+    badge.title = demo ? 'Simulated AI and scheduling. Click to switch to Live mode.' : 'Generating and scheduling through the Poster server. Click to switch to Demo mode.';
     badge.setAttribute('aria-label', `${demo ? 'Demo' : 'Live'} mode. Activate to switch to ${demo ? 'Live' : 'Demo'} mode.`);
     const setPill = (id, state) => {
       const pill = byId(id);
@@ -4516,10 +4160,8 @@ class UIController {
     const s = this.settings;
     if (s.mode === 'demo') return { state: 'demo', detail: 'Demo', title: 'Simulated AI responses (Demo mode).' };
     if (this.health.ollama?.state === 'error') return { state: 'error', detail: 'Error', title: this.health.ollama.message };
-    const result = this.validation.validateSettings(s, { scope: 'ollama', requireCredentials: true });
-    if (!result.valid) return { state: 'warn', detail: 'Not configured', title: Object.values(result.errors)[0] };
-    let host = '';
-    try { host = new URL(s.ollamaEndpoint).host; } catch { host = s.ollamaEndpoint; }
+    if (!SERVER.ollama.configured) return { state: 'warn', detail: 'Not configured', title: `Server: ${SERVER.ollama.problem}` };
+    const host = SERVER.ollama.host || 'the server';
     if (this.health.ollama?.state === 'ok') return { state: 'ok', detail: 'Connected', title: `${s.model} at ${host}` };
     return { state: 'ok', detail: 'Ready', title: `${s.model} at ${host} (not tested yet)` };
   }
@@ -4529,9 +4171,9 @@ class UIController {
     const s = this.settings;
     if (s.mode === 'demo') return { state: 'demo', detail: 'Demo', title: `Simulated scheduling to ${pluralize(s.channelIds.demo.length, 'demo channel')}.` };
     if (this.health.buffer?.state === 'error') return { state: 'error', detail: 'Error', title: this.health.buffer.message };
-    if (isPlaceholder(s.bufferToken)) return { state: 'warn', detail: 'No token', title: 'Add a Buffer personal access token in Settings.' };
+    if (!SERVER.buffer.configured) return { state: 'warn', detail: 'No token', title: `Server: ${SERVER.buffer.problem}` };
     const selected = s.channelIds.live.length;
-    const connection = this.app.liveBuffer.getConnection(s);
+    const connection = this.app.liveBuffer.getConnection();
     if (!connection && !selected) return { state: 'warn', detail: 'Not connected', title: 'Open Settings → Buffer and connect to load channels.' };
     if (!selected) return { state: 'warn', detail: 'No channels', title: 'Choose at least one channel in Settings → Buffer.' };
     return { state: 'ok', detail: pluralize(selected, 'channel'), title: connection ? `Connected as ${connection.account?.email || 'Buffer user'}.` : 'Channels selected (connection not verified in this browser).' };
@@ -4873,8 +4515,8 @@ class UIController {
     if (item.mediaUrl) mediaHint.textContent = 'This URL is attached to the post in Buffer.';
     else if (item.uploadedUrl) mediaHint.textContent = `Uploaded earlier: ${truncate(item.uploadedUrl, 70)}`;
     else if (s.mode === 'demo') mediaHint.textContent = 'Demo mode simulates hosting. In Live mode, Buffer needs a public URL or a media host.';
-    else if (s.mediaEndpoint) mediaHint.textContent = 'Leave empty to upload this image to your media host when scheduling.';
-    else mediaHint.textContent = 'Buffer attaches images from public URLs. Paste one, or set a media host in Settings.';
+    else if (SERVER.media.configured) mediaHint.textContent = `Leave empty to upload this image to ${SERVER.media.host || 'the media host'} when scheduling.`;
+    else mediaHint.textContent = 'Buffer attaches images from public URLs. Paste one here; no media host is configured on the server.';
 
     const text = this.scheduler.composeText(item);
     const preview = byId('ed-preview');
@@ -5563,7 +5205,7 @@ class UIController {
     const live = this.settings.mode === 'live';
     const stats = `${op.succeeded} succeeded · ${op.failed} failed · ${op.skipped} skipped · ${op.cancelled} not processed · ${op.retries} retries · ${formatDuration(op.finishedAt - op.startedAt)}`;
     if (live && op.succeeded) this.health[service] = { state: 'ok' };
-    if (live && op.abortReason && ['auth', 'cors', 'network', 'config'].includes(op.abortReason.kind)) {
+    if (live && op.abortReason && ['auth', 'network', 'config'].includes(op.abortReason.kind)) {
       this.health[service] = { state: 'error', message: op.abortReason.message };
       this.showServiceErrorBanner(op.abortReason);
     }
@@ -5586,7 +5228,7 @@ class UIController {
     }
   }
 
-  /** Banner for errors that need user action (CORS, auth, network). */
+  /** Banner for errors that need user action (auth, configuration, network). */
   showServiceErrorBanner(error) {
     const service = error.service || 'Service';
     const section = service === 'Ollama' ? 'settings-ollama' : service === 'Media host' ? 'settings-media' : 'settings-buffer';
@@ -5629,11 +5271,16 @@ class UIController {
     const s = this.settings;
     this.notifier.clearBanner('mode');
     if (s.mode === 'demo') {
+      const ready = SERVER.ollama.configured;
       this.notifier.banner('mode', {
         type: 'info',
         title: 'You are in Demo mode',
-        message: 'AI captions and Buffer scheduling are simulated, so you can try everything safely. Add your Ollama and Buffer credentials in Settings to go live.',
-        actions: [{ label: 'Open settings', onClick: () => this.openSettings() }]
+        message: ready
+          ? 'AI captions and Buffer scheduling are simulated. The server is configured, so you can switch to Live mode whenever you are ready.'
+          : 'AI captions and Buffer scheduling are simulated, so you can try everything safely. To go live, add OLLAMA_API_KEY and BUFFER_ACCESS_TOKEN to the .env file next to app.py and restart Poster.',
+        actions: ready
+          ? [{ label: 'Switch to Live mode', onClick: () => this.setMode('live'), primary: true }]
+          : [{ label: 'Open settings', onClick: () => this.openSettings() }]
       });
       return;
     }
@@ -5662,7 +5309,7 @@ class UIController {
     if (mode === 'live') {
       const check = this.validation.validateSettings({ ...this.settings, mode: 'live' }, { scope: 'ollama', requireCredentials: true });
       if (!check.valid) {
-        showToast(Object.values(check.errors)[0], 'warning', { title: 'Live mode needs your credentials' });
+        showToast(Object.values(check.errors)[0], 'warning', { title: 'Live mode needs server configuration' });
         this.openSettings('settings-ollama');
         return;
       }
@@ -5681,8 +5328,7 @@ class UIController {
   onSettingsChanged(previous, next) {
     if (!previous) return;
     if (previous.mode !== next.mode) this.notifier.log('info', 'settings', `Switched to ${next.mode === 'demo' ? 'Demo' : 'Live'} mode.`);
-    if (previous.ollamaEndpoint !== next.ollamaEndpoint || previous.ollamaApiKey !== next.ollamaApiKey || previous.model !== next.model) this.health.ollama = null;
-    if (previous.bufferToken !== next.bufferToken || previous.bufferApiUrl !== next.bufferApiUrl) this.health.buffer = null;
+    if (previous.model !== next.model) this.health.ollama = null;
     if (previous.timezone !== next.timezone) byId('plan-start').value = '';
     this.renderAll();
     this.updateModeBanner();
@@ -5758,14 +5404,6 @@ class UIController {
     byId('set-extra').addEventListener('input', () => {
       byId('set-extra-count').textContent = `${charCount(byId('set-extra').value)} / ${LIMITS.maxExtraInstructions}`;
     });
-    dialog.querySelectorAll('[data-toggle-secret]').forEach((button) => button.addEventListener('click', () => {
-      const input = byId(button.dataset.toggleSecret);
-      const reveal = input.type === 'password';
-      input.type = reveal ? 'text' : 'password';
-      button.setAttribute('aria-pressed', String(reveal));
-      button.setAttribute('aria-label', `${reveal ? 'Hide' : 'Show'} ${button.dataset.toggleSecret === 'set-ollama-key' ? 'API key' : 'access token'}`);
-      button.replaceChildren(icon(reveal ? 'eye-off' : 'eye'));
-    }));
     byId('channel-list').addEventListener('change', (event) => {
       const input = event.target.closest('input[data-channel-id]');
       if (!input) return;
@@ -5778,12 +5416,11 @@ class UIController {
     });
     byId('test-ollama').addEventListener('click', () => this.testOllamaFromForm());
     byId('connect-buffer').addEventListener('click', () => this.connectBufferFromForm());
-    byId('export-credentials').addEventListener('change', (event) => { this.ui.exportCredentials = event.target.checked; this.saveUiPrefs(); });
     byId('export-config').addEventListener('click', () => {
       const { settings } = this.readSettingsForm();
       settings.channelIds = this.settingsChannelDraft;
-      exportConfig(settings, { includeCredentials: byId('export-credentials').checked });
-      showToast(`Settings exported${byId('export-credentials').checked ? ' with credentials. Keep the file private.' : ' without credentials.'}`, 'success');
+      exportConfig(settings);
+      showToast('Settings exported. Credentials stay on the server and are not included.', 'success');
     });
     byId('import-config').addEventListener('click', () => byId('import-input').click());
     byId('import-input').addEventListener('change', async (event) => {
@@ -5802,7 +5439,7 @@ class UIController {
     byId('restore-defaults').addEventListener('click', () => {
       this.fillSettingsForm(SettingsModel.defaults(), { keepSnapshot: true });
       this.updateDirtyState();
-      showToast('Embedded defaults loaded into the form. Click "Save settings" to apply them.', 'info');
+      showToast('Server defaults loaded into the form. Click "Save settings" to apply them.', 'info');
     });
     byId('reset-all').addEventListener('click', () => this.resetAllSettings());
     byId('clear-drafts').addEventListener('click', async () => {
@@ -5864,13 +5501,45 @@ class UIController {
     this.settingsChannelDraft = { live: [...s.channelIds.live], demo: [...s.channelIds.demo] };
     byId('set-extra-count').textContent = `${charCount(s.extraInstructions)} / ${LIMITS.maxExtraInstructions}`;
     byId('settings-source').textContent = this.app.settingsSource === 'storage'
-      ? 'Using settings saved in this browser'
-      : 'Using the embedded configuration (nothing saved yet)';
+      ? 'Using preferences saved in this browser'
+      : 'Using the server defaults (nothing saved in this browser yet)';
     this.showSettingsErrors({});
+    this.renderServerInfo();
     this.renderChannelList();
     this.renderStorageUsage();
     if (!keepSnapshot) this.settingsSnapshot = JSON.stringify(this.readSettingsForm().settings);
     this.updateDirtyState();
+  }
+
+  /**
+   * Read-only view of what the server has configured. Secrets are never sent
+   * to the browser, only whether they are present.
+   */
+  renderServerInfo() {
+    const row = (label, value, state = '') => el('div', {}, [el('dt', { text: label }), el('dd', { class: state ? `is-${state}` : '', text: value })]);
+    const note = (problem) => el('div', {}, [el('span', { class: 'server-note', text: `${problem} Set it in the .env file next to app.py, then restart Poster.` })]);
+    const status = (service) => row('Status', service.configured ? 'Configured on the server' : 'Not configured', service.configured ? 'ok' : 'missing');
+    const o = SERVER.ollama;
+    byId('ollama-server-info').replaceChildren(...[
+      status(o),
+      row('Endpoint', o.host ? `${o.host}${o.style === 'openai' ? ' (OpenAI-compatible)' : ''}` : '—'),
+      row('Default model', o.model || '—'),
+      row('Timeout', `${o.timeout} s per request · up to 3 retries`),
+      o.configured ? null : note(o.problem)
+    ].filter(Boolean));
+    const b = SERVER.buffer;
+    byId('buffer-server-info').replaceChildren(...[
+      status(b),
+      row('API', b.host || '—'),
+      row('Access token', b.tokenId ? 'Set on the server' : 'Missing', b.tokenId ? 'ok' : 'missing'),
+      b.configured ? null : note(b.problem)
+    ].filter(Boolean));
+    const m = SERVER.media;
+    byId('media-server-info').replaceChildren(...[
+      row('Status', m.configured ? 'Configured on the server' : 'Not configured: paste public image URLs in the editor', m.configured ? 'ok' : 'missing'),
+      m.host ? row('Host', m.host) : null,
+      m.configured || !m.host ? null : note(m.problem)
+    ].filter(Boolean));
   }
 
   /**
@@ -5966,15 +5635,14 @@ class UIController {
   renderChannelList() {
     const mode = this.formMode();
     const list = byId('channel-list');
-    const { settings } = this.readSettingsForm();
-    const channels = mode === 'demo' ? SettingsModel.demoChannels : (this.app.liveBuffer.getConnection(settings)?.channels || []);
+    const channels = mode === 'demo' ? SettingsModel.demoChannels : (this.app.liveBuffer.getConnection()?.channels || []);
     const selected = new Set(this.settingsChannelDraft[mode]);
     byId('connect-buffer-label').textContent = mode === 'demo' ? 'Reload demo channels' : (channels.length ? 'Reconnect & refresh channels' : 'Connect & load channels');
     if (!channels.length) {
       const savedIds = this.settingsChannelDraft.live;
       list.replaceChildren(el('p', { class: 'hint', text: savedIds.length
         ? `${pluralize(savedIds.length, 'channel')} selected from an earlier connection or import. Connect to see their names and status.`
-        : 'Connect with your access token to load your Buffer channels.' }));
+        : (SERVER.buffer.configured ? 'Connect to load the channels of the Buffer account configured on the server.' : 'Buffer is not configured on the server, so there are no channels to load.') }));
       byId('channel-count').textContent = savedIds.length ? `${savedIds.length} selected` : '';
       return;
     }
@@ -6046,7 +5714,7 @@ class UIController {
         const detail = result.models.length ? `${pluralize(result.models.length, 'model')} available, including ${settings.model}.` : 'The model list is not available here; the first generation will confirm the model.';
         this.showTestResult('ollama-test-result', 'ok', `Connected to ${result.host}. ${detail}`);
         this.notifier.log('success', 'settings', `Ollama connection test passed (${result.host}).`);
-        if (settings.ollamaEndpoint === this.settings.ollamaEndpoint) { this.health.ollama = { state: 'ok' }; this.renderHeader(); }
+        if (settings.model === this.settings.model) { this.health.ollama = { state: 'ok' }; this.renderHeader(); }
       }
     } catch (error) {
       this.showTestResult('ollama-test-result', 'error', [error.message, error.hint].filter(Boolean).join(' '));
@@ -6103,7 +5771,7 @@ class UIController {
   async resetAllSettings() {
     const ok = await this.confirm({
       title: 'Reset all settings?',
-      message: 'This restores the embedded configuration, removes saved credentials, channel selections, the Buffer connection, theme and interface preferences.\n\nImages, drafts, scheduled posts and the activity log are kept.',
+      message: 'This restores the server defaults and removes your saved preferences, channel selections, the cached Buffer connection, theme and interface preferences.\n\nImages, drafts, scheduled posts and the activity log are kept. Credentials on the server are not affected.',
       confirmLabel: 'Reset all settings',
       danger: true
     });
@@ -6111,15 +5779,15 @@ class UIController {
     const previous = this.settings;
     for (const key of [STORAGE_KEYS.settings, STORAGE_KEYS.theme, STORAGE_KEYS.ui, STORAGE_KEYS.connection]) this.app.storage.remove(key);
     this.app.settings = SettingsModel.defaults();
-    this.app.settingsSource = 'embedded';
+    this.app.settingsSource = 'defaults';
     this.health = { ollama: null, buffer: null };
-    this.ui = { logFilter: 'all', plannerOpen: false, planInterval: null, exportCredentials: false };
+    this.ui = { logFilter: 'all', plannerOpen: false, planInterval: null };
     this.restoreUiPrefs();
     this.applyTheme(window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light', { persist: false });
     this.fillSettingsForm(this.app.settings);
     this.onSettingsChanged(previous, this.app.settings);
-    this.notifier.log('warn', 'settings', 'Reset all settings to the embedded defaults.');
-    showToast('All settings were reset to the embedded defaults.', 'success');
+    this.notifier.log('warn', 'settings', 'Reset all settings to the server defaults.');
+    showToast('All settings were reset to the server defaults.', 'success');
   }
 
   /* ======================================================= orchestration */
@@ -6286,7 +5954,7 @@ class UIController {
  * ========================================================================== */
 const app = {
   settings: null,
-  settingsSource: 'embedded',
+  settingsSource: 'defaults',
   /** @type {StorageService} */ storage: null,
   /** @type {NotificationService} */ notifier: null,
   /** @type {ValidationService} */ validation: null,
@@ -6374,22 +6042,21 @@ function validateSettings(settings = app.settings, options = {}) {
 }
 
 /**
- * Validates the Buffer token and loads channels; caches the result for Live mode.
- * @param {{mode?: 'demo'|'live', settings?: object, signal?: AbortSignal, onRetry?: Function}} [options]
+ * Has the server validate its Buffer token and load the channels, then caches
+ * the result in this browser for the channel picker.
+ * @param {{mode?: 'demo'|'live', signal?: AbortSignal, onRetry?: Function}} [options]
  * @returns {Promise<{account: object, channels: object[]}>}
  */
 async function connectToBuffer(options = {}) {
-  const mode = options.mode || app.settings.mode;
-  const service = app.bufferFor(mode);
-  const settings = options.settings || app.settings;
-  const connection = await service.connectToBuffer({ ...options, settings });
-  service.saveConnection(connection, settings);
+  const service = app.bufferFor(options.mode || app.settings.mode);
+  const connection = await service.connectToBuffer(options);
+  service.saveConnection(connection);
   return connection;
 }
 
 /**
- * Checks the Buffer personal access token.
- * @param {{settings?: object, signal?: AbortSignal, onRetry?: Function}} [options]
+ * Checks the Buffer personal access token configured on the server.
+ * @param {{signal?: AbortSignal, onRetry?: Function}} [options]
  */
 function validateBufferToken(options = {}) {
   return app.getBuffer().validateBufferToken(options);
@@ -6431,20 +6098,20 @@ function saveSettings(nextSettings) {
 }
 
 /**
- * Loads settings: saved values merged over the embedded CONFIG defaults.
- * Falls back to the embedded defaults if nothing (or nothing readable) is saved.
+ * Loads preferences: values saved in this browser merged over the server
+ * defaults. Falls back to the defaults if nothing (or nothing readable) is saved.
  * @returns {object}
  */
 function loadSettings() {
   const defaults = SettingsModel.defaults();
   const stored = app.storage.get(STORAGE_KEYS.settings, null);
   if (stored === null) {
-    app.settingsSource = 'embedded';
+    app.settingsSource = 'defaults';
     return defaults;
   }
   if (!isPlainObject(stored)) {
-    app.settingsSource = 'embedded';
-    app.notifier.log('warn', 'settings', 'Saved settings were unreadable; using the embedded configuration.');
+    app.settingsSource = 'defaults';
+    app.notifier.log('warn', 'settings', 'Saved settings were unreadable; using the server defaults.');
     return defaults;
   }
   app.settingsSource = 'storage';
@@ -6452,16 +6119,15 @@ function loadSettings() {
 }
 
 /**
- * Downloads settings as JSON. Credentials are blanked unless requested.
- * @param {object} [settings] @param {{includeCredentials?: boolean}} [options]
+ * Downloads the browser preferences as JSON. Credentials and endpoints live
+ * on the server, so they are never part of an export.
+ * @param {object} [settings]
  * @returns {object} the exported document
  */
-function exportConfig(settings = app.settings, { includeCredentials = false } = {}) {
-  const data = SettingsModel.normalize(settings);
-  if (!includeCredentials) for (const key of SettingsModel.credentialKeys) data[key] = '';
-  const payload = { app: 'Poster', version: APP_VERSION, exportedAt: new Date().toISOString(), includesCredentials: includeCredentials, settings: data };
+function exportConfig(settings = app.settings) {
+  const payload = { app: 'Poster', version: APP_VERSION, exportedAt: new Date().toISOString(), settings: SettingsModel.normalize(settings) };
   downloadFile(`poster-settings-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(payload, null, 2));
-  app.notifier.log('info', 'settings', `Exported settings ${includeCredentials ? 'including credentials' : 'without credentials'}.`);
+  app.notifier.log('info', 'settings', 'Exported settings (credentials stay on the server).');
   return payload;
 }
 
@@ -6528,7 +6194,7 @@ function bootstrap() {
   });
   app.ui = new UIController(app);
   app.ui.init();
-  app.notifier.log('info', 'system', `Poster ${APP_VERSION} started in ${app.settings.mode === 'demo' ? 'Demo' : 'Live'} mode using ${app.settingsSource === 'storage' ? 'saved settings' : 'the embedded configuration'}.`);
+  app.notifier.log('info', 'system', `Poster ${APP_VERSION} started in ${app.settings.mode === 'demo' ? 'Demo' : 'Live'} mode using ${app.settingsSource === 'storage' ? 'saved settings' : 'the server defaults'}.`);
 
   window.addEventListener('error', (event) => {
     const message = event.error?.message || event.message || 'Unknown error';
@@ -6554,6 +6220,7 @@ try {
   box.textContent = `Poster could not start: ${error && error.message ? error.message : error}. Try "Reset All Settings" by clearing this site's data, or check the browser console.`;
   if (main) main.prepend(box); else document.body.prepend(box);
 }
+{% endraw %}
 </script>
 </body>
 </html>
