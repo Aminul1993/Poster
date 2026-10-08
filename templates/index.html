@@ -3365,7 +3365,23 @@ class BufferService {
       return manual;
     }
     if (item.uploadedUrl) return item.uploadedUrl;
-    if (SERVER.media.configured) {
+    if (SERVER.media.configured) return this.saveToMediaHost(item, { signal, onRetry });
+    if (s.requireMedia) {
+      throw new ApiError(`"${item.name}" has no public image URL. Buffer attaches images from public URLs: paste one in the editor, or set BLOB_READ_WRITE_TOKEN (Vercel Blob) or MEDIA_UPLOAD_ENDPOINT on the server.`, { kind: 'validation', service: 'Buffer' });
+    }
+    return null;
+  }
+
+  /**
+   * Uploads the image to the server's media host (Vercel Blob or an upload
+   * endpoint) and returns its public URL. A call for an image that is already
+   * uploading shares that upload, so each image is stored once.
+   * @param {object} item
+   * @param {{signal?: AbortSignal, onRetry?: Function}} [ctx]
+   * @returns {Promise<string>}
+   */
+  saveToMediaHost(item, { signal, onRetry } = {}) {
+    item.pendingUpload ??= (async () => {
       const upload = await prepareUploadImage(item);
       const form = new FormData();
       form.append(API_CONFIG.mediaFileField, upload.blob, upload.name);
@@ -3376,11 +3392,8 @@ class BufferService {
         throw new ApiError('The media host did not return a public https:// URL.', { kind: 'parse', service: 'Media host' });
       }
       return data.url;
-    }
-    if (s.requireMedia) {
-      throw new ApiError(`"${item.name}" has no public image URL. Buffer attaches images from public URLs: paste one in the editor, or set BLOB_READ_WRITE_TOKEN (Vercel Blob) or MEDIA_UPLOAD_ENDPOINT on the server.`, { kind: 'validation', service: 'Buffer' });
-    }
-    return null;
+    })().finally(() => { item.pendingUpload = null; });
+    return item.pendingUpload;
   }
 
   /**
@@ -4542,8 +4555,8 @@ class UIController {
     const mediaHint = byId('ed-media-hint');
     if (item.mediaUrl) mediaHint.textContent = 'This URL is attached to the post in Buffer.';
     else if (item.uploadedUrl) mediaHint.textContent = `Uploaded earlier: ${truncate(item.uploadedUrl, 70)}`;
+    else if (SERVER.media.configured) mediaHint.textContent = `Leave empty to use the copy saved to ${SERVER.media.host || 'the media host'}.`;
     else if (s.mode === 'demo') mediaHint.textContent = 'Demo mode simulates hosting. In Live mode, Buffer needs a public URL or a media host.';
-    else if (SERVER.media.configured) mediaHint.textContent = `Leave empty to upload this image to ${SERVER.media.host || 'the media host'} when scheduling.`;
     else mediaHint.textContent = 'Buffer attaches images from public URLs. Paste one here; no media host is configured on the server.';
 
     const text = this.scheduler.composeText(item);
@@ -4810,6 +4823,7 @@ class UIController {
 
     if (accepted.length) {
       this.store.add(accepted);
+      this.saveToMediaHost(accepted);
       const restored = accepted.filter((i) => i.restored);
       this.notifier.log('success', 'upload', `Added ${pluralize(accepted.length, 'image')} to the gallery.`, accepted.map((i) => `${i.name} (${formatBytes(i.size)})`).join(', '));
       if (restored.length) this.notifier.log('info', 'upload', `Restored saved content for ${pluralize(restored.length, 'image')}.`, restored.map((i) => i.name).join(', '));
@@ -4820,6 +4834,32 @@ class UIController {
       for (const e of errors) this.notifier.log('warn', 'upload', `Rejected "${e.name}": ${e.message}`);
       showToast(`${pluralize(errors.length, 'file')} could not be added. See the details under the upload area.`, accepted.length ? 'warning' : 'error');
     }
+  }
+
+  /**
+   * Saves newly added images to the server's media host in the background, in
+   * Live and Demo mode alike. A failed upload is tried again when the post is
+   * scheduled.
+   * @param {object[]} items
+   */
+  async saveToMediaHost(items) {
+    if (!SERVER.media.configured) return;
+    const host = SERVER.media.host || 'the media host';
+    const queue = items.filter((item) => !item.mediaUrl && !item.uploadedUrl);
+    const next = async () => {
+      while (queue.length) {
+        const item = queue.shift();
+        if (!this.store.get(item.id)) continue;
+        try {
+          const url = await this.app.liveBuffer.saveToMediaHost(item);
+          if (this.store.get(item.id)) this.store.update(item.id, { uploadedUrl: url }, { reason: 'status' });
+          this.notifier.log('success', 'upload', `Saved "${item.name}" to ${host}.`, url);
+        } catch (error) {
+          this.notifier.log('warn', 'upload', `Could not save "${item.name}" to ${host}: ${error?.message || error}`, 'Scheduling tries the upload again.');
+        }
+      }
+    };
+    await Promise.all([next(), next()]);
   }
 
   showUploadErrors(errors, total) {
