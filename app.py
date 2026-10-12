@@ -1,10 +1,12 @@
 """Poster: Flask backend for AI social media publishing.
 
-This file does three jobs:
+This file does four jobs:
 
 * serves the dashboard (``templates/index.html``),
 * talks to Ollama: one image in; a caption, an alternative caption, hashtags,
   a category and an engagement score out,
+* optionally talks to Pollinations: a written description in, an image out,
+  as an alternative to uploading one,
 * talks to Buffer's GraphQL API (token check, channels, scheduled posts) and,
   optionally, to a media host that turns uploads into public image URLs
   (Vercel Blob, or an upload endpoint such as a Cloudinary unsigned preset).
@@ -37,7 +39,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 import requests
 from flask import Flask, g, jsonify, render_template, request
@@ -105,9 +107,11 @@ CONFIG: dict[str, Any] = {
     "BLOB_READ_WRITE_TOKEN": _env("BLOB_READ_WRITE_TOKEN"),
     "BLOB_STORE_ID": _env("BLOB_STORE_ID"),
     "BLOB_API_URL": _env("VERCEL_BLOB_API_URL", "https://vercel.com/api/blob"),
+    "POLLINATIONS_API_KEY": _env("POLLINATIONS_API_KEY"),
     "OLLAMA_TIMEOUT": _env_int("OLLAMA_TIMEOUT", 120, 10, 600),
     "BUFFER_TIMEOUT": _env_int("BUFFER_TIMEOUT", 30, 5, 120),
     "MEDIA_TIMEOUT": _env_int("MEDIA_TIMEOUT", 120, 10, 600),
+    "POLLINATIONS_TIMEOUT": _env_int("POLLINATIONS_TIMEOUT", 60, 10, 600),
     "MODE": _env("POSTER_MODE", "auto").lower(),  # auto | demo | live
     "HOST": _env("POSTER_HOST", "127.0.0.1"),
     "PORT": _env_int("POSTER_PORT", 5000, 1, 65535),
@@ -143,6 +147,11 @@ API: dict[str, Any] = {
         "blob_api_version": "12",
         "blob_folder": "poster",
     },
+    "image_gen": {
+        "url": "https://gen.pollinations.ai/image",
+        # Shapes offered in the browser, as (width, height) in pixels.
+        "aspects": {"square": (1024, 1024), "portrait": (1024, 1280), "landscape": (1280, 720), "story": (720, 1280)},
+    },
     "retry": {
         "max_retries": 3,
         "delays": (1, 2, 4),
@@ -162,6 +171,8 @@ LIMITS = {
     "max_hashtags": 15,
     "max_extra_chars": 500,
     "max_caption_chars": 10_000,
+    "min_prompt_chars": 3,
+    "max_prompt_chars": 1000,
 }
 
 TONES = {
@@ -322,6 +333,14 @@ class HttpClient:
 
     def request(self, method: str, url: str, *, service: str, timeout: int, **kwargs: Any) -> tuple[int, Any, str]:
         """Sends one request. Returns (status, parsed JSON or None, raw text)."""
+        response = self._send(method, url, service=service, timeout=timeout, **kwargs)
+        return response.status_code, self._parse_json(response), response.text
+
+    def request_bytes(self, method: str, url: str, *, service: str, timeout: int, **kwargs: Any) -> bytes:
+        """Sends one request and returns the raw response body (for images)."""
+        return self._send(method, url, service=service, timeout=timeout, **kwargs).content
+
+    def _send(self, method: str, url: str, *, service: str, timeout: int, **kwargs: Any) -> requests.Response:
         host = urlparse(url).netloc
         try:
             response = self._session().request(method, url, timeout=(min(10, timeout), timeout), **kwargs)
@@ -334,14 +353,16 @@ class HttpClient:
         except requests.RequestException as exc:
             raise ServiceError(f"The request to {service} failed ({exc.__class__.__name__}).", kind="network",
                                service=service) from exc
-        text = response.text
-        try:
-            data = response.json() if text else None
-        except ValueError:
-            data = None
         if not response.ok:
-            raise self._http_error(response, data, text, service)
-        return response.status_code, data, text
+            raise self._http_error(response, self._parse_json(response), response.text, service)
+        return response
+
+    @staticmethod
+    def _parse_json(response: requests.Response) -> Any:
+        try:
+            return response.json() if response.text else None
+        except ValueError:
+            return None
 
     @staticmethod
     def _http_error(response: requests.Response, data: Any, text: str, service: str) -> ServiceError:
@@ -1016,6 +1037,81 @@ class MediaService:
 
 
 # =============================================================================
+# Image generation (Pollinations)
+# =============================================================================
+
+class ImageGenService:
+    """Text-to-image through Pollinations, as an alternative to uploading a photo."""
+
+    service = "Pollinations"
+
+    def __init__(self, http: HttpClient, config: dict[str, Any]) -> None:
+        self.http = http
+        self.api_key = "" if is_placeholder(config["POLLINATIONS_API_KEY"]) else config["POLLINATIONS_API_KEY"]
+        self.timeout = config["POLLINATIONS_TIMEOUT"]
+        self.problem = self._check_config()
+
+    def _check_config(self) -> str | None:
+        if not self.api_key:
+            return "POLLINATIONS_API_KEY is not set."
+        if re.search(r"\s", self.api_key):
+            return "POLLINATIONS_API_KEY contains whitespace."
+        return None
+
+    @property
+    def configured(self) -> bool:
+        return self.problem is None
+
+    def require_configured(self) -> None:
+        if self.problem:
+            raise ServiceError(f"Image generation is not configured on the server: {self.problem}", kind="config",
+                               service=self.service,
+                               hint="Get a free key at enter.pollinations.ai, set it in the environment or .env file and restart Poster.")
+
+    def public_info(self) -> dict[str, Any]:
+        retry = API["retry"]
+        return {
+            "configured": self.configured, "problem": self.problem, "host": urlparse(API["image_gen"]["url"]).netloc,
+            "aspects": {name: list(size) for name, size in API["image_gen"]["aspects"].items()},
+            "maxPromptChars": LIMITS["max_prompt_chars"],
+            "requestTimeout": self.timeout * (retry["max_retries"] + 1) + sum(retry["delays"]) + 10,
+        }
+
+    def headers(self) -> dict[str, str]:
+        # The API key goes in a Bearer header; without it Pollinations answers 401.
+        return {"Authorization": f"Bearer {self.api_key}"}
+
+    @staticmethod
+    def build_url(prompt: str, width: int, height: int, seed: int) -> str:
+        """Pollinations takes the prompt in the URL path and the options in the query string."""
+        params = urlencode({"width": width, "height": height, "seed": seed, "nologo": "true"})
+        # Encode every special character, "/" included, so the prompt stays one path segment.
+        return f"{API['image_gen']['url']}/{quote(prompt, safe='')}?{params}"
+
+    def generate(self, prompt: str, aspect: str, on_retry: RetryCallback) -> dict[str, Any]:
+        """Generates one image and returns it as Base64."""
+        self.require_configured()
+        width, height = API["image_gen"]["aspects"][aspect]
+        # Pollinations caches by URL and the browser rejects identical files, so every call
+        # gets a new random seed. Retries reuse the URL, so they ask for the same image.
+        seed = secrets.randbelow(2**31)
+        url = self.build_url(prompt, width, height, seed)
+        data = retry_request(
+            lambda: self.http.request_bytes("GET", url, service=self.service, timeout=self.timeout, headers=self.headers()),
+            on_retry=on_retry,
+        )
+        mimetype = sniff_image(data)
+        if not mimetype:
+            raise ServiceError("Pollinations did not return an image.", kind="parse", service=self.service,
+                               details=truncate(data[:300].decode("utf-8", "replace"), 300))
+        if len(data) > LIMITS["max_image_bytes"]:
+            raise ServiceError("The generated image is larger than 20 MB.", kind="parse", service=self.service)
+        log.info("Generated a %dx%d image (%d bytes)", width, height, len(data))
+        return {"image": base64.b64encode(data).decode("ascii"), "mimeType": mimetype,
+                "width": width, "height": height, "seed": seed}
+
+
+# =============================================================================
 # Request validation
 # =============================================================================
 
@@ -1065,6 +1161,24 @@ def parse_generation_options(body: dict[str, Any]) -> GenerationOptions:
     if desc_min >= desc_max:
         raise ServiceError("descMax must be greater than descMin.", kind="validation")
     return GenerationOptions(model=model.strip(), tone=tone, extra=extra.strip(), desc_min=desc_min, desc_max=desc_max)
+
+
+def parse_prompt(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ServiceError('"prompt" must be text describing the image.', kind="validation")
+    prompt = re.sub(r"\s+", " ", value).strip()
+    if len(prompt) < LIMITS["min_prompt_chars"]:
+        raise ServiceError("Describe the image in a few words.", kind="validation")
+    if len(prompt) > LIMITS["max_prompt_chars"]:
+        raise ServiceError(f"The description must be at most {LIMITS['max_prompt_chars']} characters.", kind="validation")
+    return prompt
+
+
+def parse_aspect(value: Any) -> str:
+    aspect = value or "square"
+    if not isinstance(aspect, str) or aspect not in API["image_gen"]["aspects"]:
+        raise ServiceError(f'"aspect" must be one of: {", ".join(API["image_gen"]["aspects"])}.', kind="validation")
+    return aspect
 
 
 def parse_image_b64(value: Any) -> str:
@@ -1141,6 +1255,7 @@ http = HttpClient()
 ollama = OllamaService(http, CONFIG)
 buffer = BufferService(http, CONFIG)
 media = MediaService(http, CONFIG)
+image_gen = ImageGenService(http, CONFIG)
 
 
 def default_mode() -> str:
@@ -1157,6 +1272,7 @@ def server_config() -> dict[str, Any]:
         "ollama": ollama.public_info(),
         "buffer": buffer.public_info(),
         "media": media.public_info(),
+        "imageGen": image_gen.public_info(),
         "limits": {"maxImageBytes": LIMITS["max_image_bytes"], "maxUploadBytes": LIMITS["max_upload_bytes"],
                    "maxChannels": LIMITS["max_channels"]},
     }
@@ -1244,7 +1360,8 @@ def index() -> Any:
 
 @app.get("/api/health")
 def health() -> Any:
-    return jsonify(status="ok", version=APP_VERSION, ollama=ollama.configured, buffer=buffer.configured, media=media.configured)
+    return jsonify(status="ok", version=APP_VERSION, ollama=ollama.configured, buffer=buffer.configured, media=media.configured,
+                   imageGen=image_gen.configured)
 
 
 @app.get("/api/config")
@@ -1265,6 +1382,14 @@ def ollama_generate() -> Any:
     image_b64 = parse_image_b64(body.get("image"))
     name = str(body.get("fileName") or "image")[:200]
     return run(f"Ollama generate ({name})", lambda retries: ollama.generate(image_b64, opts, retries))
+
+
+@app.post("/api/image/generate")
+def image_generate() -> Any:
+    body = json_body()
+    prompt = parse_prompt(body.get("prompt"))
+    aspect = parse_aspect(body.get("aspect"))
+    return run("Image generate", lambda retries: image_gen.generate(prompt, aspect, retries))
 
 
 @app.post("/api/buffer/validate")
@@ -1307,7 +1432,7 @@ def media_upload() -> Any:
 
 
 def log_startup() -> None:
-    for name, service in (("Ollama", ollama), ("Buffer", buffer), ("Media host", media)):
+    for name, service in (("Ollama", ollama), ("Buffer", buffer), ("Media host", media), ("Pollinations", image_gen)):
         if service.configured:
             log.info("%s: configured", name)
         else:

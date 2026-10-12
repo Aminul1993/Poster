@@ -1,8 +1,8 @@
 # Poster
 
-Upload images, generate captions, hashtags, a category and an engagement score with an Ollama vision model, then schedule the posts through Buffer.
+Upload images (or generate them from a description), generate captions, hashtags, a category and an engagement score with an Ollama vision model, then schedule the posts through Buffer.
 
-- `app.py`: Flask server. It holds the credentials and handles every call to Ollama, Buffer and the optional media host.
+- `app.py`: Flask server. It holds the credentials and handles every call to Ollama, Buffer, Pollinations and the optional media host.
 - `templates/index.html`: the dashboard (HTML, CSS and JavaScript). It only talks to `app.py`.
 
 ## Run
@@ -10,7 +10,7 @@ Upload images, generate captions, hashtags, a category and an engagement score w
 ```bash
 pip install -r requirements.txt
 cp .env.example .env        # Windows: copy .env.example .env
-# edit .env: OLLAMA_API_KEY, BUFFER_ACCESS_TOKEN, optionally MEDIA_UPLOAD_ENDPOINT
+# edit .env: OLLAMA_API_KEY, BUFFER_ACCESS_TOKEN, optionally POLLINATIONS_API_KEY and MEDIA_UPLOAD_ENDPOINT
 python app.py               # http://127.0.0.1:5000
 ```
 
@@ -18,6 +18,7 @@ Without credentials, Poster starts in **Demo mode**, where AI and scheduling are
 
 ## Notes
 
+- The **Add images** card has two modes: **Upload** (drag and drop, browse or paste) and **Generate with AI** (describe the image, pick a shape, and Pollinations creates it). Generated images join the gallery exactly like uploads. Generation needs `POLLINATIONS_API_KEY` (free at enter.pollinations.ai); in Demo mode it draws a placeholder instead.
 - Buffer attaches images only from public URLs. Set `BLOB_READ_WRITE_TOKEN` to upload them to a public Vercel Blob store, or configure another media host (for example a Cloudinary unsigned upload preset), or paste a public image URL per post in the editor.
 - On Vercel, request bodies are capped at 4.5 MB, so the browser re-encodes images over 4 MB as smaller JPEGs before uploading them.
 - Server-side calls retry timeouts, network errors and HTTP 429/5xx three times (1 s, 2 s, 4 s). Buffer post creation is retried only on 429/503, so a post is never created twice.

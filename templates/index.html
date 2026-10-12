@@ -365,6 +365,10 @@ fieldset:disabled .tag-editor { opacity: .6; }
 .capacity { margin-top: 14px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
 .capacity .progress { flex: 1; margin: 0; height: 6px; }
 .upload-busy { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 13px; color: var(--text-2); }
+.generator { display: flex; flex-direction: column; gap: 14px; }
+.generator-actions { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.generator-actions .field { flex: 0 1 200px; }
+.generator .hint.is-warning { color: var(--warning); }
 .notice {
   margin-top: 14px; border-radius: 10px; padding: 12px 14px; font-size: 13px;
   border: 1px solid var(--danger-border); background: var(--danger-soft);
@@ -933,15 +937,43 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
       <section class="card" id="upload-section" aria-labelledby="upload-title">
         <div class="card-header">
           <div>
-            <h2 class="card-title" id="upload-title"><svg class="icon"><use href="#i-upload-cloud"/></svg>Upload images</h2>
-            <p class="card-sub">JPG, JPEG, PNG or WEBP · up to 20 MB each · maximum 25 images</p>
+            <h2 class="card-title" id="upload-title"><svg class="icon"><use href="#i-upload-cloud"/></svg>Add images</h2>
+            <p class="card-sub" id="upload-sub">JPG, JPEG, PNG or WEBP · up to 20 MB each · maximum 25 images</p>
+          </div>
+          <div class="segmented" role="radiogroup" aria-label="How to add images">
+            <label><input type="radio" name="image-source" value="upload" checked><span>Upload</span></label>
+            <label><input type="radio" name="image-source" value="generate"><span>Generate with AI</span></label>
           </div>
         </div>
         <div class="card-body">
-          <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-describedby="dropzone-hint" aria-label="Upload images: drag and drop files or press Enter to browse">
-            <div class="dropzone-icon"><svg class="icon"><use href="#i-image"/></svg></div>
-            <div class="dropzone-title">Drag &amp; drop images here, or <span class="link">browse files</span></div>
-            <div class="dropzone-hint" id="dropzone-hint">Select several at once. You can also paste images from the clipboard.</div>
+          <div id="source-upload">
+            <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-describedby="dropzone-hint" aria-label="Upload images: drag and drop files or press Enter to browse">
+              <div class="dropzone-icon"><svg class="icon"><use href="#i-image"/></svg></div>
+              <div class="dropzone-title">Drag &amp; drop images here, or <span class="link">browse files</span></div>
+              <div class="dropzone-hint" id="dropzone-hint">Select several at once. You can also paste images from the clipboard.</div>
+            </div>
+          </div>
+          <div class="generator" id="source-generate" hidden>
+            <div class="field">
+              <div class="label"><label for="imggen-prompt">Describe the image</label><span class="counter" id="imggen-count">0 / 1000</span></div>
+              <textarea class="textarea" id="imggen-prompt" rows="3" placeholder="e.g. A cosy coffee shop at sunrise, warm light, film photography" aria-describedby="imggen-hint imggen-error"></textarea>
+              <p class="hint" id="imggen-hint">Name the subject, setting, light and style. Ctrl+Enter generates.</p>
+            </div>
+            <div class="generator-actions">
+              <div class="field">
+                <label class="label" for="imggen-aspect">Shape</label>
+                <select class="select" id="imggen-aspect">
+                  <option value="square">Square 1:1</option>
+                  <option value="portrait">Portrait 4:5</option>
+                  <option value="landscape">Landscape 16:9</option>
+                  <option value="story">Story 9:16</option>
+                </select>
+              </div>
+              <button type="button" class="btn btn-primary" id="imggen-button"><svg class="icon"><use href="#i-sparkles"/></svg><span id="imggen-button-label">Generate image</span></button>
+              <button type="button" class="btn btn-ghost" id="imggen-cancel" hidden>Cancel</button>
+            </div>
+            <p class="error-text" id="imggen-error" role="alert" hidden></p>
+            <p class="hint" id="imggen-status" role="status"></p>
           </div>
           <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" multiple hidden>
           <div class="capacity" aria-hidden="true">
@@ -977,7 +1009,7 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
         <div class="empty" id="gallery-empty">
           <div class="empty-icon"><svg class="icon"><use href="#i-images"/></svg></div>
           <p class="empty-title">No images yet</p>
-          <p>Upload up to 25 photos. Poster writes captions and hashtags for each one, then schedules them through Buffer.</p>
+          <p>Upload or generate up to 25 images. Poster writes captions and hashtags for each one, then schedules them through Buffer.</p>
         </div>
       </section>
     </div>
@@ -1394,11 +1426,12 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
  *   ValidationService    images, captions, hashtags, schedules, settings, imports
  *   ApiService           fetch to the Poster server: timeouts, cancellation, errors
  *   OllamaService        image → caption/hashtags/category/score (/api/ollama/*)
+ *   ImageGenService      description → image, instead of an upload (/api/image/generate)
  *   BufferService        token check, channels, media URLs, posts (/api/buffer/*)
  *   SchedulerService     bulk runs with progress, cancellation and statistics
  *   UIController         DOM rendering and event wiring
- * Demo mode swaps OllamaService/BufferService for simulated subclasses that
- * never contact the server.
+ * Demo mode swaps OllamaService/ImageGenService/BufferService for simulated
+ * subclasses that never contact the server.
  * ========================================================================== */
 'use strict';
 
@@ -1415,6 +1448,7 @@ const SERVER = (() => {
     ollama: { configured: false, problem: missing, model: 'gemma4:31b', host: '', timeout: 120, requestTimeout: 1000 },
     buffer: { configured: false, problem: missing, tokenId: '', host: '', timeout: 30, requestTimeout: 160 },
     media: { configured: false, problem: missing, host: '', requestTimeout: 500 },
+    imageGen: { configured: false, problem: missing, host: '', aspects: {}, maxPromptChars: 1000, requestTimeout: 260 },
     limits: {}
   };
   try {
@@ -1425,7 +1459,8 @@ const SERVER = (() => {
       ...parsed,
       ollama: { ...fallback.ollama, ...parsed.ollama },
       buffer: { ...fallback.buffer, ...parsed.buffer },
-      media: { ...fallback.media, ...parsed.media }
+      media: { ...fallback.media, ...parsed.media },
+      imageGen: { ...fallback.imageGen, ...parsed.imageGen }
     };
   } catch {
     return fallback;
@@ -1444,7 +1479,8 @@ const API_CONFIG = Object.freeze({
     bufferValidate: '/api/buffer/validate',
     bufferConnect: '/api/buffer/connect',
     bufferSchedule: '/api/buffer/schedule',
-    mediaUpload: '/api/media/upload'
+    mediaUpload: '/api/media/upload',
+    imageGenerate: '/api/image/generate'
   }),
   /** Multipart field the server reads the image from. */
   mediaFileField: 'file',
@@ -1452,7 +1488,8 @@ const API_CONFIG = Object.freeze({
     testMs: 90000,
     generateMs: SERVER.ollama.requestTimeout * 1000,
     bufferMs: SERVER.buffer.requestTimeout * 1000,
-    mediaMs: SERVER.media.requestTimeout * 1000
+    mediaMs: SERVER.media.requestTimeout * 1000,
+    imageGenMs: SERVER.imageGen.requestTimeout * 1000
   }),
   retry: Object.freeze({
     maxRetries: 3,
@@ -1478,7 +1515,9 @@ const LIMITS = Object.freeze({
   maxLogEntries: 300,
   maxSchedules: 200,
   maxDrafts: 150,
-  maxExtraInstructions: 500
+  maxExtraInstructions: 500,
+  minPromptChars: 3,
+  maxPromptChars: Number(SERVER.imageGen.maxPromptChars) || 1000
 });
 
 /** localStorage keys (namespaced by StorageService). */
@@ -3201,6 +3240,133 @@ class DemoOllamaService extends OllamaService {
 }
 
 /* ==========================================================================
+ * ImageGenService — text-to-image through the Poster server
+ * ========================================================================== */
+
+/**
+ * Wraps generated image data in a File named after the description, so it
+ * joins the gallery like an upload (and Demo captions can use its words).
+ * @param {BlobPart} data @param {string} prompt @param {string} mimeType
+ * @returns {File}
+ */
+function generatedImageFile(data, prompt, mimeType) {
+  const words = prompt.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').match(/[\p{L}\p{M}\p{N}]+/gu) || [];
+  let slug = '';
+  for (const word of words) {
+    if (slug.length + word.length + 1 > 48) break;
+    slug = slug ? `${slug}-${word}` : word;
+  }
+  const ext = { 'image/png': 'png', 'image/webp': 'webp' }[mimeType] || 'jpg';
+  return new File([data], `ai-${slug || 'image'}.${ext}`, { type: mimeType, lastModified: Date.now() });
+}
+
+/**
+ * Sends a description to /api/image/generate. The server calls Pollinations
+ * with retries and returns the image as Base64.
+ */
+class ImageGenService {
+  /** @param {{api: ApiService}} deps */
+  constructor({ api }) {
+    this.api = api;
+  }
+
+  /** @returns {boolean} */
+  get isDemo() { return false; }
+
+  /** @returns {boolean} whether generateImage() can run */
+  get available() { return SERVER.imageGen.configured; }
+
+  /** @throws {ApiError} kind "config" when the server has no Pollinations key */
+  assertConfigured() {
+    if (!this.available) {
+      throw new ApiError(`Image generation is not set up on the server: ${SERVER.imageGen.problem}`, {
+        kind: 'config', service: 'Pollinations', hint: 'Add POLLINATIONS_API_KEY to the .env file next to app.py and restart Poster.'
+      });
+    }
+  }
+
+  /**
+   * Generates one image from a description.
+   * @param {string} prompt what the image should show
+   * @param {string} aspect square | portrait | landscape | story
+   * @param {{signal?: AbortSignal, onRetry?: Function}} [ctx]
+   * @returns {Promise<File>}
+   */
+  async generateImage(prompt, aspect, { signal, onRetry } = {}) {
+    this.assertConfigured();
+    const data = await retryRequest(() => this.api.call(API_CONFIG.routes.imageGenerate, {
+      json: { prompt, aspect }, timeoutMs: API_CONFIG.timeouts.imageGenMs, signal, service: 'Pollinations', onRetry
+    }), { signal, onRetry });
+    if (typeof data.image !== 'string' || !LIMITS.allowedTypes.includes(data.mimeType)) {
+      throw new ApiError('The Poster server returned no image.', { kind: 'parse', service: 'Pollinations' });
+    }
+    const binary = atob(data.image);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return generatedImageFile(bytes, prompt, data.mimeType);
+  }
+}
+
+/** Demo-mode ImageGenService: draws a placeholder in the browser, no network. */
+class DemoImageGenService extends ImageGenService {
+  get isDemo() { return true; }
+
+  get available() { return true; }
+
+  /** @returns {Promise<File>} a gradient with the description written on it */
+  async generateImage(prompt, aspect, { signal } = {}) {
+    await sleep(900 + (hashString(prompt) % 900), signal);
+    const [width, height] = SERVER.imageGen.aspects[aspect] || [1024, 1024];
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    // Random colours and circles, so every run gives a new image (identical files are rejected as duplicates).
+    const hue = Math.floor(Math.random() * 360);
+    const gradient = ctx.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, `hsl(${hue}, 70%, 58%)`);
+    gradient.addColorStop(1, `hsl(${(hue + 50) % 360}, 65%, 32%)`);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    for (let i = 0; i < 14; i += 1) {
+      ctx.fillStyle = `hsla(${(hue + 30 + Math.random() * 60) % 360}, 80%, 75%, ${0.08 + Math.random() * 0.14})`;
+      ctx.beginPath();
+      ctx.arc(Math.random() * width, Math.random() * height, (0.05 + Math.random() * 0.2) * Math.min(width, height), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const size = Math.round(Math.min(width, height) / 16);
+    ctx.fillStyle = 'rgba(255, 255, 255, .94)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `600 ${size}px system-ui, sans-serif`;
+    const lines = DemoImageGenService.wrap(ctx, truncate(prompt, 140), width * 0.8);
+    lines.forEach((line, index) => ctx.fillText(line, width / 2, height / 2 + (index - (lines.length - 1) / 2) * size * 1.3));
+    ctx.font = `500 ${Math.round(size * 0.5)}px system-ui, sans-serif`;
+    ctx.fillText('Demo image · not AI-generated', width / 2, height - size * 1.4);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+    if (!blob) throw new ApiError('The demo image could not be drawn.', { kind: 'client', service: 'Pollinations' });
+    return generatedImageFile(blob, prompt, 'image/jpeg');
+  }
+
+  /** Splits text into lines that fit `maxWidth` in the context's current font. */
+  static wrap(ctx, text, maxWidth) {
+    const lines = [];
+    let line = '';
+    for (const word of text.split(' ')) {
+      const next = line ? `${line} ${word}` : word;
+      if (line && ctx.measureText(next).width > maxWidth) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = next;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+}
+
+/* ==========================================================================
  * BufferService — Buffer scheduling through the Poster server
  * ========================================================================== */
 
@@ -4071,6 +4237,8 @@ class UIController {
     this.dropTarget = null;
     this.dragDepth = 0;
     this.uploading = false;
+    /** @type {AbortController|null} set while an image is being generated */
+    this.imageGenController = null;
     this.health = { ollama: null, buffer: null };
     this.settingsChannelDraft = { live: [], demo: [] };
     this.settingsSnapshot = '';
@@ -4078,7 +4246,7 @@ class UIController {
     this.opTicker = null;
     this.lastOp = null;
     this.logRenderQueued = false;
-    this.ui = { logFilter: 'all', plannerOpen: false, planInterval: null };
+    this.ui = { logFilter: 'all', plannerOpen: false, planInterval: null, imageSource: 'upload', imageAspect: 'square' };
   }
 
   get settings() { return this.app.settings; }
@@ -4094,6 +4262,7 @@ class UIController {
     this.populateTimezones();
     this.bindHeader();
     this.bindUpload();
+    this.bindImageGenerator();
     this.bindGallery();
     this.bindOperations();
     this.bindEditor();
@@ -4138,7 +4307,11 @@ class UIController {
       if (['all', 'error', 'warn', 'success', 'user'].includes(stored.logFilter)) this.ui.logFilter = stored.logFilter;
       this.ui.plannerOpen = Boolean(stored.plannerOpen);
       if (Number.isInteger(stored.planInterval) && stored.planInterval > 0) this.ui.planInterval = stored.planInterval;
+      if (['upload', 'generate'].includes(stored.imageSource)) this.ui.imageSource = stored.imageSource;
+      if (['square', 'portrait', 'landscape', 'story'].includes(stored.imageAspect)) this.ui.imageAspect = stored.imageAspect;
     }
+    $(`input[name="image-source"][value="${this.ui.imageSource}"]`).checked = true;
+    byId('imggen-aspect').value = this.ui.imageAspect;
     byId('log-filter').value = this.ui.logFilter;
     byId('planner').open = this.ui.plannerOpen;
     byId('plan-interval').value = String(this.ui.planInterval || this.settings.intervalMinutes);
@@ -4153,6 +4326,7 @@ class UIController {
   renderAll() {
     this.renderHeader();
     this.renderKpis();
+    this.renderImageGenerator();
     this.renderGallery();
     this.renderOperations();
     this.renderEditor();
@@ -4772,12 +4946,13 @@ class UIController {
   /**
    * Validates and adds files to the gallery, reporting every rejection.
    * @param {File[]} files
+   * @returns {Promise<object[]>} the items that were added
    */
   async handleFiles(files) {
-    if (!files.length) return;
+    if (!files.length) return [];
     if (this.uploading) {
       showToast('Still processing the previous files. Try again in a moment.', 'warning');
-      return;
+      return [];
     }
     this.uploading = true;
     const busy = byId('upload-busy');
@@ -4820,6 +4995,7 @@ class UIController {
       for (const e of errors) this.notifier.log('warn', 'upload', `Rejected "${e.name}": ${e.message}`);
       showToast(`${pluralize(errors.length, 'file')} could not be added. See the details under the upload area.`, accepted.length ? 'warning' : 'error');
     }
+    return accepted;
   }
 
   showUploadErrors(errors, total) {
@@ -4828,6 +5004,125 @@ class UIController {
     byId('upload-errors-title').textContent = `${errors.length} of ${pluralize(total, 'file')} not added`;
     byId('upload-error-list').replaceChildren(...errors.map((e) => el('li', {}, [el('strong', { text: e.name }), ` — ${e.message}`])));
     box.hidden = false;
+  }
+
+  /* ------------------------------------------------------- image generator */
+
+  bindImageGenerator() {
+    for (const radio of document.querySelectorAll('input[name="image-source"]')) {
+      radio.addEventListener('change', () => {
+        if (!radio.checked) return;
+        this.ui.imageSource = radio.value;
+        this.saveUiPrefs();
+        this.renderImageGenerator();
+      });
+    }
+    const prompt = byId('imggen-prompt');
+    prompt.addEventListener('input', () => {
+      this.renderImageGenerator();
+      if (prompt.getAttribute('aria-invalid') === 'true') this.showImageGenError('');
+    });
+    prompt.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        this.generateImage();
+      }
+    });
+    byId('imggen-aspect').addEventListener('change', (event) => {
+      this.ui.imageAspect = event.target.value;
+      this.saveUiPrefs();
+    });
+    byId('imggen-button').addEventListener('click', () => this.generateImage());
+    byId('imggen-cancel').addEventListener('click', () => this.imageGenController?.abort());
+  }
+
+  /** Upload / Generate panels, plus the generator's counter, button and status line. */
+  renderImageGenerator() {
+    const generating = this.imageGenController !== null;
+    const source = this.ui.imageSource;
+    const demo = this.settings.mode === 'demo';
+    const full = this.store.count >= LIMITS.maxImages;
+    const service = this.app.getImageGen();
+    byId('source-upload').hidden = source !== 'upload';
+    byId('source-generate').hidden = source !== 'generate';
+    byId('upload-sub').textContent = source === 'upload'
+      ? `JPG, JPEG, PNG or WEBP · up to 20 MB each · maximum ${LIMITS.maxImages} images`
+      : `Describe a picture and AI creates it${demo ? ' (simulated in Demo mode)' : ''} · maximum ${LIMITS.maxImages} images`;
+
+    const length = byId('imggen-prompt').value.trim().length;
+    const counter = byId('imggen-count');
+    counter.textContent = `${length} / ${LIMITS.maxPromptChars}`;
+    counter.classList.toggle('is-over', length > LIMITS.maxPromptChars);
+
+    const button = byId('imggen-button');
+    button.disabled = generating || full || !service.available;
+    button.classList.toggle('is-loading', generating);
+    byId('imggen-button-label').textContent = generating ? 'Generating…' : 'Generate image';
+    byId('imggen-cancel').hidden = !generating;
+
+    const status = byId('imggen-status');
+    status.classList.toggle('is-warning', !generating && (full || !service.available));
+    if (generating) status.textContent = 'Creating your image. This usually takes 5–30 seconds.';
+    else if (!service.available) status.textContent = `Image generation is not set up on the server: ${SERVER.imageGen.problem} Get a free key at enter.pollinations.ai, add it to the .env file next to app.py and restart Poster.`;
+    else if (full) status.textContent = `The gallery is full (${LIMITS.maxImages} images). Remove an image to generate another.`;
+    else if (demo) status.textContent = 'Demo mode draws a placeholder instead of calling the image AI.';
+    else status.textContent = 'Images are created by Pollinations and added to the gallery like uploads. Each run makes a new image.';
+  }
+
+  /** @param {string} message empty hides the error @param {{invalid?: boolean}} [options] invalid marks the description field */
+  showImageGenError(message, { invalid = false } = {}) {
+    const node = byId('imggen-error');
+    node.textContent = message;
+    node.hidden = !message;
+    byId('imggen-prompt').setAttribute('aria-invalid', String(Boolean(message) && invalid));
+  }
+
+  /** Generates an image from the description and adds it to the gallery, like an upload. */
+  async generateImage() {
+    if (this.imageGenController) return;
+    const input = byId('imggen-prompt');
+    const prompt = input.value.replace(/\s+/g, ' ').trim();
+    let problem = '';
+    if (prompt.length < LIMITS.minPromptChars) problem = 'Describe the image in a few words first.';
+    else if (prompt.length > LIMITS.maxPromptChars) problem = `Shorten the description to ${LIMITS.maxPromptChars} characters or fewer.`;
+    this.showImageGenError(problem, { invalid: true });
+    if (problem) {
+      input.focus();
+      return;
+    }
+    if (this.store.count >= LIMITS.maxImages) {
+      showToast(`The gallery is full (${LIMITS.maxImages} images). Remove an image to add another.`, 'warning');
+      return;
+    }
+
+    const service = this.app.getImageGen();
+    const controller = new AbortController();
+    this.imageGenController = controller;
+    this.renderImageGenerator();
+    const started = Date.now();
+    this.notifier.log('info', 'image', `Generating an image${service.isDemo ? ' (demo)' : ''}: "${truncate(prompt, 80)}"`);
+    try {
+      const file = await service.generateImage(prompt, byId('imggen-aspect').value, {
+        signal: controller.signal,
+        onRetry: ({ attempt, maxRetries, delayMs, error }) => this.notifier.log('warn', 'retry', `Image generation: retry ${attempt}/${maxRetries} in ${delayMs / 1000}s (${error.message})`)
+      });
+      this.notifier.log('success', 'image', `Generated "${file.name}" (${formatBytes(file.size)}) in ${formatDuration(Date.now() - started)}.`);
+      // handleFiles() takes one batch at a time; wait for an upload that is still being checked.
+      while (this.uploading) await sleep(150);
+      const [item] = await this.handleFiles([file]);
+      if (item) this.store.setActive(item.id);
+    } catch (error) {
+      if (isCancelled(error)) {
+        this.notifier.log('info', 'image', 'Image generation cancelled.');
+      } else {
+        this.showImageGenError(error.hint ? `${error.message} ${error.hint}` : error.message);
+        this.notifier.log('error', 'image', `Image generation failed: ${error.message}`, error.hint || '');
+        showToast(error.message, 'error', { title: 'Image not generated' });
+      }
+    } finally {
+      this.imageGenController = null;
+      this.renderImageGenerator();
+    }
   }
 
   bindGallery() {
@@ -5200,6 +5495,7 @@ class UIController {
       const { reason, ids } = event.detail;
       this.renderGallery();
       this.renderKpis();
+      this.renderImageGenerator();
       this.renderOperations();
       const touchesActive = ids.includes(this.store.activeId) || ['active', 'remove', 'clear', 'add', 'reorder'].includes(reason);
       if (reason !== 'edit' && touchesActive) this.renderEditor();
@@ -5355,7 +5651,10 @@ class UIController {
   /** Called by saveSettings() after settings change. */
   onSettingsChanged(previous, next) {
     if (!previous) return;
-    if (previous.mode !== next.mode) this.notifier.log('info', 'settings', `Switched to ${next.mode === 'demo' ? 'Demo' : 'Live'} mode.`);
+    if (previous.mode !== next.mode) {
+      this.notifier.log('info', 'settings', `Switched to ${next.mode === 'demo' ? 'Demo' : 'Live'} mode.`);
+      this.showImageGenError('');
+    }
     if (previous.model !== next.model) this.health.ollama = null;
     if (previous.timezone !== next.timezone) byId('plan-start').value = '';
     this.renderAll();
@@ -5989,6 +6288,8 @@ const app = {
   /** @type {ApiService} */ api: null,
   /** @type {OllamaService} */ liveOllama: null,
   /** @type {DemoOllamaService} */ demoOllama: null,
+  /** @type {ImageGenService} */ liveImageGen: null,
+  /** @type {DemoImageGenService} */ demoImageGen: null,
   /** @type {BufferService} */ liveBuffer: null,
   /** @type {DemoBufferService} */ demoBuffer: null,
   /** @type {ImageStore} */ store: null,
@@ -5996,6 +6297,8 @@ const app = {
   /** @type {UIController} */ ui: null,
   /** @returns {OllamaService} the service for the current mode */
   getOllama() { return this.settings.mode === 'demo' ? this.demoOllama : this.liveOllama; },
+  /** @returns {ImageGenService} the service for the current mode */
+  getImageGen() { return this.settings.mode === 'demo' ? this.demoImageGen : this.liveImageGen; },
   /** @returns {BufferService} the service for the current mode */
   getBuffer() { return this.settings.mode === 'demo' ? this.demoBuffer : this.liveBuffer; },
   /** @param {'demo'|'live'} mode @returns {BufferService} */
@@ -6208,6 +6511,8 @@ function bootstrap() {
   const deps = { api: app.api, validation: app.validation, notifier: app.notifier, storage: app.storage, getSettings: () => app.settings };
   app.liveOllama = new OllamaService(deps);
   app.demoOllama = new DemoOllamaService(deps);
+  app.liveImageGen = new ImageGenService(deps);
+  app.demoImageGen = new DemoImageGenService(deps);
   app.liveBuffer = new BufferService(deps);
   app.demoBuffer = new DemoBufferService(deps);
   app.store = new ImageStore({ storage: app.storage });
