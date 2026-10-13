@@ -9,8 +9,8 @@ This file does four jobs:
   as an alternative to uploading one,
 * talks to Buffer's GraphQL API (token check, channels, scheduled posts) and,
   optionally, to a media host that turns uploads into public image URLs:
-  Vercel Blob, which stores a thumbnail and a Parquet copy of each image that
-  this server serves back to Buffer, or an upload endpoint such as a
+  Vercel Blob, which stores a thumbnail and a compressed AVIF copy of each
+  image that this server serves back to Buffer, or an upload endpoint such as a
   Cloudinary unsigned preset.
 
 Credentials stay on the server, in environment variables or a ``.env`` file
@@ -44,11 +44,9 @@ from pathlib import Path
 from typing import Any, Callable, TypeVar
 from urllib.parse import quote, urlencode, urlparse
 
-import pyarrow as pa
-import pyarrow.parquet as pq
 import requests
 from flask import Flask, g, jsonify, render_template, request, url_for
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, features
 from werkzeug.exceptions import HTTPException, NotFound
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -179,10 +177,17 @@ API: dict[str, Any] = {
         "blob_api_version": "12",
         "blob_folder": "poster",
         "blob_public_url": "https://{store_id}.public.blob.vercel-storage.com",
-        "parquet_mimetype": "application/vnd.apache.parquet",
-        "parquet_compression": "zstd",
+        # The stored copy: shrunk to fit avif_max_size, quality 0-100 (non-linear; 45-55 is very small with little
+        # visible loss), speed 0 (slowest, smallest file) to 10.
+        "avif_max_size": (1920, 1920),
+        "avif_quality": 48,
+        "avif_speed": 2,
+        # Buffer and the networks it posts to do not take AVIF, so /api/media/image/<name>.jpg converts the copy back.
+        "served_quality": 90,
+        # The stored thumbnail, also AVIF. At this size a faster speed costs almost nothing in file size.
         "thumbnail_size": (400, 400),
-        "thumbnail_quality": 80,
+        "thumbnail_quality": 60,
+        "thumbnail_speed": 6,
     },
     "image_gen": {
         "url": "https://gen.pollinations.ai/image",
@@ -1134,54 +1139,64 @@ class BufferService:
 
 
 # =============================================================================
-# Image packing (a thumbnail and a Parquet copy are stored instead of the original)
+# Image packing (a thumbnail and an AVIF copy are stored instead of the original)
 # =============================================================================
 
 IMAGE_EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+# Pillow's names for the formats /api/media/image/ serves.
+IMAGE_FORMATS = {"image/avif": "AVIF", "image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
 
-# The layout Hugging Face `datasets` writes for Features({"image_id": Value("string"), "image": Image()}),
-# so Dataset.from_parquet() reads these files back as PIL images.
-PARQUET_SCHEMA = pa.schema(
-    [("image_id", pa.string()), ("image", pa.struct([("bytes", pa.binary()), ("path", pa.string())]))],
-    metadata={"huggingface": json.dumps({"info": {"features": {
-        "image_id": {"dtype": "string", "_type": "Value"}, "image": {"_type": "Image"}}}})},
-)
+
+def open_upright(data: bytes, max_size: tuple[int, int]) -> Image.Image:
+    """The image shrunk to fit max_size and turned upright according to the photo's EXIF orientation."""
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image.thumbnail(max_size, Image.Resampling.LANCZOS)  # decodes large JPEGs at reduced size
+            return ImageOps.exif_transpose(image)  # a copy, so it outlives the file
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise ServiceError("The image could not be decoded.", kind="validation") from exc
+
+
+def on_white(image: Image.Image) -> Image.Image:
+    """The image as RGB, with transparency turned white, as in the thumbnails the browser makes."""
+    rgba = image.convert("RGBA")
+    return Image.alpha_composite(Image.new("RGBA", rgba.size, "white"), rgba).convert("RGB")
 
 
 def make_thumbnail(data: bytes) -> bytes:
-    """A small JPEG preview, turned upright according to the photo's EXIF orientation."""
-    try:
-        with Image.open(io.BytesIO(data)) as image:
-            image.thumbnail(API["media"]["thumbnail_size"])  # decodes large JPEGs at reduced size
-            upright = ImageOps.exif_transpose(image).convert("RGBA")
-            # Transparency goes white, as in the thumbnails the browser makes.
-            thumbnail = Image.alpha_composite(Image.new("RGBA", upright.size, "white"), upright).convert("RGB")
-    except (OSError, Image.DecompressionBombError) as exc:
-        raise ServiceError("The image could not be decoded.", kind="validation") from exc
+    """A small AVIF preview, turned upright according to the photo's EXIF orientation."""
+    thumbnail = on_white(open_upright(data, API["media"]["thumbnail_size"]))
     out = io.BytesIO()
-    thumbnail.save(out, "JPEG", quality=API["media"]["thumbnail_quality"], optimize=True)
+    thumbnail.save(out, "AVIF", quality=API["media"]["thumbnail_quality"], speed=API["media"]["thumbnail_speed"])
     return out.getvalue()
 
 
-def pack_parquet(image_id: str, filename: str, data: bytes) -> bytes:
-    """A one-row Parquet file that holds the image's bytes, not just its path."""
-    table = pa.Table.from_pylist([{"image_id": image_id, "image": {"bytes": data, "path": filename}}],
-                                 schema=PARQUET_SCHEMA)
-    sink = pa.BufferOutputStream()
-    pq.write_table(table, sink, compression=API["media"]["parquet_compression"])
-    return sink.getvalue().to_pybytes()
+def pack_avif(data: bytes) -> bytes:
+    """The image as a compressed AVIF file: shrunk to fit avif_max_size, upright, and without EXIF or XMP
+    metadata (the color profile stays)."""
+    image = open_upright(data, API["media"]["avif_max_size"])
+    image = image.convert("RGBA" if image.has_transparency_data else "RGB")
+    out = io.BytesIO()
+    image.save(out, "AVIF", quality=API["media"]["avif_quality"], speed=API["media"]["avif_speed"])
+    return out.getvalue()
 
 
-def unpack_parquet(data: bytes) -> bytes:
-    """The image bytes from a file written by pack_parquet()."""
+def unpack_avif(data: bytes, mimetype: str) -> bytes:
+    """A file written by pack_avif() as `mimetype`: AVIF as stored, or converted to JPEG, PNG or WEBP."""
+    if data[4:8] != b"ftyp" or data[8:12] not in (b"avif", b"avis"):
+        raise ServiceError("The stored file is not an AVIF image.", kind="parse", service="Media host")
+    if mimetype == "image/avif":
+        return data
+    out = io.BytesIO()
     try:
-        rows = pq.read_table(pa.BufferReader(data), columns=["image"]).column("image").to_pylist()
-    except pa.ArrowException as exc:
-        raise ServiceError("The stored Parquet file could not be read.", kind="parse", service="Media host") from exc
-    image = rows[0] if rows else None
-    if not isinstance(image, dict) or not isinstance(image.get("bytes"), bytes):
-        raise ServiceError("The stored Parquet file holds no image data.", kind="parse", service="Media host")
-    return image["bytes"]
+        with Image.open(io.BytesIO(data), formats=["AVIF"]) as image:
+            icc_profile = image.info.get("icc_profile")
+            if mimetype == "image/jpeg":
+                image = on_white(image)  # JPEG has no transparency
+            image.save(out, IMAGE_FORMATS[mimetype], quality=API["media"]["served_quality"], icc_profile=icc_profile)
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise ServiceError("The stored AVIF file could not be read.", kind="parse", service="Media host") from exc
+    return out.getvalue()
 
 
 # =============================================================================
@@ -1191,10 +1206,11 @@ def unpack_parquet(data: bytes) -> bytes:
 class MediaService:
     """Gives Buffer a public URL for an image.
 
-    With BLOB_READ_WRITE_TOKEN, a thumbnail and a Parquet copy of the image go to
-    Vercel Blob (never the original file), and GET /api/media/image/<name> serves
-    the image back out of the Parquet file. Otherwise the original goes to
-    MEDIA_UPLOAD_ENDPOINT (e.g. a Cloudinary unsigned preset).
+    With BLOB_READ_WRITE_TOKEN, a thumbnail and a compressed AVIF copy of the
+    image go to Vercel Blob (never the original file), and GET
+    /api/media/image/<name>.jpg serves the AVIF copy converted back to JPEG (or
+    PNG/WEBP). Otherwise the original goes to MEDIA_UPLOAD_ENDPOINT (e.g. a
+    Cloudinary unsigned preset).
     """
 
     service = "Media host"
@@ -1220,6 +1236,8 @@ class MediaService:
                 return "BLOB_READ_WRITE_TOKEN is not a Vercel Blob read-write token (vercel_blob_rw_...)."
             if not re.fullmatch(r"[A-Za-z0-9]{1,64}", self.blob_store_id):
                 return "The Blob store ID could not be read from BLOB_READ_WRITE_TOKEN. Set BLOB_STORE_ID."
+            if not features.check("avif"):
+                return "This Pillow build cannot write AVIF files. Install Pillow 11.3 or newer."
             return check_url(self.blob_api_url, "VERCEL_BLOB_API_URL", https_only=True)
         if not self.endpoint:
             return "MEDIA_UPLOAD_ENDPOINT is not set."
@@ -1264,34 +1282,30 @@ class MediaService:
                            service=self.service, details=truncate(text, 300))
 
     def store_packed(self, filename: str, data: bytes, on_retry: RetryCallback) -> dict[str, str]:
-        """Saves a thumbnail and a Parquet copy of the image to Vercel Blob, never the original file.
+        """Saves a thumbnail and an AVIF copy of the image to Vercel Blob, never the original file.
         Returns the stored name, which load_packed() takes, and both files' Blob URLs."""
         self.require_configured()
         thumbnail = make_thumbnail(data)
+        avif = pack_avif(data)
         slug = re.sub(r"[^a-z0-9]+", "-", Path(filename).stem.lower()).strip("-")[:60] or "image"
         name = f"{slug}-{secrets.token_hex(6)}"
-        parquet = pack_parquet(name, filename, data)
-        parquet_url = self.put_blob(f"{name}.parquet", parquet, API["media"]["parquet_mimetype"], on_retry)
-        thumbnail_url = self.put_blob(f"{name}.thumb.jpg", thumbnail, "image/jpeg", on_retry)
-        log.info("Stored %s on Vercel Blob as %s (Parquet %d bytes, thumbnail %d bytes)", filename, name, len(parquet), len(thumbnail))
-        return {"name": name, "file": f"{name}.parquet", "parquetUrl": parquet_url, "thumbnailUrl": thumbnail_url}
+        avif_url = self.put_blob(f"{name}.avif", avif, "image/avif", on_retry)
+        thumbnail_url = self.put_blob(f"{name}.thumb.avif", thumbnail, "image/avif", on_retry)
+        log.info("Stored %s on Vercel Blob as %s (%d bytes; AVIF %d bytes, thumbnail %d bytes)", filename, name, len(data),
+                 len(avif), len(thumbnail))
+        return {"name": name, "file": f"{name}.avif", "avifUrl": avif_url, "thumbnailUrl": thumbnail_url}
 
-    def load_packed(self, name: str, on_retry: RetryCallback) -> tuple[bytes, str]:
-        """The image saved by store_packed(), read back out of its Parquet file. Returns (bytes, MIME type)."""
+    def load_packed(self, name: str, mimetype: str, on_retry: RetryCallback) -> bytes:
+        """The image saved by store_packed(), as `mimetype` (see unpack_avif)."""
         if not self.uses_blob:
             raise ServiceError("Vercel Blob is not configured on the server.", kind="config", service=self.service,
                                hint="Set BLOB_READ_WRITE_TOKEN.")
         self.require_configured()
         data = retry_request(
-            lambda: self.http.request_bytes("GET", self.blob_url(f"{name}.parquet"), service=self.service, timeout=self.timeout),
+            lambda: self.http.request_bytes("GET", self.blob_url(f"{name}.avif"), service=self.service, timeout=self.timeout),
             on_retry=on_retry,
         )
-        image = unpack_parquet(data)
-        mimetype = sniff_image(image)
-        if not mimetype:
-            raise ServiceError("The stored Parquet file does not hold a JPG, PNG or WEBP image.", kind="parse",
-                               service=self.service)
-        return image, mimetype
+        return unpack_avif(data, mimetype)
 
     def put_blob(self, name: str, data: bytes, mimetype: str, on_retry: RetryCallback) -> str:
         """Uploads one file to the Blob folder and returns its public URL."""
@@ -1692,7 +1706,7 @@ def public_base_url() -> str:
 
 
 def stored_thumbnails() -> ThumbnailFinder | None:
-    """Maps an image this server serves out of a Parquet file (see media_image) to its thumbnail on Vercel Blob,
+    """Maps an image this server serves from its AVIF copy (see media_image) to its thumbnail on Vercel Blob,
     so the posts list shows the small thumbnail instead of pulling each full image through this server.
     Image URLs start with PUBLIC_BASE_URL, or with this server's own address when it is unset."""
     if not media.uses_blob or not media.configured:
@@ -1703,7 +1717,7 @@ def stored_thumbnails() -> ThumbnailFinder | None:
         for prefix in prefixes:
             if url.startswith(prefix):
                 match = _IMAGE_FILE_RE.fullmatch(url[len(prefix):].split("?")[0].lower())
-                return media.blob_url(f"{match[1]}.thumb.jpg") if match else None
+                return media.blob_url(f"{match[1]}.thumb.avif") if match else None
         return None
 
     return find
@@ -1830,7 +1844,7 @@ def media_upload() -> Any:
     filename = re.sub(r"[^\w.\-]", "_", file.filename)[:120] or "image"
     if not media.uses_blob:
         return run("Media upload", lambda retries: {"url": media.upload(filename, data, mimetype, retries)})
-    # Vercel Blob keeps a thumbnail and a Parquet copy, and Buffer gets this server's URL for the image.
+    # Vercel Blob keeps a thumbnail and an AVIF copy, and Buffer gets this server's URL for the image.
     base_url = public_base_url()
 
     def store(retries: RetryLog) -> dict[str, Any]:
@@ -1842,18 +1856,23 @@ def media_upload() -> Any:
 
 
 MEDIA_IMAGE_PATH = "/api/media/image/"
-_IMAGE_FILE_RE = re.compile(r"([a-z0-9-]{1,80})(?:\.(?:parquet|jpe?g|png|webp))?")
+_IMAGE_FILE_RE = re.compile(r"([a-z0-9-]{1,80})(?:\.(avif|jpe?g|png|webp))?")
+# What media_image serves for each extension; a bare name gets the AVIF copy as stored.
+_IMAGE_FILE_TYPES = {None: "image/avif", "avif": "image/avif", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                     "png": "image/png", "webp": "image/webp"}
 
 
 @app.get(f"{MEDIA_IMAGE_PATH}<filename>")
 def media_image(filename: str) -> Any:
-    """Serves an uploaded image out of its Parquet file on Vercel Blob. Buffer fetches post images
-    from here. Takes the name /api/media/upload returned, alone or with .parquet or an image extension."""
+    """Serves an uploaded image from its AVIF copy on Vercel Blob. Buffer fetches post images from here.
+    Takes the name /api/media/upload returned, with .jpg, .png or .webp to get the image converted to
+    that format, or alone or with .avif to get the AVIF copy."""
     match = _IMAGE_FILE_RE.fullmatch(filename.lower())
     if not match:
         raise ServiceError("Image file names contain only letters, numbers and dashes.", kind="validation")
+    mimetype = _IMAGE_FILE_TYPES[match[2]]
     try:
-        data, mimetype = media.load_packed(match[1], RetryLog(f"Media image ({filename})"))
+        data = media.load_packed(match[1], mimetype, RetryLog(f"Media image ({filename})"))
     except ServiceError as error:
         if error.kind == "not_found":
             raise NotFound(f'There is no stored image named "{match[1]}".') from error
