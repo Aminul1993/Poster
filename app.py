@@ -8,8 +8,10 @@ This file does four jobs:
 * optionally talks to Pollinations: a written description in, an image out,
   as an alternative to uploading one,
 * talks to Buffer's GraphQL API (token check, channels, scheduled posts) and,
-  optionally, to a media host that turns uploads into public image URLs
-  (Vercel Blob, or an upload endpoint such as a Cloudinary unsigned preset).
+  optionally, to a media host that turns uploads into public image URLs:
+  Vercel Blob, which stores a thumbnail and a Parquet copy of each image that
+  this server serves back to Buffer, or an upload endpoint such as a
+  Cloudinary unsigned preset.
 
 Credentials stay on the server, in environment variables or a ``.env`` file
 next to this one, and the browser never sees them. The browser only calls this
@@ -27,6 +29,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import io
 import json
 import logging
 import os
@@ -41,9 +44,12 @@ from pathlib import Path
 from typing import Any, Callable, TypeVar
 from urllib.parse import quote, urlencode, urlparse
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import requests
-from flask import Flask, g, jsonify, render_template, request
-from werkzeug.exceptions import HTTPException
+from flask import Flask, g, jsonify, render_template, request, url_for
+from PIL import Image, ImageOps
+from werkzeug.exceptions import HTTPException, NotFound
 
 BASE_DIR = Path(__file__).resolve().parent
 APP_VERSION = "2.0.0"
@@ -107,6 +113,7 @@ CONFIG: dict[str, Any] = {
     "BLOB_READ_WRITE_TOKEN": _env("BLOB_READ_WRITE_TOKEN"),
     "BLOB_STORE_ID": _env("BLOB_STORE_ID"),
     "BLOB_API_URL": _env("VERCEL_BLOB_API_URL", "https://vercel.com/api/blob"),
+    "PUBLIC_BASE_URL": _env("PUBLIC_BASE_URL"),
     "POLLINATIONS_API_KEY": _env("POLLINATIONS_API_KEY"),
     "OLLAMA_TIMEOUT": _env_int("OLLAMA_TIMEOUT", 120, 10, 600),
     "BUFFER_TIMEOUT": _env_int("BUFFER_TIMEOUT", 30, 5, 120),
@@ -146,6 +153,10 @@ API: dict[str, Any] = {
         # Vercel Blob REST API, as called by @vercel/blob's put().
         "blob_api_version": "12",
         "blob_folder": "poster",
+        "blob_public_url": "https://{store_id}.public.blob.vercel-storage.com",
+        "parquet_mimetype": "application/vnd.apache.parquet",
+        "thumbnail_size": (400, 400),
+        "thumbnail_quality": 80,
     },
     "image_gen": {
         "url": "https://gen.pollinations.ai/image",
@@ -946,14 +957,65 @@ class BufferService:
 
 
 # =============================================================================
+# Image packing (a thumbnail and a Parquet copy are stored instead of the original)
+# =============================================================================
+
+IMAGE_EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+
+# The layout Hugging Face `datasets` writes for Features({"image_id": Value("string"), "image": Image()}),
+# so Dataset.from_parquet() reads these files back as PIL images (see a.py).
+PARQUET_SCHEMA = pa.schema(
+    [("image_id", pa.string()), ("image", pa.struct([("bytes", pa.binary()), ("path", pa.string())]))],
+    metadata={"huggingface": json.dumps({"info": {"features": {
+        "image_id": {"dtype": "string", "_type": "Value"}, "image": {"_type": "Image"}}}})},
+)
+
+
+def make_thumbnail(data: bytes) -> bytes:
+    """A small JPEG preview, turned upright according to the photo's EXIF orientation."""
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image.thumbnail(API["media"]["thumbnail_size"])  # decodes large JPEGs at reduced size
+            thumbnail = ImageOps.exif_transpose(image).convert("RGB")
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise ServiceError("The image could not be decoded.", kind="validation") from exc
+    out = io.BytesIO()
+    thumbnail.save(out, "JPEG", quality=API["media"]["thumbnail_quality"], optimize=True)
+    return out.getvalue()
+
+
+def pack_parquet(image_id: str, filename: str, data: bytes) -> bytes:
+    """A one-row Parquet file that holds the image's bytes, not just its path."""
+    table = pa.Table.from_pylist([{"image_id": image_id, "image": {"bytes": data, "path": filename}}],
+                                 schema=PARQUET_SCHEMA)
+    sink = pa.BufferOutputStream()
+    pq.write_table(table, sink)
+    return sink.getvalue().to_pybytes()
+
+
+def unpack_parquet(data: bytes) -> bytes:
+    """The image bytes from a file written by pack_parquet()."""
+    try:
+        rows = pq.read_table(pa.BufferReader(data), columns=["image"]).column("image").to_pylist()
+    except pa.ArrowException as exc:
+        raise ServiceError("The stored Parquet file could not be read.", kind="parse", service="Media host") from exc
+    image = rows[0] if rows else None
+    if not isinstance(image, dict) or not isinstance(image.get("bytes"), bytes):
+        raise ServiceError("The stored Parquet file holds no image data.", kind="parse", service="Media host")
+    return image["bytes"]
+
+
+# =============================================================================
 # Media host (Buffer only accepts public image URLs)
 # =============================================================================
 
 class MediaService:
-    """Uploads an image to a host that returns a public URL.
+    """Gives Buffer a public URL for an image.
 
-    Vercel Blob when BLOB_READ_WRITE_TOKEN is set, otherwise MEDIA_UPLOAD_ENDPOINT
-    (e.g. a Cloudinary unsigned preset).
+    With BLOB_READ_WRITE_TOKEN, a thumbnail and a Parquet copy of the image go to
+    Vercel Blob (never the original file), and GET /api/media/image/<name> serves
+    the image back out of the Parquet file. Otherwise the original goes to
+    MEDIA_UPLOAD_ENDPOINT (e.g. a Cloudinary unsigned preset).
     """
 
     service = "Media host"
@@ -977,6 +1039,8 @@ class MediaService:
         if self.uses_blob:
             if not self.blob_token.startswith("vercel_blob_rw_"):
                 return "BLOB_READ_WRITE_TOKEN is not a Vercel Blob read-write token (vercel_blob_rw_...)."
+            if not re.fullmatch(r"[A-Za-z0-9]{1,64}", self.blob_store_id):
+                return "The Blob store ID could not be read from BLOB_READ_WRITE_TOKEN. Set BLOB_STORE_ID."
             return check_url(self.blob_api_url, "VERCEL_BLOB_API_URL", https_only=True)
         if not self.endpoint:
             return "MEDIA_UPLOAD_ENDPOINT is not set."
@@ -994,19 +1058,18 @@ class MediaService:
         return {"configured": self.configured, "problem": self.problem, "host": host,
                 "requestTimeout": self.timeout * (retry["max_retries"] + 1) + sum(retry["delays"]) + 10}
 
-    def upload(self, filename: str, data: bytes, mimetype: str, on_retry: RetryCallback) -> str:
+    def require_configured(self) -> None:
         if self.problem:
             raise ServiceError(f"No media host is configured on the server: {self.problem}", kind="config", service=self.service,
                                hint="Set BLOB_READ_WRITE_TOKEN (Vercel Blob) or MEDIA_UPLOAD_ENDPOINT, or paste a public image URL in the editor.")
-        if self.uses_blob:
-            method, url = "PUT", f"{self.blob_api_url}/?{urlencode({'pathname': API['media']['blob_folder'] + '/' + filename})}"
-            options: dict[str, Any] = {"data": data, "headers": self.blob_headers(mimetype)}
-        else:
-            form = {API["media"]["preset_field"]: self.preset} if self.preset else {}
-            method, url = "POST", self.endpoint
-            options = {"files": {API["media"]["file_field"]: (filename, data, mimetype)}, "data": form}
+
+    def upload(self, filename: str, data: bytes, mimetype: str, on_retry: RetryCallback) -> str:
+        """Uploads the original image to MEDIA_UPLOAD_ENDPOINT and returns its public URL."""
+        self.require_configured()
+        form = {API["media"]["preset_field"]: self.preset} if self.preset else {}
         _, payload, text = retry_request(
-            lambda: self.http.request(method, url, service=self.service, timeout=self.timeout, **options),
+            lambda: self.http.request("POST", self.endpoint, service=self.service, timeout=self.timeout,
+                                      files={API["media"]["file_field"]: (filename, data, mimetype)}, data=form),
             on_retry=on_retry,
         )
         for path in API["media"]["url_paths"]:
@@ -1021,15 +1084,68 @@ class MediaService:
         raise ServiceError("The media host accepted the upload but did not return a public URL.", kind="parse",
                            service=self.service, details=truncate(text, 300))
 
+    def store_packed(self, filename: str, data: bytes, on_retry: RetryCallback) -> dict[str, str]:
+        """Saves a thumbnail and a Parquet copy of the image to Vercel Blob, never the original file.
+        Returns the stored name, which load_packed() takes, and both files' Blob URLs."""
+        self.require_configured()
+        thumbnail = make_thumbnail(data)
+        slug = re.sub(r"[^a-z0-9]+", "-", Path(filename).stem.lower()).strip("-")[:60] or "image"
+        name = f"{slug}-{secrets.token_hex(6)}"
+        parquet = pack_parquet(name, filename, data)
+        parquet_url = self.put_blob(f"{name}.parquet", parquet, API["media"]["parquet_mimetype"], on_retry)
+        thumbnail_url = self.put_blob(f"{name}.thumb.jpg", thumbnail, "image/jpeg", on_retry)
+        log.info("Stored %s on Vercel Blob as %s (Parquet %d bytes, thumbnail %d bytes)", filename, name, len(parquet), len(thumbnail))
+        return {"name": name, "file": f"{name}.parquet", "parquetUrl": parquet_url, "thumbnailUrl": thumbnail_url}
+
+    def load_packed(self, name: str, on_retry: RetryCallback) -> tuple[bytes, str]:
+        """The image saved by store_packed(), read back out of its Parquet file. Returns (bytes, MIME type)."""
+        if not self.uses_blob:
+            raise ServiceError("Vercel Blob is not configured on the server.", kind="config", service=self.service,
+                               hint="Set BLOB_READ_WRITE_TOKEN.")
+        self.require_configured()
+        data = retry_request(
+            lambda: self.http.request_bytes("GET", self.blob_url(f"{name}.parquet"), service=self.service, timeout=self.timeout),
+            on_retry=on_retry,
+        )
+        image = unpack_parquet(data)
+        mimetype = sniff_image(image)
+        if not mimetype:
+            raise ServiceError("The stored Parquet file does not hold a JPG, PNG or WEBP image.", kind="parse",
+                               service=self.service)
+        return image, mimetype
+
+    def put_blob(self, name: str, data: bytes, mimetype: str, on_retry: RetryCallback) -> str:
+        """Uploads one file to the Blob folder and returns its public URL."""
+        pathname = f"{API['media']['blob_folder']}/{name}"
+        url = f"{self.blob_api_url}/?{urlencode({'pathname': pathname})}"
+        _, payload, text = retry_request(
+            lambda: self.http.request("PUT", url, service=self.service, timeout=self.timeout, data=data,
+                                      headers=self.blob_headers(mimetype)),
+            on_retry=on_retry,
+        )
+        blob_url = payload.get("url") if isinstance(payload, dict) else None
+        # load_packed() finds files by name alone, so they must be where blob_url() says.
+        if not isinstance(blob_url, str) or blob_url.lower() != self.blob_url(name).lower():
+            raise ServiceError(f"Vercel Blob did not store {pathname} at the expected public URL.", kind="parse",
+                               service=self.service, details=truncate(text, 300))
+        return blob_url
+
+    def blob_url(self, name: str) -> str:
+        """Public URL of a file in the Blob folder."""
+        base = API["media"]["blob_public_url"].format(store_id=self.blob_store_id.lower())
+        return f"{base}/{API['media']['blob_folder']}/{name}"
+
     def blob_headers(self, mimetype: str) -> dict[str, str]:
-        """Headers for a Vercel Blob put. Public access, because Buffer fetches the image without credentials;
-        a random suffix keeps every upload at its own URL."""
+        """Headers for a Vercel Blob put. Public access, because Buffer's fetch reaches the files without
+        credentials. No random suffix: store_packed() picks unique names itself, so load_packed() can find
+        a file by name, and a retried put may overwrite its own earlier attempt."""
         headers = {
             "Authorization": f"Bearer {self.blob_token}",
             "x-api-version": API["media"]["blob_api_version"],
             "x-vercel-blob-access": "public",
             "x-content-type": mimetype,
-            "x-add-random-suffix": "1",
+            "x-add-random-suffix": "0",
+            "x-allow-overwrite": "1",
         }
         if self.blob_store_id:
             headers["x-vercel-blob-store-id"] = self.blob_store_id
@@ -1308,7 +1424,7 @@ def security_headers(response: Any) -> Any:
             "form-action 'self'; frame-ancestors 'none'"
         )
     if request.path.startswith("/api/"):
-        response.headers["Cache-Control"] = "no-store"
+        response.headers.setdefault("Cache-Control", "no-store")
     return response
 
 
@@ -1336,6 +1452,21 @@ def handle_unexpected(error: Exception) -> Any:
     if request.path.startswith("/api/"):
         return jsonify(error={"message": "Unexpected server error. Check the server log.", "kind": "server"}), 500
     return "Unexpected server error. Check the server log.", 500
+
+
+def public_base_url() -> str:
+    """This server's public https:// address. Buffer fetches post images from it (see media_image)."""
+    configured = CONFIG["PUBLIC_BASE_URL"]
+    if configured:
+        problem = check_url(configured, "PUBLIC_BASE_URL", https_only=True)
+        if problem:
+            raise ServiceError(problem, kind="config", service="Media host")
+        return configured.rstrip("/")
+    if is_local_host(urlparse(request.host_url).hostname or ""):
+        raise ServiceError("Buffer fetches post images from this server, which is running on a local address it cannot reach.",
+                           kind="config", service="Media host",
+                           hint="Deploy Poster (for example to Vercel), or set PUBLIC_BASE_URL to a public https:// address of this server.")
+    return f"https://{request.host}"
 
 
 def respond(result: dict[str, Any], retries: RetryLog) -> Any:
@@ -1428,7 +1559,39 @@ def media_upload() -> Any:
     if not mimetype:
         raise ServiceError("The file is not a JPG, PNG or WEBP image.", kind="validation")
     filename = re.sub(r"[^\w.\-]", "_", file.filename)[:120] or "image"
-    return run("Media upload", lambda retries: {"url": media.upload(filename, data, mimetype, retries)})
+    if not media.uses_blob:
+        return run("Media upload", lambda retries: {"url": media.upload(filename, data, mimetype, retries)})
+    # Vercel Blob keeps a thumbnail and a Parquet copy, and Buffer gets this server's URL for the image.
+    base_url = public_base_url()
+
+    def store(retries: RetryLog) -> dict[str, Any]:
+        stored = media.store_packed(filename, data, retries)
+        image_file = stored["name"] + IMAGE_EXTENSIONS[mimetype]
+        return {"url": base_url + url_for("media_image", filename=image_file), **stored}
+
+    return run("Media upload", store)
+
+
+_IMAGE_FILE_RE = re.compile(r"([a-z0-9-]{1,80})(?:\.(?:parquet|jpe?g|png|webp))?")
+
+
+@app.get("/api/media/image/<filename>")
+def media_image(filename: str) -> Any:
+    """Serves an uploaded image out of its Parquet file on Vercel Blob. Buffer fetches post images
+    from here. Takes the name /api/media/upload returned, alone or with .parquet or an image extension."""
+    match = _IMAGE_FILE_RE.fullmatch(filename.lower())
+    if not match:
+        raise ServiceError("Image file names contain only letters, numbers and dashes.", kind="validation")
+    try:
+        data, mimetype = media.load_packed(match[1], RetryLog(f"Media image ({filename})"))
+    except ServiceError as error:
+        if error.kind == "not_found":
+            raise NotFound(f'There is no stored image named "{match[1]}".') from error
+        raise
+    response = app.response_class(data, mimetype=mimetype)
+    # Every upload gets a new name, so the image behind a URL never changes.
+    response.headers["Cache-Control"] = "public, max-age=31536000, s-maxage=31536000, immutable"
+    return response
 
 
 def log_startup() -> None:

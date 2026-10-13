@@ -1,2 +1,4 @@
 flask>=3.0
 requests>=2.31
+pillow>=10.0
+pyarrow>=16.0
