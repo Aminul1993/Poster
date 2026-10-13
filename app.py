@@ -144,7 +144,32 @@ API: dict[str, Any] = {
                 "mutation PosterCreatePost($input: CreatePostInput!) { createPost(input: $input) { __typename "
                 "... on PostActionSuccess { post { id dueAt status } } ... on MutationError { message } } }"
             ),
+            "post_status": "query PosterPostStatus($input: PostInput!) { post(input: $input) { id status } }",
+            "posts": (
+                "query PosterPosts($input: PostsInput!, $first: Int, $after: String) { posts(input: $input, first: $first, after: $after) "
+                "{ edges { node { ...PosterPostFields } } pageInfo { hasNextPage endCursor } } }"
+            ),
+            "edit_post": (
+                "mutation PosterEditPost($input: EditPostInput!) { editPost(input: $input) { __typename "
+                "... on PostActionSuccess { post { ...PosterPostFields } } ... on MutationError { message } } }"
+            ),
+            "delete_post": (
+                "mutation PosterDeletePost($input: DeletePostInput!) { deletePost(input: $input) { __typename "
+                "... on DeletePostSuccess { id } ... on MutationError { message } } }"
+            ),
         },
+        # What the posts list and editPost read about each post.
+        "post_fields": (
+            "fragment PosterPostFields on Post { id status dueAt sentAt createdAt text channelId channelService externalLink "
+            "channel { name displayName } assets { thumbnail source } error { message } }"
+        ),
+        # Post statuses that mean the post is out of reach: it was published or is being published now.
+        "published_statuses": frozenset({"sent", "sending"}),
+        # The posts list's filters (None: every status) and their order by publish time.
+        "post_filters": {"all": None, "upcoming": ["scheduled", "needs_approval", "sending"], "published": ["sent"]},
+        "post_sort": {"all": "desc", "upcoming": "asc", "published": "desc"},
+        # Posts per page. Buffer allows few requests (100 per 15 minutes on the free plan), so pages are generous.
+        "posts_page_size": 30,
     },
     "media": {
         "file_field": "file",
@@ -225,7 +250,7 @@ class ServiceError(Exception):
     """A classified failure, rendered to the browser as JSON.
 
     ``kind`` is one of: validation, config, auth, rate_limit, timeout, network,
-    server, client, not_found, parse.
+    server, client, not_found, conflict, parse.
     """
 
     def __init__(self, message: str, *, kind: str = "server", status: int = 0, service: str = "",
@@ -245,7 +270,7 @@ class ServiceError(Exception):
 
     @property
     def http_status(self) -> int:
-        return {"validation": 400, "config": 503, "rate_limit": 429, "timeout": 504}.get(self.kind, 502)
+        return {"validation": 400, "config": 503, "conflict": 409, "rate_limit": 429, "timeout": 504}.get(self.kind, 502)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -256,6 +281,7 @@ class ServiceError(Exception):
 
 T = TypeVar("T")
 RetryCallback = Callable[[int, int, ServiceError], None]
+ThumbnailFinder = Callable[[str], str | None]  # image URL -> URL of a smaller stored thumbnail, if any
 
 
 def retry_request(operation: Callable[[], T], *, should_retry: Callable[[ServiceError], bool] | None = None,
@@ -776,6 +802,11 @@ class OllamaService:
 # Buffer
 # =============================================================================
 
+def utc_iso(value: datetime) -> str:
+    """ISO 8601 in UTC with a Z suffix, as Buffer's DateTime fields take it."""
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _create_post_retryable(error: ServiceError) -> bool:
     """createPost is not idempotent: a timeout or 5xx may still have created the
     post. Only failures that guarantee nothing was created are retried."""
@@ -925,7 +956,7 @@ class BufferService:
         self.require_configured()
         posts: list[dict[str, str]] = []
         failures: list[dict[str, str]] = []
-        due_iso = due_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        due_iso = utc_iso(due_at)
         for channel_id in channel_ids:
             post_input: dict[str, Any] = {
                 "channelId": channel_id, "text": text, "schedulingType": "automatic",
@@ -947,14 +978,159 @@ class BufferService:
                 posts.append({"channelId": channel_id, "postId": str(post["id"]), "dueAt": str(post.get("dueAt") or due_iso),
                               "status": str(post.get("status") or "scheduled")})
             else:
-                reason = result.get("message") if isinstance(result, dict) and result.get("message") else (
-                    f"Buffer returned {result.get('__typename') if isinstance(result, dict) else 'an unexpected response'}.")
-                failures.append({"channelId": channel_id, "message": str(reason)})
+                failures.append({"channelId": channel_id, "message": self.mutation_message(result)})
         if not posts:
             summary = " · ".join(f"{f['channelId']}: {f['message']}" for f in failures)
             raise ServiceError(f"Buffer did not schedule the post. {summary}", kind="client", service=self.service)
         log.info("Scheduled post for %s on %d channel(s)", due_iso, len(posts))
         return {"posts": posts, "failures": failures}
+
+    @staticmethod
+    def mutation_message(result: Any) -> str:
+        """Why a mutation did not succeed: Buffer's MutationError message, or the type it returned."""
+        if isinstance(result, dict) and result.get("message"):
+            return str(result["message"])
+        return f"Buffer returned {result.get('__typename') if isinstance(result, dict) else 'an unexpected response'}."
+
+    def post_summary(self, post: Any, thumbnail_for: ThumbnailFinder | None = None) -> dict[str, Any]:
+        """What the browser shows for a post read with the PosterPostFields fragment. ``thumbnail_for``
+        swaps an image URL for a smaller stored thumbnail when it knows one."""
+        if not isinstance(post, dict) or not post.get("id"):
+            raise ServiceError("Buffer returned unexpected post data.", kind="parse", service=self.service)
+        status = str(post.get("status") or "")
+        channel = post.get("channel") if isinstance(post.get("channel"), dict) else {}
+        assets = post.get("assets") if isinstance(post.get("assets"), list) else []
+        # The first https image: each asset's thumbnail, else its source; a stored thumbnail beats both.
+        images = [url for a in assets if isinstance(a, dict) for url in (a.get("thumbnail"), a.get("source"))
+                  if isinstance(url, str) and url.startswith("https://")]
+        stored = next(filter(None, map(thumbnail_for, images)), None) if thumbnail_for else None
+        thumbnail = stored or next(iter(images), None)
+        link = post.get("externalLink")
+        error = post.get("error") if isinstance(post.get("error"), dict) else {}
+        return {
+            "postId": str(post["id"]), "status": status, "published": status in API["buffer"]["published_statuses"],
+            "dueAt": post.get("dueAt") or None, "sentAt": post.get("sentAt") or None, "createdAt": post.get("createdAt") or None,
+            "text": str(post.get("text") or ""), "channelId": str(post.get("channelId") or ""),
+            "channelName": str(channel.get("displayName") or channel.get("name") or ""),
+            "service": str(post.get("channelService") or ""), "thumbnail": thumbnail,
+            "externalLink": link if isinstance(link, str) and link.startswith("https://") else None,
+            "error": str(error.get("message") or "") or None,
+        }
+
+    def graphql_posts(self, query: str, variables: dict[str, Any], **options: Any) -> dict[str, Any]:
+        """Runs a document that uses the PosterPostFields fragment."""
+        return self.graphql(f"{query} {API['buffer']['post_fields']}", variables, **options)
+
+    def list_posts(self, organization_ids: list[str], status_filter: str, after: dict[str, str] | None,
+                   on_retry: RetryCallback, thumbnail_for: ThumbnailFinder | None = None) -> dict[str, Any]:
+        """One page of posts per organization, read straight from Buffer. ``after`` holds each organization's
+        cursor from the previous page; the result's ``next`` does the same for the page after this one."""
+        self.require_configured()
+        if not organization_ids:
+            organization_ids = [org["id"] for org in self.validate_token(on_retry)["organizations"]]
+        statuses = API["buffer"]["post_filters"][status_filter]
+        direction = API["buffer"]["post_sort"][status_filter]
+        posts: list[dict[str, Any]] = []
+        cursors: dict[str, str] = {}
+        for organization_id in organization_ids:
+            if after is not None and organization_id not in after:
+                continue  # no more pages there
+            post_input: dict[str, Any] = {
+                "organizationId": organization_id,
+                "sort": [{"field": "dueAt", "direction": direction}, {"field": "createdAt", "direction": "desc"}],
+            }
+            if statuses:
+                post_input["filter"] = {"status": statuses}
+            data = self.graphql_posts(
+                API["buffer"]["queries"]["posts"],
+                {"input": post_input, "first": API["buffer"]["posts_page_size"], "after": (after or {}).get(organization_id)},
+                action="load posts", on_retry=on_retry,
+            )
+            result = data.get("posts")
+            if not isinstance(result, dict) or not isinstance(result.get("edges"), list):
+                raise ServiceError("Buffer returned an unexpected post list.", kind="parse", service=self.service)
+            posts.extend(self.post_summary(edge.get("node"), thumbnail_for) for edge in result["edges"] if isinstance(edge, dict))
+            page = result.get("pageInfo") if isinstance(result.get("pageInfo"), dict) else {}
+            if page.get("hasNextPage") and page.get("endCursor"):
+                cursors[organization_id] = str(page["endCursor"])
+        posts.sort(key=lambda p: p["dueAt"] or p["createdAt"] or "", reverse=direction == "desc")
+        return {"posts": posts, "next": cursors or None}
+
+    def require_unpublished(self, post_id: str, on_retry: RetryCallback) -> None:
+        """Reads the post's status from Buffer and refuses it if it is published or publishing right now."""
+        data = self.graphql(API["buffer"]["queries"]["post_status"], {"input": {"id": post_id}},
+                            action="load the post", on_retry=on_retry)
+        post = data.get("post")
+        status = str(post.get("status") or "") if isinstance(post, dict) else ""
+        if status == "sending":
+            raise ServiceError("Buffer is publishing this post right now, so it can no longer be changed.",
+                               kind="conflict", service=self.service)
+        if status in API["buffer"]["published_statuses"]:
+            raise ServiceError("This post has already been published, so it can no longer be changed.",
+                               kind="conflict", service=self.service)
+
+    def each_post(self, post_ids: list[str], action: Callable[[str], T]) -> tuple[list[T], list[dict[str, str]]]:
+        """Runs ``action`` on each post. Posts are independent: failures on some are reported, with a
+        reason (published, missing or error), while the others still go through."""
+        done: list[T] = []
+        failures: list[dict[str, str]] = []
+        for post_id in post_ids:
+            try:
+                done.append(action(post_id))
+            except ServiceError as error:
+                if error.kind in ("auth", "config", "network") and not done:
+                    raise
+                reason = {"conflict": "published", "not_found": "missing"}.get(error.kind, "error")
+                failures.append({"postId": post_id, "message": error.message, "reason": reason})
+        return done, failures
+
+    def edit_posts(self, post_ids: list[str], text: str | None, due_at: datetime | None,
+                   on_retry: RetryCallback, thumbnail_for: ThumbnailFinder | None = None) -> dict[str, Any]:
+        """Changes the text and/or publish time of posts that are not published yet."""
+        self.require_configured()
+        changes: dict[str, Any] = {}
+        if text is not None:
+            changes["text"] = text
+        if due_at is not None:
+            # Without a mode, Buffer keeps the post's current schedule and ignores the new time.
+            changes.update(dueAt=utc_iso(due_at), mode="customScheduled")
+
+        def edit(post_id: str) -> dict[str, Any]:
+            self.require_unpublished(post_id, on_retry)
+            data = self.graphql_posts(API["buffer"]["queries"]["edit_post"], {"input": {"id": post_id, **changes}},
+                                      action="edit the post", on_retry=on_retry)
+            result = data.get("editPost")
+            if isinstance(result, dict) and isinstance(result.get("post"), dict):
+                return self.post_summary(result["post"], thumbnail_for)
+            raise ServiceError(f"Buffer did not change the post: {self.mutation_message(result)}", kind="client",
+                               service=self.service)
+
+        posts, failures = self.each_post(post_ids, edit)
+        log.info("Edited %d post(s) (%s); %d failed", len(posts), ", ".join(changes) or "no changes", len(failures))
+        return {"posts": posts, "failures": failures}
+
+    def delete_posts(self, post_ids: list[str], on_retry: RetryCallback) -> dict[str, Any]:
+        """Deletes posts that are not published yet. A post that is already gone from Buffer counts as deleted."""
+        self.require_configured()
+
+        def delete(post_id: str) -> str:
+            try:
+                self.require_unpublished(post_id, on_retry)
+            except ServiceError as error:
+                if error.kind == "not_found":
+                    return post_id
+                raise
+            data = self.graphql(API["buffer"]["queries"]["delete_post"], {"input": {"id": post_id}},
+                                action="delete the post", on_retry=on_retry)
+            result = data.get("deletePost")
+            if isinstance(result, dict) and result.get("id"):
+                return post_id
+            raise ServiceError(f"Buffer did not delete the post: {self.mutation_message(result)}", kind="client",
+                               service=self.service)
+
+        deleted, failures = self.each_post(post_ids, delete)
+        log.info("Deleted %d post(s); %d failed", len(deleted), len(failures))
+        return {"deleted": deleted, "failures": failures}
 
 
 # =============================================================================
@@ -1133,14 +1309,10 @@ class MediaService:
                                service=self.service, details=truncate(text, 300))
         return blob_url
 
-    @property
-    def blob_origin(self) -> str:
-        """Where the Blob store serves its public files."""
-        return API["media"]["blob_public_url"].format(store_id=self.blob_store_id.lower())
-
     def blob_url(self, name: str) -> str:
         """Public URL of a file in the Blob folder."""
-        return f"{self.blob_origin}/{API['media']['blob_folder']}/{name}"
+        base = API["media"]["blob_public_url"].format(store_id=self.blob_store_id.lower())
+        return f"{base}/{API['media']['blob_folder']}/{name}"
 
     def blob_headers(self, mimetype: str) -> dict[str, str]:
         """Headers for a Vercel Blob put. Public access, because Buffer's fetch reaches the files without
@@ -1239,7 +1411,7 @@ class ImageGenService:
 # =============================================================================
 
 _MODEL_RE = re.compile(r"^[\w.\-/:]{1,100}$")
-_CHANNEL_RE = re.compile(r"^[\w.\-:]{1,100}$")
+_ID_RE = re.compile(r"^[\w.\-:]{1,100}$")  # Buffer channel and post IDs
 
 
 def sniff_image(data: bytes) -> str | None:
@@ -1352,6 +1524,47 @@ def parse_media_url(value: Any) -> str | None:
     return value.strip()
 
 
+def parse_post_text(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ServiceError("The post text is empty.", kind="validation")
+    if len(value) > LIMITS["max_text_chars"]:
+        raise ServiceError(f"The post text is longer than {LIMITS['max_text_chars']} characters.", kind="validation")
+    return value
+
+
+def parse_post_ids(value: Any) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise ServiceError('"postIds" must list at least one Buffer post ID.', kind="validation")
+    if len(value) > LIMITS["max_channels"]:
+        raise ServiceError(f"At most {LIMITS['max_channels']} posts per request.", kind="validation")
+    ids: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not _ID_RE.fullmatch(item):
+            raise ServiceError("Post IDs contain only letters, numbers and . - _ : characters.", kind="validation")
+        if item not in ids:
+            ids.append(item)
+    return ids
+
+
+def parse_organization_ids(value: Any) -> list[str]:
+    """Organization IDs the browser knows from connecting; empty means the server looks them up."""
+    if value in (None, []):
+        return []
+    if not isinstance(value, list) or len(value) > 10 or not all(isinstance(v, str) and _ID_RE.fullmatch(v) for v in value):
+        raise ServiceError('"organizationIds" must be a short list of Buffer organization IDs.', kind="validation")
+    return list(dict.fromkeys(value))
+
+
+def parse_cursors(value: Any) -> dict[str, str] | None:
+    """The previous page's "next": a cursor per organization, or None for the first page."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not value or len(value) > 10 or not all(
+            isinstance(k, str) and _ID_RE.fullmatch(k) and isinstance(v, str) and 0 < len(v) <= 500 for k, v in value.items()):
+        raise ServiceError('"after" must be the "next" value of the previous page.', kind="validation")
+    return value
+
+
 def parse_channel_ids(value: Any) -> list[str]:
     if not isinstance(value, list) or not value:
         raise ServiceError("Choose at least one Buffer channel.", kind="validation")
@@ -1359,7 +1572,7 @@ def parse_channel_ids(value: Any) -> list[str]:
         raise ServiceError(f"At most {LIMITS['max_channels']} channels per post.", kind="validation")
     ids: list[str] = []
     for item in value:
-        if not isinstance(item, str) or not _CHANNEL_RE.fullmatch(item):
+        if not isinstance(item, str) or not _ID_RE.fullmatch(item):
             raise ServiceError("Channel IDs contain only letters, numbers and . - _ : characters.", kind="validation")
         if item not in ids:
             ids.append(item)
@@ -1425,11 +1638,11 @@ def security_headers(response: Any) -> Any:
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     if response.mimetype == "text/html":
         nonce = getattr(g, "csp_nonce", "")
-        # The page shows the thumbnails stored on Vercel Blob.
-        blob_images = f" {media.blob_origin}" if media.uses_blob and media.configured else ""
+        # https: images, because the posts list shows Buffer's thumbnails from wherever each image is hosted
+        # (Buffer, Vercel Blob, a media host or a URL pasted in the editor).
         response.headers["Content-Security-Policy"] = (
             f"default-src 'self'; script-src 'nonce-{nonce}'; style-src 'self' 'unsafe-inline'; "
-            f"img-src 'self' data: blob:{blob_images}; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+            "img-src 'self' data: blob: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
             "form-action 'self'; frame-ancestors 'none'"
         )
     if request.path.startswith("/api/"):
@@ -1476,6 +1689,24 @@ def public_base_url() -> str:
                            kind="config", service="Media host",
                            hint="Deploy Poster (for example to Vercel), or set PUBLIC_BASE_URL to a public https:// address of this server.")
     return f"https://{request.host}"
+
+
+def stored_thumbnails() -> ThumbnailFinder | None:
+    """Maps an image this server serves out of a Parquet file (see media_image) to its thumbnail on Vercel Blob,
+    so the posts list shows the small thumbnail instead of pulling each full image through this server.
+    Image URLs start with PUBLIC_BASE_URL, or with this server's own address when it is unset."""
+    if not media.uses_blob or not media.configured:
+        return None
+    prefixes = [f"{base.rstrip('/')}{MEDIA_IMAGE_PATH}" for base in (CONFIG["PUBLIC_BASE_URL"], f"https://{request.host}") if base]
+
+    def find(url: str) -> str | None:
+        for prefix in prefixes:
+            if url.startswith(prefix):
+                match = _IMAGE_FILE_RE.fullmatch(url[len(prefix):].split("?")[0].lower())
+                return media.blob_url(f"{match[1]}.thumb.jpg") if match else None
+        return None
+
+    return find
 
 
 def respond(result: dict[str, Any], retries: RetryLog) -> Any:
@@ -1545,15 +1776,44 @@ def buffer_connect() -> Any:
 @app.post("/api/buffer/schedule")
 def buffer_schedule() -> Any:
     body = json_body()
-    text = body.get("text")
-    if not isinstance(text, str) or not text.strip():
-        raise ServiceError("The post text is empty.", kind="validation")
-    if len(text) > LIMITS["max_text_chars"]:
-        raise ServiceError(f"The post text is longer than {LIMITS['max_text_chars']} characters.", kind="validation")
+    text = parse_post_text(body.get("text"))
     channel_ids = parse_channel_ids(body.get("channelIds"))
     due_at = parse_due_at(body.get("dueAt"))
     media_url = parse_media_url(body.get("mediaUrl"))
     return run("Buffer schedule", lambda retries: buffer.schedule(text, channel_ids, due_at, media_url, retries))
+
+
+@app.post("/api/buffer/posts")
+def buffer_posts() -> Any:
+    """A page of the account's posts, read straight from Buffer (nothing is stored)."""
+    body = json_body()
+    status_filter = body.get("filter") or "all"
+    if status_filter not in API["buffer"]["post_filters"]:
+        raise ServiceError(f'"filter" must be one of: {", ".join(API["buffer"]["post_filters"])}.', kind="validation")
+    organization_ids = parse_organization_ids(body.get("organizationIds"))
+    after = parse_cursors(body.get("after"))
+    thumbnails = stored_thumbnails()
+    return run("Buffer posts", lambda retries: buffer.list_posts(organization_ids, status_filter, after, retries, thumbnails))
+
+
+@app.post("/api/buffer/posts/edit")
+def buffer_posts_edit() -> Any:
+    """Changes the text and/or publish time of posts that are not published yet."""
+    body = json_body()
+    post_ids = parse_post_ids(body.get("postIds"))
+    text = parse_post_text(body["text"]) if body.get("text") is not None else None
+    due_at = parse_due_at(body["dueAt"]) if body.get("dueAt") is not None else None
+    if text is None and due_at is None:
+        raise ServiceError('Nothing to change: send a new "text" or "dueAt".', kind="validation")
+    thumbnails = stored_thumbnails()
+    return run("Buffer edit", lambda retries: buffer.edit_posts(post_ids, text, due_at, retries, thumbnails))
+
+
+@app.post("/api/buffer/posts/delete")
+def buffer_posts_delete() -> Any:
+    """Deletes posts that are not published yet."""
+    post_ids = parse_post_ids(json_body().get("postIds"))
+    return run("Buffer delete", lambda retries: buffer.delete_posts(post_ids, retries))
 
 
 @app.post("/api/media/upload")
@@ -1581,10 +1841,11 @@ def media_upload() -> Any:
     return run("Media upload", store)
 
 
+MEDIA_IMAGE_PATH = "/api/media/image/"
 _IMAGE_FILE_RE = re.compile(r"([a-z0-9-]{1,80})(?:\.(?:parquet|jpe?g|png|webp))?")
 
 
-@app.get("/api/media/image/<filename>")
+@app.get(f"{MEDIA_IMAGE_PATH}<filename>")
 def media_image(filename: str) -> Any:
     """Serves an uploaded image out of its Parquet file on Vercel Blob. Buffer fetches post images
     from here. Takes the name /api/media/upload returned, alone or with .parquet or an image extension."""

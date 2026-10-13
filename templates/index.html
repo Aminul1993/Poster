@@ -598,6 +598,8 @@ fieldset:disabled .tag-editor { opacity: .6; }
 .sched-meta span { display: inline-flex; align-items: center; gap: 4px; }
 .sched-ids { margin-top: 4px; font-family: var(--mono); font-size: 11px; color: var(--faint); word-break: break-all; }
 .sched-actions { display: flex; gap: 2px; }
+.sched-item .error-text { margin-top: 4px; }
+.sched-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 20px 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
 .log-item {
   display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 10px; align-items: baseline;
   padding: 7px 20px; font-size: 12.5px; border-left: 3px solid transparent;
@@ -759,6 +761,9 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
 .modal h2 { font-size: 16px; font-weight: 700; }
 .modal p { margin-top: 6px; font-size: 13.5px; color: var(--text-2); white-space: pre-line; }
 .modal-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; padding: 18px 24px 20px; }
+.modal-wide { width: min(580px, calc(100% - 32px)); }
+.modal-main { flex: 1; min-width: 0; display: grid; gap: 14px; }
+.modal-main > p { margin-top: -8px; }
 
 /* ==========================================================================
    15. Responsive
@@ -833,6 +838,8 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
     <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 3v4M21 5h-4M5 17v4M7 19H3"/></symbol>
     <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
     <symbol id="i-calendar-check" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="m9 16 2 2 4-4"/></symbol>
+    <symbol id="i-calendar-x" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="m10 14 4 4M14 14l-4 4"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
     <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
@@ -852,7 +859,6 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
     <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></symbol>
     <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
-    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
     <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
     <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24M1 1l22 22"/></symbol>
     <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
@@ -927,7 +933,7 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
     </div>
     <div class="kpi">
       <div class="kpi-icon kpi-green"><svg class="icon"><use href="#i-calendar-check"/></svg></div>
-      <div><div class="kpi-value" id="kpi-scheduled">0</div><div class="kpi-label" id="kpi-scheduled-label">Posts scheduled</div></div>
+      <div><div class="kpi-value" id="kpi-scheduled">—</div><div class="kpi-label" id="kpi-scheduled-label">Upcoming in Buffer</div></div>
     </div>
   </section>
 
@@ -1210,14 +1216,23 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
       <div class="card-header">
         <h2 class="card-title" id="sched-title"><svg class="icon"><use href="#i-calendar-check"/></svg>Scheduled posts <span class="count-badge" id="sched-count">0</span></h2>
         <div class="row-actions">
-          <button type="button" class="btn btn-ghost btn-sm" id="clear-schedules" disabled><svg class="icon"><use href="#i-trash"/></svg>Clear history</button>
+          <div class="segmented" role="radiogroup" aria-label="Show posts">
+            <label><input type="radio" name="sched-filter" value="all" checked><span>All</span></label>
+            <label><input type="radio" name="sched-filter" value="upcoming"><span>Upcoming</span></label>
+            <label><input type="radio" name="sched-filter" value="published"><span>Published</span></label>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" id="sched-refresh"><svg class="icon"><use href="#i-refresh"/></svg>Refresh</button>
         </div>
       </div>
-      <ul class="list-reset scroll-area" id="sched-list" aria-label="Scheduled posts" hidden></ul>
+      <ul class="list-reset scroll-area" id="sched-list" aria-label="Posts in Buffer" hidden></ul>
       <div class="empty" id="sched-empty">
         <div class="empty-icon"><svg class="icon"><use href="#i-calendar"/></svg></div>
-        <p class="empty-title">No scheduled posts</p>
-        <p>Posts you schedule appear here with their publish time, channels and Buffer post IDs.</p>
+        <p class="empty-title" id="sched-empty-title">No posts yet</p>
+        <p id="sched-empty-text"></p>
+      </div>
+      <div class="sched-footer" id="sched-footer" hidden>
+        <span id="sched-source"></span>
+        <button type="button" class="btn btn-sm" id="sched-more" hidden>Load more</button>
       </div>
     </section>
 
@@ -1408,6 +1423,34 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
   </form>
 </dialog>
 
+<!-- Edit a scheduled post -->
+<dialog class="modal modal-wide" id="post-dialog" aria-labelledby="post-dialog-title" aria-describedby="post-dialog-sub">
+  <form id="post-form" novalidate>
+    <div class="modal-body">
+      <div class="modal-icon"><svg class="icon"><use href="#i-edit"/></svg></div>
+      <div class="modal-main">
+        <h2 id="post-dialog-title">Edit scheduled post</h2>
+        <p id="post-dialog-sub"></p>
+        <div class="field">
+          <div class="label"><label for="post-text">Post text</label><span class="counter" id="post-text-count"></span></div>
+          <textarea class="textarea" id="post-text" rows="8" aria-describedby="post-text-error"></textarea>
+          <div class="error-text" id="post-text-error" hidden></div>
+        </div>
+        <div class="field">
+          <div class="label"><label for="post-due">Publish at</label><span class="hint" id="post-due-zone"></span></div>
+          <input type="datetime-local" class="input" id="post-due" aria-describedby="post-due-error">
+          <div class="error-text" id="post-due-error" hidden></div>
+        </div>
+        <div class="error-text" id="post-dialog-error" role="alert" hidden></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="post-cancel">Cancel</button>
+      <button type="submit" class="btn btn-primary" id="post-save"><svg class="icon"><use href="#i-check"/></svg>Save changes</button>
+    </div>
+  </form>
+</dialog>
+
 <input type="file" id="import-input" accept="application/json,.json" hidden>
 <div class="toast-region" id="toast-region" aria-live="polite" aria-relevant="additions"></div>
 <script nonce="{{ csp_nonce }}">
@@ -1479,6 +1522,9 @@ const API_CONFIG = Object.freeze({
     bufferValidate: '/api/buffer/validate',
     bufferConnect: '/api/buffer/connect',
     bufferSchedule: '/api/buffer/schedule',
+    bufferPosts: '/api/buffer/posts',
+    bufferEditPosts: '/api/buffer/posts/edit',
+    bufferDeletePosts: '/api/buffer/posts/delete',
     mediaUpload: '/api/media/upload',
     imageGenerate: '/api/image/generate'
   }),
@@ -1510,12 +1556,13 @@ const LIMITS = Object.freeze({
   allowedExtensions: Object.freeze(['jpg', 'jpeg', 'png', 'webp']),
   minHashtags: 10,
   maxHashtags: 15,
+  /** Longest post text the server sends to Buffer. */
+  maxPostChars: 10000,
   analysisMaxEdge: 1280,
   /** Gallery and editor thumbnails; matches the thumbnails the server stores. */
   previewMaxEdge: 400,
   thumbMaxEdge: 160,
   maxLogEntries: 300,
-  maxSchedules: 200,
   maxDrafts: 150,
   maxExtraInstructions: 500,
   minPromptChars: 3,
@@ -1528,6 +1575,7 @@ const STORAGE_KEYS = Object.freeze({
   theme: 'theme',
   ui: 'ui',
   drafts: 'drafts',
+  /** No longer written: scheduled posts come from Buffer. Old copies are removed at start. */
   schedules: 'schedules',
   log: 'log',
   connection: 'connection'
@@ -1741,27 +1789,6 @@ function downloadFile(filename, content, type = 'application/json') {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-/**
- * Copies text to the clipboard, falling back to execCommand for file:// pages.
- * @param {string} text @returns {Promise<boolean>}
- */
-async function copyText(text) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch { /* fall through to the legacy path */ }
-  const area = el('textarea', { style: 'position:fixed;opacity:0;pointer-events:none', readonly: '' });
-  area.value = text;
-  document.body.append(area);
-  area.select();
-  let ok = false;
-  try { ok = document.execCommand('copy'); } catch { ok = false; }
-  area.remove();
-  return ok;
 }
 
 /** Decides whether a URL's host is the local machine. */
@@ -3401,6 +3428,64 @@ function serviceMeta(service) {
   return meta ? { label: meta[0], color: meta[1] } : { label: service ? service.charAt(0).toUpperCase() + service.slice(1) : 'Channel', color: '#64748b' };
 }
 
+/** Post statuses after which a post can no longer change: published, or being published now. */
+const PUBLISHED_STATUSES = Object.freeze(['sent', 'sending']);
+
+/** Statuses each filter of the posts list shows (null: all); matches the server's post_filters. */
+const POST_FILTERS = Object.freeze({ all: null, upcoming: ['scheduled', 'needs_approval', 'sending'], published: ['sent'] });
+
+/**
+ * A post as the posts list shows it, read from Buffer.
+ * @typedef {{postId: string, status: string, published: boolean, dueAt: string|null, sentAt: string|null, createdAt: string|null,
+ *            text: string, channelId: string, channelName: string, service: string, thumbnail: string|null,
+ *            externalLink: string|null, error: string|null}} BufferPost
+ */
+
+/** @param {object} p @returns {BufferPost} */
+function normalizePost(p) {
+  const text = (value) => (typeof value === 'string' && value ? value : null);
+  const https = (value) => (typeof value === 'string' && value.startsWith('https://') ? value : null);
+  return {
+    postId: String(p.postId), status: String(p.status || ''), published: PUBLISHED_STATUSES.includes(p.status),
+    dueAt: text(p.dueAt), sentAt: text(p.sentAt), createdAt: text(p.createdAt), text: String(p.text ?? ''),
+    channelId: String(p.channelId || ''), channelName: String(p.channelName || ''), service: String(p.service || ''),
+    // Demo posts keep the browser-made thumbnail as a data: URL.
+    thumbnail: https(p.thumbnail) || (String(p.thumbnail || '').startsWith('data:image/') ? p.thumbnail : null),
+    externalLink: https(p.externalLink), error: text(p.error)
+  };
+}
+
+/**
+ * Sorts posts the way the server does for a filter: upcoming soonest first,
+ * everything else newest first.
+ * @param {BufferPost[]} posts @param {string} filter @returns {BufferPost[]}
+ */
+function sortPosts(posts, filter) {
+  const key = (p) => p.dueAt || p.createdAt || '';
+  const direction = filter === 'upcoming' ? 1 : -1;
+  return [...posts].sort((a, b) => direction * key(a).localeCompare(key(b)));
+}
+
+/**
+ * Checks the server's answer to listing, editing or deleting posts.
+ * @param {object} data
+ * @returns {{posts: BufferPost[], next: Object<string, string>|null, deleted: string[],
+ *            failures: Array<{postId: string, message: string, reason: 'published'|'missing'|'error'}>}}
+ */
+function normalizePostResults(data) {
+  const posts = Array.isArray(data.posts) ? data.posts.filter((p) => isPlainObject(p) && p.postId) : [];
+  const failures = Array.isArray(data.failures) ? data.failures.filter((f) => isPlainObject(f) && f.postId) : [];
+  return {
+    posts: posts.map(normalizePost),
+    next: isPlainObject(data.next) && Object.keys(data.next).length ? data.next : null,
+    deleted: Array.isArray(data.deleted) ? data.deleted.map(String) : [],
+    failures: failures.map((f) => ({
+      postId: String(f.postId), message: String(f.message || 'Unknown error'),
+      reason: ['published', 'missing'].includes(f.reason) ? f.reason : 'error'
+    }))
+  };
+}
+
 /**
  * Buffer through the Poster server. The server holds the personal access
  * token and talks to Buffer's GraphQL API; the browser caches the account and
@@ -3603,10 +3688,60 @@ class BufferService {
       failures: failures.map((f) => ({ channelId: String(f.channelId), message: String(f.message || 'Unknown error') }))
     };
   }
+
+  /**
+   * One page of the account's posts, read straight from Buffer.
+   * @param {{filter: 'all'|'upcoming'|'published', after?: Object<string, string>|null}} query
+   *   after: the previous page's `next`, for the page after it
+   * @returns {Promise<{posts: BufferPost[], next: Object<string, string>|null}>}
+   */
+  async listPosts({ filter, after = null }) {
+    this.assertConfigured();
+    // Organizations known from connecting save the server a Buffer request.
+    const organizationIds = (this.getConnection()?.account?.organizations || []).map((o) => o.id).filter(Boolean);
+    const data = await this.api.call(API_CONFIG.routes.bufferPosts, {
+      json: { filter, after, organizationIds },
+      timeoutMs: API_CONFIG.timeouts.bufferMs * Math.max(2, organizationIds.length), service: 'Buffer'
+    });
+    const { posts, next } = normalizePostResults(data);
+    return { posts, next };
+  }
+
+  /**
+   * Changes the text and/or publish time of posts. The server skips posts
+   * that are published by now.
+   * @param {string[]} postIds @param {{text?: string, dueAt?: Date}} changes
+   */
+  async editPosts(postIds, { text, dueAt }) {
+    return this.#changePosts(API_CONFIG.routes.bufferEditPosts, postIds, { text: text ?? null, dueAt: dueAt ? dueAt.toISOString() : null });
+  }
+
+  /**
+   * Deletes posts from Buffer. The server skips posts that are published by now.
+   * @param {string[]} postIds
+   */
+  async deletePosts(postIds) {
+    return this.#changePosts(API_CONFIG.routes.bufferDeletePosts, postIds, {});
+  }
+
+  async #changePosts(route, postIds, fields) {
+    this.assertConfigured();
+    // The server reads each post before changing it: two Buffer calls per post.
+    const data = await this.api.call(route, {
+      json: { postIds, ...fields }, timeoutMs: API_CONFIG.timeouts.bufferMs * 2 * Math.max(1, postIds.length), service: 'Buffer'
+    });
+    return normalizePostResults(data);
+  }
 }
 
 /** Demo-mode BufferService: sample channels, simulated latency, fake post IDs. */
 class DemoBufferService extends BufferService {
+  constructor(deps) {
+    super(deps);
+    /** Simulated Buffer posts, in memory only (gone when the tab closes). */
+    this.posts = [];
+  }
+
   get isDemo() { return true; }
 
   getConnection() {
@@ -3659,9 +3794,56 @@ class DemoBufferService extends BufferService {
     const posts = [];
     for (const channelId of post.channelIds) {
       await sleep(220 + (hashString(channelId + post.text) % 300));
-      posts.push({ channelId, postId: uid('demo').replace('_', '-'), dueAt: post.dueAt.toISOString(), status: 'scheduled' });
+      const created = { channelId, postId: uid('demo').replace('_', '-'), dueAt: post.dueAt.toISOString(), status: 'scheduled' };
+      posts.push(created);
+      const channel = this.channels().find((c) => c.id === channelId);
+      this.posts.push({
+        ...created, text: post.text, createdAt: new Date().toISOString(), channelName: channel?.name || channelId,
+        service: channel?.service || '', thumbnail: post.thumbnailUrl || null
+      });
     }
     return { posts, failures: [] };
+  }
+
+  /** Demo posts count as published once their publish time has passed. */
+  #current() {
+    const now = Date.now();
+    return this.posts.map((p) => {
+      const sent = new Date(p.dueAt).getTime() <= now;
+      return normalizePost({ ...p, status: sent ? 'sent' : p.status, sentAt: sent ? p.dueAt : null });
+    });
+  }
+
+  async listPosts({ filter }) {
+    await sleep(250);
+    const statuses = POST_FILTERS[filter];
+    return { posts: sortPosts(this.#current().filter((p) => !statuses || statuses.includes(p.status)), filter), next: null };
+  }
+
+  async editPosts(postIds, { text, dueAt }) {
+    await sleep(350);
+    const results = { posts: [], failures: [] };
+    for (const post of this.#current().filter((p) => postIds.includes(p.postId))) {
+      if (post.published) {
+        results.failures.push({ postId: post.postId, message: 'This post has already been published, so it can no longer be changed.', reason: 'published' });
+        continue;
+      }
+      const stored = this.posts.find((p) => p.postId === post.postId);
+      if (text !== undefined) stored.text = text;
+      if (dueAt) stored.dueAt = dueAt.toISOString();
+      results.posts.push(stored);
+    }
+    return normalizePostResults(results);
+  }
+
+  async deletePosts(postIds) {
+    await sleep(350);
+    const published = this.#current().filter((p) => p.published && postIds.includes(p.postId)).map((p) => p.postId);
+    const deleted = postIds.filter((id) => !published.includes(id));
+    this.posts = this.posts.filter((p) => !deleted.includes(p.postId));
+    return normalizePostResults({
+      deleted, failures: published.map((postId) => ({ postId, message: 'This post has already been published, so it can no longer be changed.', reason: 'published' }))
+    });
   }
 }
 
@@ -3888,6 +4070,30 @@ class ImageStore extends EventTarget {
     this.persistDrafts();
   }
 
+  /**
+   * Updates the schedule result of images whose Buffer posts changed, open in
+   * the gallery or saved as drafts.
+   * @param {string[]} postIds
+   * @param {object|null} patch fields to change, or null when the posts were deleted (an image with
+   *   none of its posts left can be scheduled again)
+   */
+  updateResultsForPosts(postIds, patch) {
+    const matches = (result) => Array.isArray(result?.postIds) && result.postIds.some((id) => postIds.includes(id));
+    const apply = (result) => {
+      if (patch) return { ...result, ...patch };
+      const keep = result.postIds.map((id) => !postIds.includes(id));
+      const remaining = result.postIds.filter((_, i) => keep[i]);
+      return remaining.length ? { ...result, postIds: remaining, channels: (result.channels || []).filter((_, i) => keep[i]) } : null;
+    };
+    for (const item of this.items) {
+      if (matches(item.result)) this.update(item.id, { result: apply(item.result) }, { reason: 'status' });
+    }
+    for (const draft of Object.values(this.drafts)) {
+      if (matches(draft?.result)) draft.result = apply(draft.result);
+    }
+    this.persistDrafts();
+  }
+
   /** @returns {number} number of saved drafts */
   draftCount() {
     return Object.keys(this.drafts).length;
@@ -3913,7 +4119,7 @@ class ImageStore extends EventTarget {
 }
 
 /* ==========================================================================
- * SchedulerService — bulk operations, progress, cancellation, history
+ * SchedulerService — bulk operations, progress and cancellation
  * ========================================================================== */
 
 /**
@@ -3948,9 +4154,8 @@ class SchedulerService extends EventTarget {
     this.getBuffer = getBuffer;
     /** @type {Operation|null} */
     this.current = null;
-    const history = storage.get(STORAGE_KEYS.schedules, []);
-    /** @type {object[]} newest first */
-    this.history = Array.isArray(history) ? history.filter((r) => isPlainObject(r) && typeof r.dueAt === 'string' && Array.isArray(r.channels)) : [];
+    // Scheduled posts are read from Buffer now; drop the list older versions kept in the browser.
+    storage.remove(STORAGE_KEYS.schedules);
   }
 
   /** @returns {boolean} */
@@ -4122,33 +4327,21 @@ class SchedulerService extends EventTarget {
       }
 
       const text = this.composeText(item);
-      const result = await buffer.schedulePost({ text, channelIds, dueAt: check.date, mediaUrl }, { settings, onRetry });
-      const record = {
-        id: uid('sched'),
-        createdAt: new Date().toISOString(),
-        mode: buffer.isDemo ? 'demo' : 'live',
-        imageName: item.name,
-        fingerprint: item.fingerprint,
-        // The stored thumbnail's URL when there is one, which keeps saved history small.
-        thumb: item.uploadedThumbUrl || item.thumbDataUrl,
-        text: truncate(text, 700),
-        dueAt: check.date.toISOString(),
-        timezone: settings.timezone,
-        category: item.content.category,
-        score: item.content.engagement_score,
-        mediaUrl: mediaUrl || null,
-        channels: result.posts.map((p) => ({ id: p.channelId, name: buffer.channelName(p.channelId, settings), service: buffer.channelService(p.channelId, settings), postId: p.postId })),
-        failures: result.failures.map((f) => ({ id: f.channelId, name: buffer.channelName(f.channelId, settings), message: f.message }))
-      };
-      this.addHistory(record);
-      const partial = record.failures.length > 0;
+      // Demo mode shows the thumbnail in its simulated posts list; the server ignores it.
+      const listThumbnail = thumbnailUrl || item.uploadedThumbUrl || item.thumbDataUrl;
+      const result = await buffer.schedulePost({ text, channelIds, dueAt: check.date, mediaUrl, thumbnailUrl: listThumbnail }, { settings, onRetry });
+      const postIds = result.posts.map((p) => p.postId);
+      const failures = result.failures.map((f) => ({ id: f.channelId, name: buffer.channelName(f.channelId, settings), message: f.message }));
       this.store.update(item.id, {
         busy: null, error: null, errorHint: '', errorPhase: null, showErrors: false,
-        result: { recordId: record.id, dueAt: record.dueAt, timezone: record.timezone, mode: record.mode, postIds: record.channels.map((c) => c.postId), channels: record.channels.map((c) => c.name), partial, failures: record.failures }
+        result: {
+          dueAt: check.date.toISOString(), timezone: settings.timezone, mode: buffer.isDemo ? 'demo' : 'live', postIds,
+          channels: result.posts.map((p) => buffer.channelName(p.channelId, settings)), partial: failures.length > 0, failures
+        }
       }, { reason: 'scheduled' });
       const when = TimeZoneUtil.format(check.date, settings.timezone);
-      this.notifier.log('success', 'schedule', `${buffer.isDemo ? '[Demo] ' : ''}Scheduled "${item.name}" for ${when} on ${pluralize(record.channels.length, 'channel')}.`, `Post IDs: ${record.channels.map((c) => c.postId).join(', ')}`);
-      for (const failure of record.failures) {
+      this.notifier.log('success', 'schedule', `${buffer.isDemo ? '[Demo] ' : ''}Scheduled "${item.name}" for ${when} on ${pluralize(postIds.length, 'channel')}.`, `Post IDs: ${postIds.join(', ')}`);
+      for (const failure of failures) {
         this.notifier.log('warn', 'schedule', `"${item.name}" was not scheduled on ${failure.name}: ${failure.message}`);
       }
       return 'done';
@@ -4196,35 +4389,169 @@ class SchedulerService extends EventTarget {
     return slot;
   }
 
-  /** @param {object} record */
-  addHistory(record) {
-    this.history.unshift(record);
-    if (this.history.length > LIMITS.maxSchedules) this.history.length = LIMITS.maxSchedules;
-    this.#saveHistory();
-    this.dispatchEvent(new CustomEvent('history'));
-  }
-
-  /** @param {string} id */
-  removeHistory(id) {
-    this.history = this.history.filter((r) => r.id !== id);
-    this.#saveHistory();
-    this.dispatchEvent(new CustomEvent('history'));
-  }
-
-  clearHistory() {
-    this.history = [];
-    this.#saveHistory();
-    this.dispatchEvent(new CustomEvent('history'));
-  }
-
-  #saveHistory() {
-    this.storage.set(STORAGE_KEYS.schedules, this.history, {
-      shrink: (history) => history.slice(0, 60).map((r, i) => (i < 20 ? r : { ...r, thumb: '' }))
-    });
-  }
-
   #emit(type, op) {
     this.dispatchEvent(new CustomEvent(type, { detail: op }));
+  }
+}
+
+/* ==========================================================================
+ * BufferPostsFeed — the Scheduled posts card, read straight from Buffer
+ * ========================================================================== */
+
+/**
+ * Posts as Buffer has them, kept in memory only. Buffer's API allows few
+ * requests (100 per 15 minutes on the free plan), so the list loads at start,
+ * on Refresh, when the filter or mode changes and after scheduling; edits and
+ * deletes update it from Buffer's own answer instead of reloading. Emits
+ * "change" whenever there is something new to render.
+ */
+class BufferPostsFeed extends EventTarget {
+  constructor({ notifier, store, getBuffer }) {
+    super();
+    this.notifier = notifier;
+    this.store = store;
+    this.getBuffer = getBuffer;
+    /** @type {'all'|'upcoming'|'published'} */
+    this.filter = 'all';
+    /** @type {BufferPost[]} */
+    this.posts = [];
+    /** @type {Object<string, string>|null} cursor per organization for the next page */
+    this.next = null;
+    /** @type {false|'all'|'more'} */
+    this.loading = false;
+    /** @type {ApiError|null} why the last load failed */
+    this.error = null;
+    /** @type {{at: number, demo: boolean}|null} when the list was last read from Buffer */
+    this.loaded = null;
+    /** @type {Set<string>} posts with an edit or delete in flight */
+    this.busy = new Set();
+    this.request = 0;
+  }
+
+  /** @param {'all'|'upcoming'|'published'} filter */
+  setFilter(filter) {
+    if (!(filter in POST_FILTERS) || filter === this.filter) return;
+    this.filter = filter;
+    this.load();
+  }
+
+  /**
+   * Reads the first page (or, with `more`, the next one) from Buffer. A newer
+   * load supersedes one still in flight.
+   * @param {{more?: boolean}} [options]
+   */
+  async load({ more = false } = {}) {
+    if (more && (!this.next || this.loading)) return;
+    const buffer = this.getBuffer();
+    const request = ++this.request;
+    this.loading = more ? 'more' : 'all';
+    this.error = null;
+    this.#emit();
+    try {
+      const page = await buffer.listPosts({ filter: this.filter, after: more ? this.next : null });
+      if (request !== this.request) return;
+      const known = new Set(more ? this.posts.map((p) => p.postId) : []);
+      this.posts = sortPosts([...(more ? this.posts : []), ...page.posts.filter((p) => !known.has(p.postId))], this.filter);
+      this.next = page.next;
+      this.loaded = { at: Date.now(), demo: buffer.isDemo };
+    } catch (error) {
+      if (request !== this.request) return;
+      this.error = error;
+      if (!more) {
+        this.posts = [];
+        this.next = null;
+        this.loaded = null;
+      }
+      // A missing Buffer setup is already reported by the startup banner.
+      if (error.kind !== 'config') this.notifier.log('error', 'schedule', `Could not load posts from Buffer: ${error.message}`, error.hint || '');
+    } finally {
+      if (request === this.request) {
+        this.loading = false;
+        this.#emit();
+      }
+    }
+  }
+
+  /** @param {string} postId @returns {BufferPost|null} */
+  get(postId) {
+    return this.posts.find((p) => p.postId === postId) || null;
+  }
+
+  /** @param {BufferPost} post @returns {boolean} whether it can still be edited or deleted */
+  static canChange(post) {
+    return !post.published;
+  }
+
+  /**
+   * Changes a post's text and/or publish time in Buffer, and shows the post as
+   * Buffer returns it. Throws when Buffer did not change it.
+   * @param {string} postId @param {{text?: string, dueAt?: Date}} changes
+   */
+  async edit(postId, changes) {
+    const result = await this.#change(postId, (buffer) => buffer.editPosts([postId], changes));
+    const updated = result.posts.find((p) => p.postId === postId);
+    if (!updated) throw this.#failure(result, 'The post was not changed');
+    this.#replace(postId, updated);
+    if (changes.dueAt) this.store.updateResultsForPosts([postId], { dueAt: updated.dueAt || changes.dueAt.toISOString() });
+    const what = [changes.text !== undefined && 'text', changes.dueAt && 'publish time'].filter(Boolean).join(' and ');
+    this.notifier.log('success', 'schedule', `${this.#label(updated)}: changed the ${what} in Buffer.`, `Post ID: ${postId}`);
+    return updated;
+  }
+
+  /**
+   * Deletes a post from Buffer and removes it from the list. Its image can be
+   * scheduled again. Throws when Buffer did not delete it.
+   * @param {string} postId
+   */
+  async remove(postId) {
+    const post = this.get(postId);
+    const result = await this.#change(postId, (buffer) => buffer.deletePosts([postId]));
+    if (!result.deleted.includes(postId)) throw this.#failure(result, 'The post was not deleted');
+    this.posts = this.posts.filter((p) => p.postId !== postId);
+    this.store.updateResultsForPosts([postId], null);
+    this.notifier.log('success', 'schedule', `${post ? this.#label(post) : 'Post'}: deleted from Buffer.`, `Post ID: ${postId}`);
+    this.#emit();
+  }
+
+  async #change(postId, request) {
+    this.busy.add(postId);
+    this.#emit();
+    try {
+      const result = await request(this.getBuffer());
+      // Learn from refusals: a post published or deleted in the meantime.
+      for (const failure of result.failures) {
+        if (failure.reason === 'missing') this.posts = this.posts.filter((p) => p.postId !== failure.postId);
+        if (failure.reason === 'published') {
+          const post = this.get(failure.postId);
+          if (post) this.#replace(post.postId, { ...post, status: 'sent', published: true });
+        }
+      }
+      return result;
+    } finally {
+      this.busy.delete(postId);
+      this.#emit();
+    }
+  }
+
+  #replace(postId, post) {
+    this.posts = this.posts.map((p) => (p.postId === postId ? post : p));
+    this.#emit();
+  }
+
+  #failure(result, prefix) {
+    const failure = result.failures[0];
+    const error = new ApiError(failure ? `${prefix}: ${failure.message}` : `${prefix}.`, { kind: failure?.reason === 'published' ? 'validation' : 'client', service: 'Buffer' });
+    this.notifier.log('warn', 'schedule', error.message);
+    return error;
+  }
+
+  /** @param {BufferPost} post */
+  #label(post) {
+    return `${this.loaded?.demo ? '[Demo] ' : ''}${post.channelName || 'Post'} post "${truncate(post.text.replace(/\s+/g, ' '), 40)}"`;
+  }
+
+  #emit() {
+    this.dispatchEvent(new CustomEvent('change'));
   }
 }
 
@@ -4270,12 +4597,17 @@ class UIController {
     this.opTicker = null;
     this.lastOp = null;
     this.logRenderQueued = false;
+    /** @type {{postId: string, text: string, dueLocal: string, zone: string, saving: boolean}|null} the post being edited */
+    this.postEdit = null;
+    /** @type {{count: number, more: boolean}|null} upcoming posts in Buffer, as last loaded */
+    this.upcomingKpi = null;
     this.ui = { logFilter: 'all', plannerOpen: false, planInterval: null, imageSource: 'upload', imageAspect: 'square' };
   }
 
   get settings() { return this.app.settings; }
   get store() { return this.app.store; }
   get scheduler() { return this.app.scheduler; }
+  get feed() { return this.app.feed; }
   get notifier() { return this.app.notifier; }
   get validation() { return this.app.validation; }
 
@@ -4296,6 +4628,7 @@ class UIController {
     this.bindServices();
     this.renderAll();
     this.showStartupBanners();
+    this.feed.load();
   }
 
   /* ================================================================ theme */
@@ -4409,13 +4742,15 @@ class UIController {
     const items = this.store.all();
     const generated = items.filter(hasContent).length;
     const ready = items.filter((i) => hasContent(i) && !i.result).length;
-    const history = this.scheduler.history;
-    const upcoming = history.filter((r) => new Date(r.dueAt).getTime() > Date.now()).length;
+    // Upcoming posts in Buffer, counted whenever the posts list includes them ("+" while more pages exist).
+    if (this.feed.loaded && this.feed.filter !== 'published') {
+      this.upcomingKpi = { count: this.feed.posts.filter((p) => POST_FILTERS.upcoming.includes(p.status)).length, more: Boolean(this.feed.next) };
+    }
     byId('kpi-images').textContent = `${items.length} / ${LIMITS.maxImages}`;
     byId('kpi-generated').textContent = String(generated);
     byId('kpi-ready').textContent = String(ready);
-    byId('kpi-scheduled').textContent = String(history.length);
-    byId('kpi-scheduled-label').textContent = history.length ? `Posts scheduled · ${upcoming} upcoming` : 'Posts scheduled';
+    byId('kpi-scheduled').textContent = this.upcomingKpi ? `${this.upcomingKpi.count}${this.upcomingKpi.more ? '+' : ''}` : '—';
+    byId('kpi-scheduled-label').textContent = 'Upcoming in Buffer';
     byId('capacity-bar').style.width = `${(items.length / LIMITS.maxImages) * 100}%`;
     byId('capacity-label').textContent = `${items.length} of ${LIMITS.maxImages} slots used`;
     const full = items.length >= LIMITS.maxImages;
@@ -4463,8 +4798,8 @@ class UIController {
   /** @param {object} item @returns {HTMLElement} */
   createCard(item) {
     const refs = {};
-    refs.img = el('img', { alt: '', loading: 'lazy', draggable: 'false' });
-    showThumbnail(refs.img, item);
+    // Always the thumbnail made in the browser, also after the image is uploaded.
+    refs.img = el('img', { src: item.previewUrl, alt: '', loading: 'lazy', draggable: 'false' });
     refs.media = el('button', { type: 'button', class: 'thumb-media', dataset: { action: 'activate', focusKey: `${item.id}:activate` } }, [refs.img]);
     refs.checkbox = el('input', { type: 'checkbox', dataset: { action: 'select', focusKey: `${item.id}:select` }, 'aria-label': `Select ${item.name}` });
     refs.index = el('span', { class: 'thumb-index', 'aria-hidden': 'true' });
@@ -4500,7 +4835,6 @@ class UIController {
     const status = itemStatus(item);
     card.classList.toggle('is-active', active);
     card.classList.toggle('is-selected', item.selected);
-    showThumbnail(refs.img, item);
     refs.checkbox.checked = item.selected;
     refs.index.textContent = String(index + 1);
     refs.media.setAttribute('aria-label', `Image ${index + 1} of ${total}: ${item.name}, ${status.label}. Open in editor.`);
@@ -4811,43 +5145,68 @@ class UIController {
 
   /* ------------------------------------------------------ schedules & log */
 
+  /** The Scheduled posts card: posts as last read from Buffer. */
   renderSchedules() {
+    const feed = this.feed;
+    const { posts } = feed;
     const list = byId('sched-list');
-    const history = this.scheduler.history;
-    byId('sched-count').textContent = String(history.length);
-    byId('clear-schedules').disabled = !history.length;
-    list.hidden = !history.length;
-    byId('sched-empty').hidden = history.length > 0;
-    const now = Date.now();
-    list.replaceChildren(...history.map((record) => {
-      const due = new Date(record.dueAt);
-      const past = due.getTime() <= now;
-      const partial = record.failures?.length > 0;
-      const chips = [];
-      if (record.mode === 'demo') chips.push(el('span', { class: 'chip chip-accent', text: 'Demo' }));
-      chips.push(el('span', {
-        class: `chip ${partial ? 'chip-warning' : past ? 'chip-neutral' : 'chip-success'}`,
-        text: partial ? 'Partly scheduled' : past ? 'Publish time passed' : 'Scheduled'
-      }));
-      const ids = record.channels.map((c) => c.postId).join(', ');
+    byId('sched-count').textContent = `${posts.length}${feed.next ? '+' : ''}`;
+    for (const input of document.querySelectorAll('input[name="sched-filter"]')) input.checked = input.value === feed.filter;
+    byId('sched-refresh').classList.toggle('is-loading', feed.loading === 'all');
+    byId('sched-refresh').disabled = Boolean(feed.loading);
+    list.setAttribute('aria-busy', String(Boolean(feed.loading)));
+    list.hidden = !posts.length;
+    byId('sched-empty').hidden = posts.length > 0;
+    if (!posts.length) {
+      const emptyTitles = { all: 'No posts in Buffer', upcoming: 'Nothing scheduled in Buffer', published: 'Nothing published yet' };
+      const pending = feed.loading || (!feed.loaded && !feed.error);
+      byId('sched-empty-title').textContent = pending ? 'Loading posts from Buffer…' : feed.error ? 'Could not load posts from Buffer' : emptyTitles[feed.filter];
+      byId('sched-empty-text').textContent = pending ? '' : feed.error
+        ? [feed.error.message, feed.error.hint].filter(Boolean).join(' ')
+        : 'Posts scheduled here or in Buffer appear in this list, read directly from Buffer. Until they are published, you can edit or delete them.';
+    }
+    const footer = byId('sched-footer');
+    footer.hidden = !feed.loaded && !posts.length;
+    byId('sched-source').textContent = feed.error && posts.length
+      ? `Could not load more: ${feed.error.message}`
+      : feed.loaded ? `${feed.loaded.demo ? 'Simulated Demo posts, kept in this tab only' : 'Read from Buffer'} · ${new Date(feed.loaded.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : '';
+    const more = byId('sched-more');
+    more.hidden = !feed.next;
+    more.disabled = Boolean(feed.loading);
+    more.classList.toggle('is-loading', feed.loading === 'more');
+
+    const statusChips = {
+      scheduled: ['Scheduled', 'success'], needs_approval: ['Needs approval', 'warning'], sending: ['Publishing', 'info'],
+      sent: ['Published', 'neutral'], error: ['Failed', 'danger'], draft: ['Draft', 'neutral']
+    };
+    const zone = this.settings.timezone;
+    list.replaceChildren(...posts.map((post) => {
+      const when = post.sentAt || post.dueAt;
+      const [label, tone] = statusChips[post.status] || [post.status || 'Unknown', 'neutral'];
+      const meta = serviceMeta(post.service);
+      const busy = feed.busy.has(post.postId);
+      const changeable = BufferPostsFeed.canChange(post);
+      const name = post.channelName || meta.label;
       return el('li', { class: 'sched-item' }, [
-        record.thumb
-          ? el('img', { class: 'sched-thumb', src: record.thumb, alt: '', onerror: (e) => e.target.replaceWith(el('div', { class: 'sched-thumb', 'aria-hidden': 'true' })) })
+        post.thumbnail
+          ? el('img', { class: 'sched-thumb', src: post.thumbnail, alt: '', loading: 'lazy', onerror: (e) => e.target.replaceWith(el('div', { class: 'sched-thumb', 'aria-hidden': 'true' })) })
           : el('div', { class: 'sched-thumb', 'aria-hidden': 'true' }),
         el('div', { style: 'min-width:0' }, [
-          el('div', { class: 'sched-text', text: record.text }),
+          el('div', { class: 'sched-text', text: post.text || '(no text)' }),
           el('div', { class: 'sched-meta' }, [
-            el('span', {}, [icon('calendar'), TimeZoneUtil.format(due, record.timezone)]),
-            el('span', {}, [icon('clock'), relativeTime(due)]),
-            el('span', {}, [icon('layers'), record.channels.map((c) => c.name).join(', ') || '—']),
-            ...chips
+            when ? el('span', {}, [icon('calendar'), TimeZoneUtil.format(new Date(when), zone)]) : el('span', {}, [icon('calendar'), 'No publish time']),
+            when ? el('span', {}, [icon('clock'), relativeTime(new Date(when))]) : null,
+            el('span', {}, [el('span', { style: `width:8px;height:8px;border-radius:2px;background:${meta.color};flex:none` }), `${name} · ${meta.label}`]),
+            feed.loaded?.demo ? el('span', { class: 'chip chip-accent', text: 'Demo' }) : null,
+            el('span', { class: `chip chip-${tone}`, text: label })
           ]),
-          el('div', { class: 'sched-ids', text: `${record.imageName} · Post IDs: ${ids || '—'}` }),
-          partial ? el('div', { class: 'error-text', text: record.failures.map((f) => `${f.name}: ${f.message}`).join(' · ') }) : null
+          el('div', { class: 'sched-ids', text: `Post ID: ${post.postId}` }),
+          post.error ? el('div', { class: 'error-text', text: post.error }) : null
         ]),
         el('div', { class: 'sched-actions' }, [
-          el('button', { type: 'button', class: 'btn btn-ghost btn-icon btn-sm', 'aria-label': `Copy post IDs for ${record.imageName}`, title: 'Copy post IDs', dataset: { action: 'copy', id: record.id } }, [icon('copy')]),
-          el('button', { type: 'button', class: 'btn btn-ghost btn-icon btn-sm', 'aria-label': `Remove ${record.imageName} from history`, title: 'Remove from history', dataset: { action: 'remove', id: record.id } }, [icon('trash')])
+          changeable ? el('button', { type: 'button', class: `btn btn-ghost btn-icon btn-sm${busy ? ' is-loading' : ''}`, disabled: busy, 'aria-label': `Edit this ${name} post in Buffer`, title: 'Edit post', dataset: { action: 'edit', id: post.postId } }, [icon('edit')]) : null,
+          changeable ? el('button', { type: 'button', class: 'btn btn-ghost btn-icon btn-sm', disabled: busy, 'aria-label': `Delete this ${name} post from Buffer`, title: 'Delete post from Buffer', dataset: { action: 'delete-post', id: post.postId } }, [icon('calendar-x')]) : null,
+          post.externalLink ? el('a', { class: 'btn btn-ghost btn-icon btn-sm', href: post.externalLink, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `Open the published ${name} post`, title: 'Open published post' }, [icon('link')]) : null
         ])
       ]);
     }));
@@ -5442,31 +5801,19 @@ class UIController {
   }
 
   bindLists() {
-    byId('sched-list').addEventListener('click', async (event) => {
+    byId('sched-list').addEventListener('click', (event) => {
       const button = event.target.closest('button[data-action]');
-      if (!button) return;
-      const record = this.scheduler.history.find((r) => r.id === button.dataset.id);
-      if (!record) return;
-      if (button.dataset.action === 'copy') {
-        const ids = record.channels.map((c) => `${c.name}: ${c.postId}`).join('\n');
-        const ok = await copyText(ids);
-        showToast(ok ? 'Post IDs copied to the clipboard.' : 'Copying failed. Your browser blocked clipboard access.', ok ? 'success' : 'error');
-      } else if (button.dataset.action === 'remove') {
-        this.scheduler.removeHistory(record.id);
-        this.notifier.log('info', 'user', `Removed "${record.imageName}" from the schedule history (the Buffer post is not deleted).`);
-      }
+      const post = button && this.feed.get(button.dataset.id);
+      if (!post) return;
+      if (button.dataset.action === 'edit') this.openPostDialog(post);
+      else if (button.dataset.action === 'delete-post') this.deleteScheduledPost(post);
     });
-    byId('clear-schedules').addEventListener('click', async () => {
-      const ok = await this.confirm({
-        title: 'Clear schedule history?',
-        message: 'This only clears the list in Poster. Posts already scheduled in Buffer are not affected.',
-        confirmLabel: 'Clear history',
-        danger: true
-      });
-      if (!ok) return;
-      this.scheduler.clearHistory();
-      this.notifier.log('info', 'user', 'Cleared the scheduled posts history.');
-    });
+    for (const input of document.querySelectorAll('input[name="sched-filter"]')) {
+      input.addEventListener('change', () => this.feed.setFilter(input.value));
+    }
+    byId('sched-refresh').addEventListener('click', () => this.feed.load());
+    byId('sched-more').addEventListener('click', () => this.feed.load({ more: true }));
+    this.bindPostDialog();
     byId('log-filter').addEventListener('change', (event) => {
       this.ui.logFilter = event.target.value;
       this.saveUiPrefs();
@@ -5542,7 +5889,7 @@ class UIController {
       this.opTicker = null;
       this.onOperationComplete(event.detail);
     });
-    this.scheduler.addEventListener('history', () => { this.renderSchedules(); this.renderKpis(); });
+    this.feed.addEventListener('change', () => { this.renderSchedules(); this.renderKpis(); });
     this.notifier.addEventListener('log', () => this.queueLogRender());
     this.app.storage.addEventListener('storage-error', (event) => this.onStorageError(event.detail));
     this.app.storage.addEventListener('storage-warning', (event) => showToast(event.detail.message, 'warning'));
@@ -5552,6 +5899,8 @@ class UIController {
   onOperationComplete(op) {
     this.renderOpStatus(op);
     this.renderAll();
+    // Show the new posts as Buffer has them: one reload per scheduling run.
+    if (op.kind === 'schedule' && op.succeeded) this.feed.load();
     const isGen = op.kind === 'generate';
     const service = isGen ? 'ollama' : 'buffer';
     const live = this.settings.mode === 'live';
@@ -5609,7 +5958,7 @@ class UIController {
       this.notifier.banner('storage', {
         type: 'warning',
         title: 'Browser storage is unavailable',
-        message: 'Settings, drafts and history work for this session but are lost when you close the tab (private mode or blocked site data).'
+        message: 'Settings and drafts work for this session but are lost when you close the tab (private mode or blocked site data).'
       });
     }
     if (navigator.onLine === false) {
@@ -5682,6 +6031,8 @@ class UIController {
     if (previous.mode !== next.mode) {
       this.notifier.log('info', 'settings', `Switched to ${next.mode === 'demo' ? 'Demo' : 'Live'} mode.`);
       this.showImageGenError('');
+      this.upcomingKpi = null;
+      this.feed.load();
     }
     if (previous.model !== next.model) this.health.ollama = null;
     if (previous.timezone !== next.timezone) byId('plan-start').value = '';
@@ -5730,6 +6081,119 @@ class UIController {
       choices: [{ value: 'confirm', label: confirmLabel, primary: !danger, danger }]
     });
     return value === 'confirm';
+  }
+
+  /* ====================================================== scheduled posts */
+
+  /**
+   * Opens the editor for a post as it was last read from Buffer. The server
+   * checks again that it is not published before changing it.
+   * @param {BufferPost} post
+   */
+  openPostDialog(post) {
+    if (byId('post-dialog').open || this.feed.busy.has(post.postId) || !BufferPostsFeed.canChange(post)) return;
+    const zone = this.settings.timezone;
+    const dueLocal = post.dueAt ? TimeZoneUtil.toLocalInput(new Date(post.dueAt), zone) : '';
+    this.postEdit = { postId: post.postId, text: post.text, dueLocal, zone, saving: false };
+    const channel = `${post.channelName || serviceMeta(post.service).label} (${serviceMeta(post.service).label})`;
+    byId('post-dialog-sub').textContent = `On ${channel}. If Buffer publishes it before you save, it is left as published.`;
+    byId('post-text').value = post.text;
+    byId('post-due').value = dueLocal;
+    byId('post-due').min = TimeZoneUtil.toLocalInput(new Date(), zone);
+    byId('post-due-zone').textContent = zone;
+    this.updatePostTextCount();
+    for (const field of ['post-text', 'post-due']) this.setFieldError(field, null);
+    byId('post-dialog-error').hidden = true;
+    this.setPostDialogSaving(false);
+    byId('post-dialog').showModal();
+    byId('post-text').focus();
+  }
+
+  bindPostDialog() {
+    const dialog = byId('post-dialog');
+    byId('post-form').addEventListener('submit', (event) => { event.preventDefault(); this.savePostDialog(); });
+    byId('post-cancel').addEventListener('click', () => { if (!this.postEdit?.saving) dialog.close(); });
+    dialog.addEventListener('cancel', (event) => { if (this.postEdit?.saving) event.preventDefault(); });
+    dialog.addEventListener('close', () => { this.postEdit = null; });
+    byId('post-text').addEventListener('input', () => this.updatePostTextCount());
+  }
+
+  updatePostTextCount() {
+    const length = charCount(byId('post-text').value);
+    const counter = byId('post-text-count');
+    counter.textContent = `${length} characters${length > 280 ? ' · over X’s 280 limit' : ''}`;
+  }
+
+  /** @param {boolean} saving */
+  setPostDialogSaving(saving) {
+    if (this.postEdit) this.postEdit.saving = saving;
+    byId('post-save').classList.toggle('is-loading', saving);
+    for (const id of ['post-text', 'post-due', 'post-save', 'post-cancel']) byId(id).disabled = saving;
+  }
+
+  /** Validates the dialog, sends only what changed, and keeps the dialog open on errors. */
+  async savePostDialog() {
+    const edit = this.postEdit;
+    if (!edit || edit.saving) return;
+    const text = byId('post-text').value;
+    const dueLocal = byId('post-due').value;
+    const changes = {};
+    const errors = {};
+    if (text !== edit.text) {
+      if (!text.trim()) errors['post-text'] = 'The post text cannot be empty.';
+      else if (text.length > LIMITS.maxPostChars) errors['post-text'] = `Keep the post under ${LIMITS.maxPostChars.toLocaleString()} characters.`;
+      else changes.text = text;
+    }
+    if (dueLocal !== edit.dueLocal) {
+      const check = this.validation.validateSchedule(dueLocal, { ...this.settings, timezone: edit.zone });
+      if (check.valid) changes.dueAt = check.date;
+      else errors['post-due'] = check.error;
+    }
+    for (const field of ['post-text', 'post-due']) this.setFieldError(field, errors[field] || null);
+    byId('post-dialog-error').hidden = true;
+    if (Object.keys(errors).length) {
+      byId(Object.keys(errors)[0]).focus();
+      return;
+    }
+    if (!Object.keys(changes).length) {
+      byId('post-dialog').close();
+      showToast('Nothing changed, so Buffer was not updated.', 'info');
+      return;
+    }
+    this.setPostDialogSaving(true);
+    try {
+      await this.feed.edit(edit.postId, changes);
+      this.setPostDialogSaving(false);
+      byId('post-dialog').close();
+      showToast('The post was updated in Buffer.', 'success');
+    } catch (error) {
+      this.setPostDialogSaving(false);
+      const box = byId('post-dialog-error');
+      box.textContent = [error.message, error.hint].filter(Boolean).join(' ');
+      box.hidden = false;
+    }
+  }
+
+  /**
+   * Deletes a post from Buffer after confirmation.
+   * @param {BufferPost} post
+   */
+  async deleteScheduledPost(post) {
+    if (this.feed.busy.has(post.postId) || !BufferPostsFeed.canChange(post)) return;
+    const channel = `${post.channelName || serviceMeta(post.service).label} (${serviceMeta(post.service).label})`;
+    const ok = await this.confirm({
+      title: 'Delete this post from Buffer?',
+      message: `"${truncate(post.text.replace(/\s+/g, ' '), 80)}" on ${channel} will be deleted from Buffer and will not be published. This cannot be undone.`,
+      confirmLabel: 'Delete post',
+      danger: true
+    });
+    if (!ok) return;
+    try {
+      await this.feed.remove(post.postId);
+      showToast('The post was deleted from Buffer.', 'success');
+    } catch (error) {
+      showToast(error.message, 'error', { title: 'Could not delete the post' });
+    }
   }
 
   /* ============================================================= settings */
@@ -6322,6 +6786,7 @@ const app = {
   /** @type {DemoBufferService} */ demoBuffer: null,
   /** @type {ImageStore} */ store: null,
   /** @type {SchedulerService} */ scheduler: null,
+  /** @type {BufferPostsFeed} */ feed: null,
   /** @type {UIController} */ ui: null,
   /** @returns {OllamaService} the service for the current mode */
   getOllama() { return this.settings.mode === 'demo' ? this.demoOllama : this.liveOllama; },
@@ -6554,6 +7019,7 @@ function bootstrap() {
     getOllama: () => app.getOllama(),
     getBuffer: () => app.getBuffer()
   });
+  app.feed = new BufferPostsFeed({ notifier: app.notifier, store: app.store, getBuffer: () => app.getBuffer() });
   app.ui = new UIController(app);
   app.ui.init();
   app.notifier.log('info', 'system', `Poster ${APP_VERSION} started in ${app.settings.mode === 'demo' ? 'Demo' : 'Live'} mode using ${app.settingsSource === 'storage' ? 'saved settings' : 'the server defaults'}.`);
