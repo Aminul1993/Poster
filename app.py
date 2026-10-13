@@ -155,6 +155,7 @@ API: dict[str, Any] = {
         "blob_folder": "poster",
         "blob_public_url": "https://{store_id}.public.blob.vercel-storage.com",
         "parquet_mimetype": "application/vnd.apache.parquet",
+        "parquet_compression": "zstd",
         "thumbnail_size": (400, 400),
         "thumbnail_quality": 80,
     },
@@ -963,7 +964,7 @@ class BufferService:
 IMAGE_EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 
 # The layout Hugging Face `datasets` writes for Features({"image_id": Value("string"), "image": Image()}),
-# so Dataset.from_parquet() reads these files back as PIL images (see a.py).
+# so Dataset.from_parquet() reads these files back as PIL images.
 PARQUET_SCHEMA = pa.schema(
     [("image_id", pa.string()), ("image", pa.struct([("bytes", pa.binary()), ("path", pa.string())]))],
     metadata={"huggingface": json.dumps({"info": {"features": {
@@ -976,7 +977,9 @@ def make_thumbnail(data: bytes) -> bytes:
     try:
         with Image.open(io.BytesIO(data)) as image:
             image.thumbnail(API["media"]["thumbnail_size"])  # decodes large JPEGs at reduced size
-            thumbnail = ImageOps.exif_transpose(image).convert("RGB")
+            upright = ImageOps.exif_transpose(image).convert("RGBA")
+            # Transparency goes white, as in the thumbnails the browser makes.
+            thumbnail = Image.alpha_composite(Image.new("RGBA", upright.size, "white"), upright).convert("RGB")
     except (OSError, Image.DecompressionBombError) as exc:
         raise ServiceError("The image could not be decoded.", kind="validation") from exc
     out = io.BytesIO()
@@ -989,7 +992,7 @@ def pack_parquet(image_id: str, filename: str, data: bytes) -> bytes:
     table = pa.Table.from_pylist([{"image_id": image_id, "image": {"bytes": data, "path": filename}}],
                                  schema=PARQUET_SCHEMA)
     sink = pa.BufferOutputStream()
-    pq.write_table(table, sink)
+    pq.write_table(table, sink, compression=API["media"]["parquet_compression"])
     return sink.getvalue().to_pybytes()
 
 
@@ -1130,10 +1133,14 @@ class MediaService:
                                service=self.service, details=truncate(text, 300))
         return blob_url
 
+    @property
+    def blob_origin(self) -> str:
+        """Where the Blob store serves its public files."""
+        return API["media"]["blob_public_url"].format(store_id=self.blob_store_id.lower())
+
     def blob_url(self, name: str) -> str:
         """Public URL of a file in the Blob folder."""
-        base = API["media"]["blob_public_url"].format(store_id=self.blob_store_id.lower())
-        return f"{base}/{API['media']['blob_folder']}/{name}"
+        return f"{self.blob_origin}/{API['media']['blob_folder']}/{name}"
 
     def blob_headers(self, mimetype: str) -> dict[str, str]:
         """Headers for a Vercel Blob put. Public access, because Buffer's fetch reaches the files without
@@ -1418,9 +1425,11 @@ def security_headers(response: Any) -> Any:
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     if response.mimetype == "text/html":
         nonce = getattr(g, "csp_nonce", "")
+        # The page shows the thumbnails stored on Vercel Blob.
+        blob_images = f" {media.blob_origin}" if media.uses_blob and media.configured else ""
         response.headers["Content-Security-Policy"] = (
             f"default-src 'self'; script-src 'nonce-{nonce}'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+            f"img-src 'self' data: blob:{blob_images}; connect-src 'self'; object-src 'none'; base-uri 'none'; "
             "form-action 'self'; frame-ancestors 'none'"
         )
     if request.path.startswith("/api/"):

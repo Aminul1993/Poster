@@ -1511,6 +1511,8 @@ const LIMITS = Object.freeze({
   minHashtags: 10,
   maxHashtags: 15,
   analysisMaxEdge: 1280,
+  /** Gallery and editor thumbnails; matches the thumbnails the server stores. */
+  previewMaxEdge: 400,
   thumbMaxEdge: 160,
   maxLogEntries: 300,
   maxSchedules: 200,
@@ -2901,6 +2903,20 @@ function drawScaled(source, maxEdge) {
 }
 
 /**
+ * Shows an item's thumbnail in `img`, never the original file: the one the
+ * server stored once the image is uploaded, else the one made in the browser,
+ * which also stands in when the stored one cannot load.
+ * @param {HTMLImageElement} img @param {object} item
+ */
+function showThumbnail(img, item) {
+  const url = item.uploadedThumbUrl || item.previewUrl;
+  if (img.dataset.thumb === url) return;
+  img.dataset.thumb = url;
+  img.onerror = url === item.previewUrl ? null : () => { img.onerror = null; img.src = item.previewUrl; };
+  img.src = url;
+}
+
+/**
  * Average colour, brightness, saturation and a coarse colour name.
  * @param {HTMLCanvasElement} canvas
  * @returns {{r: number, g: number, b: number, brightness: number, saturation: number, hue: number, colorName: string}}
@@ -3518,9 +3534,11 @@ class BufferService {
    *   2. a URL from an earlier upload of this image, else
    *   3. the server uploads it to its media host and returns the URL, else
    *   4. null (text-only post) — or an error when images are required.
+   * `thumbnailUrl` is set only by a new upload to a host that stores
+   * thumbnails (Vercel Blob).
    * @param {object} item
    * @param {{settings?: object, signal?: AbortSignal, onRetry?: Function}} [ctx]
-   * @returns {Promise<string|null>}
+   * @returns {Promise<{url: string|null, thumbnailUrl: string|null}>}
    */
   async uploadMedia(item, { settings, signal, onRetry } = {}) {
     const s = settings ?? this.getSettings();
@@ -3528,9 +3546,9 @@ class BufferService {
     if (manual) {
       const error = this.validation.validateMediaUrl(manual);
       if (error) throw new ApiError(`"${item.name}": ${error}`, { kind: 'validation', service: 'Buffer' });
-      return manual;
+      return { url: manual, thumbnailUrl: null };
     }
-    if (item.uploadedUrl) return item.uploadedUrl;
+    if (item.uploadedUrl) return { url: item.uploadedUrl, thumbnailUrl: null };
     if (SERVER.media.configured) {
       const upload = await prepareUploadImage(item);
       const form = new FormData();
@@ -3541,12 +3559,13 @@ class BufferService {
       if (typeof data.url !== 'string' || !data.url.startsWith('https://')) {
         throw new ApiError('The media host did not return a public https:// URL.', { kind: 'parse', service: 'Media host' });
       }
-      return data.url;
+      const thumbnailUrl = typeof data.thumbnailUrl === 'string' && data.thumbnailUrl.startsWith('https://') ? data.thumbnailUrl : null;
+      return { url: data.url, thumbnailUrl };
     }
     if (s.requireMedia) {
       throw new ApiError(`"${item.name}" has no public image URL. Buffer attaches images from public URLs: paste one in the editor, or set BLOB_READ_WRITE_TOKEN (Vercel Blob) or MEDIA_UPLOAD_ENDPOINT on the server.`, { kind: 'validation', service: 'Buffer' });
     }
-    return null;
+    return { url: null, thumbnailUrl: null };
   }
 
   /**
@@ -3623,11 +3642,11 @@ class DemoBufferService extends BufferService {
     if (manual) {
       const error = this.validation.validateMediaUrl(manual);
       if (error) throw new ApiError(`"${item.name}": ${error}`, { kind: 'validation', service: 'Buffer' });
-      return manual;
+      return { url: manual, thumbnailUrl: null };
     }
-    if (item.uploadedUrl) return item.uploadedUrl;
+    if (item.uploadedUrl) return { url: item.uploadedUrl, thumbnailUrl: null };
     await sleep(250, signal);
-    return `https://media.poster-demo.invalid/${(item.fingerprint || uid('img')).replace(/[^a-z0-9]/gi, '').slice(-20)}.jpg`;
+    return { url: `https://media.poster-demo.invalid/${(item.fingerprint || uid('img')).replace(/[^a-z0-9]/gi, '').slice(-20)}.jpg`, thumbnailUrl: null };
   }
 
   async schedulePost(post) {
@@ -3703,24 +3722,26 @@ class ImageStore extends EventTarget {
   fingerprints() { return new Set(this.items.map((item) => item.fingerprint)); }
 
   /**
-   * Decodes the file, builds a thumbnail and colour stats, and restores any
-   * saved draft. Throws when the image cannot be decoded.
+   * Decodes the file, builds the thumbnails and colour stats, and restores any
+   * saved draft. Throws when the image cannot be decoded. The page shows the
+   * thumbnails only; the original file is kept for analysis and upload.
    * @param {File} file @param {string} fingerprint
    * @returns {Promise<object>} image item (not yet added)
    */
   async createItem(file, fingerprint) {
     const source = await decodeImage(file);
-    let thumbDataUrl = '';
-    let stats = null;
+    let preview;
     const width = source.naturalWidth || source.width;
     const height = source.naturalHeight || source.height;
     try {
-      const thumb = drawScaled(source, LIMITS.thumbMaxEdge);
-      thumbDataUrl = thumb.toDataURL('image/jpeg', 0.72);
-      stats = computeImageStats(thumb);
+      preview = drawScaled(source, LIMITS.previewMaxEdge);
     } finally {
       if (typeof source.close === 'function') source.close();
     }
+    const thumb = drawScaled(preview, LIMITS.thumbMaxEdge);
+    const thumbDataUrl = thumb.toDataURL('image/jpeg', 0.72);
+    const stats = computeImageStats(thumb);
+    const previewBlob = await new Promise((resolve) => preview.toBlob(resolve, 'image/jpeg', 0.85));
     const draft = isPlainObject(this.drafts[fingerprint]) ? this.drafts[fingerprint] : null;
     const content = draft && isPlainObject(draft.content) ? { ...emptyContent(), ...draft.content, hashtags: Array.isArray(draft.content.hashtags) ? draft.content.hashtags.filter((t) => typeof t === 'string') : [] } : null;
     return {
@@ -3730,7 +3751,7 @@ class ImageStore extends EventTarget {
       size: file.size,
       type: file.type,
       fingerprint,
-      objectUrl: URL.createObjectURL(file),
+      previewUrl: previewBlob ? URL.createObjectURL(previewBlob) : thumbDataUrl,
       width,
       height,
       thumbDataUrl,
@@ -3746,6 +3767,7 @@ class ImageStore extends EventTarget {
       scheduleLocal: typeof draft?.scheduleLocal === 'string' ? draft.scheduleLocal : '',
       mediaUrl: typeof draft?.mediaUrl === 'string' ? draft.mediaUrl : '',
       uploadedUrl: typeof draft?.uploadedUrl === 'string' ? draft.uploadedUrl : '',
+      uploadedThumbUrl: typeof draft?.uploadedThumbUrl === 'string' ? draft.uploadedThumbUrl : '',
       result: isPlainObject(draft?.result) ? draft.result : null,
       generatedAt: draft?.generatedAt || null,
       restored: Boolean(draft && (content || draft.result)),
@@ -3766,14 +3788,14 @@ class ImageStore extends EventTarget {
     const index = this.indexOf(id);
     if (index === -1) return;
     const [item] = this.items.splice(index, 1);
-    URL.revokeObjectURL(item.objectUrl);
+    URL.revokeObjectURL(item.previewUrl);
     if (this.activeId === id) this.activeId = (this.items[index] || this.items[index - 1] || null)?.id ?? null;
     this.#emit('remove', [id]);
   }
 
   /** Removes every image (drafts are kept). */
   clear() {
-    for (const item of this.items) URL.revokeObjectURL(item.objectUrl);
+    for (const item of this.items) URL.revokeObjectURL(item.previewUrl);
     const ids = this.items.map((i) => i.id);
     this.items = [];
     this.activeId = null;
@@ -3857,6 +3879,7 @@ class ImageStore extends EventTarget {
         scheduleLocal: item.scheduleLocal,
         mediaUrl: item.mediaUrl,
         uploadedUrl: item.uploadedUrl,
+        uploadedThumbUrl: item.uploadedThumbUrl,
         result: item.result,
         generatedAt: item.generatedAt,
         updatedAt: Date.now()
@@ -4088,11 +4111,11 @@ class SchedulerService extends EventTarget {
     const previous = { error: item.error, errorHint: item.errorHint, errorPhase: item.errorPhase };
     this.store.update(item.id, { busy: 'scheduling', error: null, errorHint: '', errorPhase: null }, { reason: 'status', persist: false });
     try {
-      const mediaUrl = await buffer.uploadMedia(item, { settings, signal, onRetry });
+      const { url: mediaUrl, thumbnailUrl } = await buffer.uploadMedia(item, { settings, signal, onRetry });
       throwIfAborted(signal);
       if (mediaUrl && !item.mediaUrl && mediaUrl !== item.uploadedUrl) {
         // Simulated Demo URLs are never remembered, so Live mode cannot reuse them.
-        if (!buffer.isDemo) this.store.update(item.id, { uploadedUrl: mediaUrl }, { reason: 'status' });
+        if (!buffer.isDemo) this.store.update(item.id, { uploadedUrl: mediaUrl, uploadedThumbUrl: thumbnailUrl || '' }, { reason: 'status' });
         this.notifier.log('info', 'schedule', `${buffer.isDemo ? '[Demo] Simulated upload of' : 'Uploaded'} "${item.name}" to the media host.`, mediaUrl);
       } else if (!mediaUrl) {
         this.notifier.log('warn', 'schedule', `"${item.name}" will be posted as text only (no public image URL).`);
@@ -4106,7 +4129,8 @@ class SchedulerService extends EventTarget {
         mode: buffer.isDemo ? 'demo' : 'live',
         imageName: item.name,
         fingerprint: item.fingerprint,
-        thumb: item.thumbDataUrl,
+        // The stored thumbnail's URL when there is one, which keeps saved history small.
+        thumb: item.uploadedThumbUrl || item.thumbDataUrl,
         text: truncate(text, 700),
         dueAt: check.date.toISOString(),
         timezone: settings.timezone,
@@ -4439,7 +4463,8 @@ class UIController {
   /** @param {object} item @returns {HTMLElement} */
   createCard(item) {
     const refs = {};
-    refs.img = el('img', { src: item.objectUrl, alt: '', loading: 'lazy', draggable: 'false' });
+    refs.img = el('img', { alt: '', loading: 'lazy', draggable: 'false' });
+    showThumbnail(refs.img, item);
     refs.media = el('button', { type: 'button', class: 'thumb-media', dataset: { action: 'activate', focusKey: `${item.id}:activate` } }, [refs.img]);
     refs.checkbox = el('input', { type: 'checkbox', dataset: { action: 'select', focusKey: `${item.id}:select` }, 'aria-label': `Select ${item.name}` });
     refs.index = el('span', { class: 'thumb-index', 'aria-hidden': 'true' });
@@ -4475,6 +4500,7 @@ class UIController {
     const status = itemStatus(item);
     card.classList.toggle('is-active', active);
     card.classList.toggle('is-selected', item.selected);
+    showThumbnail(refs.img, item);
     refs.checkbox.checked = item.selected;
     refs.index.textContent = String(index + 1);
     refs.media.setAttribute('aria-label', `Image ${index + 1} of ${total}: ${item.name}, ${status.label}. Open in editor.`);
@@ -4603,7 +4629,7 @@ class UIController {
     const s = this.settings;
     const index = this.store.indexOf(item.id);
     const image = byId('ed-image');
-    if (image.getAttribute('src') !== item.objectUrl) image.src = item.objectUrl;
+    showThumbnail(image, item);
     image.alt = `Preview of ${item.name}`;
     byId('ed-position').textContent = `${index + 1} of ${items.length}`;
     byId('ed-prev').disabled = index <= 0;
@@ -4805,7 +4831,9 @@ class UIController {
       }));
       const ids = record.channels.map((c) => c.postId).join(', ');
       return el('li', { class: 'sched-item' }, [
-        record.thumb ? el('img', { class: 'sched-thumb', src: record.thumb, alt: '' }) : el('div', { class: 'sched-thumb', 'aria-hidden': 'true' }),
+        record.thumb
+          ? el('img', { class: 'sched-thumb', src: record.thumb, alt: '', onerror: (e) => e.target.replaceWith(el('div', { class: 'sched-thumb', 'aria-hidden': 'true' })) })
+          : el('div', { class: 'sched-thumb', 'aria-hidden': 'true' }),
         el('div', { style: 'min-width:0' }, [
           el('div', { class: 'sched-text', text: record.text }),
           el('div', { class: 'sched-meta' }, [
@@ -6394,9 +6422,10 @@ function validateBufferToken(options = {}) {
 }
 
 /**
- * Resolves (uploading if needed) the public URL for an image item.
+ * Resolves (uploading if needed) the public URL for an image item, and the
+ * stored thumbnail's URL when this call uploaded it.
  * @param {object} item @param {object} [options]
- * @returns {Promise<string|null>}
+ * @returns {Promise<{url: string|null, thumbnailUrl: string|null}>}
  */
 function uploadMedia(item, options = {}) {
   return app.getBuffer().uploadMedia(item, options);
