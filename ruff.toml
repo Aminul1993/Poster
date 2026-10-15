@@ -1,0 +1,20 @@
+# Lint only (no formatter): the code keeps its hand-wrapped style.
+target-version = "py312"
+line-length = 150
+extend-exclude = [".venv", "venv"]
+
+[lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "S", "PT", "C4", "PIE", "RET", "N"]
+ignore = [
+    "RUF001", "RUF002", "RUF003",  # typographic quotes and dashes in user-facing text are intended
+    "SIM108",                      # if/else blocks read better than long ternaries here
+    "RET505", "RET506",            # else after return/raise kept where it mirrors the branches
+    "SIM905",                      # word lists written as one string
+    "UP047",                       # TypeVar generics, readable on any 3.x
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["S101", "S104", "S105", "S106", "PT011", "PT018", "N802"]
+
+[lint.isort]
+known-first-party = ["poster", "tests"]

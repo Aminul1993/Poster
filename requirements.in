@@ -1,0 +1,5 @@
+# Poster's direct dependencies. requirements.txt pins them and theirs, so every deploy installs the same versions.
+# After changing this file: pip install pip-tools && pip-compile requirements.in
+flask>=3.1
+requests>=2.32.4
+pillow>=11.3

@@ -1,0 +1,18 @@
+/** Interface preferences kept in this browser: filters, open panels and the image source (not settings). */
+
+/** @returns {{logFilter: string, plannerOpen: boolean, planInterval: number|null, imageSource: string, imageAspect: string}} */
+export function defaultPrefs() {
+  return { logFilter: 'all', plannerOpen: false, planInterval: null, imageSource: 'upload', imageAspect: 'square' };
+}
+
+/** The stored preferences over the defaults; unknown or invalid values are ignored. */
+export function normalizePrefs(stored) {
+  const prefs = defaultPrefs();
+  if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) return prefs;
+  if (['all', 'error', 'warn', 'success', 'user'].includes(stored.logFilter)) prefs.logFilter = stored.logFilter;
+  prefs.plannerOpen = Boolean(stored.plannerOpen);
+  if (Number.isInteger(stored.planInterval) && stored.planInterval > 0) prefs.planInterval = stored.planInterval;
+  if (['upload', 'generate'].includes(stored.imageSource)) prefs.imageSource = stored.imageSource;
+  if (['square', 'portrait', 'landscape', 'story'].includes(stored.imageAspect)) prefs.imageAspect = stored.imageAspect;
+  return prefs;
+}

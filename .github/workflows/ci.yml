@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install
+        run: pip install -r requirements-dev.txt
+      - name: Lint (Python)
+        run: ruff check .
+      - name: Type check
+        run: mypy
+      - name: Lint (JavaScript modules)
+        run: python tools/check_js.py
+      - name: Audit dependencies
+        run: pip-audit -r requirements.txt
+      - name: Lock file matches requirements.in
+        # Starting from the current pins, pip-compile changes nothing unless requirements.in asks for it.
+        run: |
+          cp requirements.txt /tmp/requirements.txt
+          pip-compile requirements.in -o /tmp/requirements.txt --strip-extras --annotation-style=line --no-emit-index-url -q
+          diff <(grep -v '^#' requirements.txt) <(grep -v '^#' /tmp/requirements.txt)
+      - name: Server tests
+        run: pytest tests --ignore=tests/browser
+      - name: Browser tests
+        run: |
+          python -m playwright install --with-deps chromium
+          pytest tests/browser

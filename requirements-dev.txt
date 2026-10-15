@@ -1,0 +1,10 @@
+# Tests, linting and auditing: pip install -r requirements-dev.txt
+# Browser tests also need a browser: python -m playwright install chromium (or pass --browser-channel msedge)
+-r requirements.txt
+pytest==9.1.1
+pytest-playwright==0.10.0
+ruff==0.17.0
+mypy==2.4.0
+types-requests==2.33.0.20261006
+pip-audit==2.10.1
+pip-tools==7.6.2
