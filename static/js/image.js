@@ -128,20 +128,27 @@ export async function canvasToBase64Jpeg(canvas, quality) {
 }
 
 /**
+ * An image file as Base64 JPEG (without the data: prefix), shrunk so its longest edge is at most `maxEdge`.
+ * @param {Blob} file @param {number} maxEdge @param {number} quality
+ * @returns {Promise<string>}
+ */
+export async function encodeScaledJpeg(file, maxEdge, quality) {
+  const source = await decodeImage(file);
+  try {
+    return await canvasToBase64Jpeg(drawScaled(source, maxEdge), quality);
+  } finally {
+    if (typeof source.close === 'function') source.close();
+  }
+}
+
+/**
  * Resized Base64 JPEG for the vision model (cached on the item, memory only).
  * Sending a 1280 px preview keeps requests small without hurting analysis.
  * @param {object} item @returns {Promise<string>}
  */
 export async function prepareAnalysisImage(item) {
-  if (item.analysisBase64) return item.analysisBase64;
-  const source = await decodeImage(item.file);
-  try {
-    const canvas = drawScaled(source, LIMITS.analysisMaxEdge);
-    item.analysisBase64 = await canvasToBase64Jpeg(canvas, 0.85);
-    return item.analysisBase64;
-  } finally {
-    if (typeof source.close === 'function') source.close();
-  }
+  if (!item.analysisBase64) item.analysisBase64 = await encodeScaledJpeg(item.file, LIMITS.analysisMaxEdge, 0.85);
+  return item.analysisBase64;
 }
 
 /**

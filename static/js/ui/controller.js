@@ -13,6 +13,7 @@ import { Dialogs } from './dialogs.js';
 import { byId, hasFiles } from './dom.js';
 import { EditorView } from './editor.js';
 import { GalleryView } from './gallery.js';
+import { ImageEditView } from './imageedit.js';
 import { LogView } from './log.js';
 import { OperationsView } from './operations.js';
 import { Orchestrator } from './orchestrator.js';
@@ -27,6 +28,7 @@ export class UIController {
     this.app = appRef;
     this.dialogs = new Dialogs();
     this.upload = new UploadView(this);
+    this.imageEdit = new ImageEditView(this);
     this.gallery = new GalleryView(this);
     this.operations = new OperationsView(this);
     this.editor = new EditorView(this);
@@ -57,6 +59,7 @@ export class UIController {
     this.settingsView.populateTimezones();
     this.bindHeader();
     this.upload.bind();
+    this.imageEdit.bind();
     this.gallery.bind();
     this.operations.bind();
     this.editor.bind();
@@ -128,6 +131,7 @@ export class UIController {
     this.renderHeader();
     this.renderKpis();
     this.upload.renderGenerator();
+    this.imageEdit.render();
     this.gallery.render();
     this.operations.render();
     this.editor.render();
@@ -266,6 +270,7 @@ export class UIController {
       this.gallery.render();
       this.renderKpis();
       this.upload.renderGenerator();
+      this.imageEdit.render();
       this.operations.render();
       const touchesActive = ids.includes(this.store.activeId) || ['active', 'remove', 'clear', 'add', 'reorder'].includes(reason);
       if (reason !== 'edit' && touchesActive) this.editor.render();

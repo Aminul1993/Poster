@@ -145,6 +145,7 @@
           <div class="segmented" role="radiogroup" aria-label="How to add images">
             <label><input type="radio" name="image-source" value="upload" checked><span>Upload</span></label>
             <label><input type="radio" name="image-source" value="generate"><span>Generate with AI</span></label>
+            <label><input type="radio" name="image-source" value="edit"><span>Edit with AI</span></label>
           </div>
         </div>
         <div class="card-body">
@@ -177,7 +178,42 @@
             <p class="error-text" id="imggen-error" role="alert" hidden></p>
             <p class="hint" id="imggen-status" role="status"></p>
           </div>
+          <div class="generator" id="source-edit" hidden>
+            <div class="field edit-drop" id="imgedit-drop">
+              <span class="label" id="imgedit-source-label">Photo to change</span>
+              <div class="dropzone dropzone-compact" id="imgedit-dropzone" role="button" tabindex="0" aria-labelledby="imgedit-source-label" aria-describedby="imgedit-dropzone-hint">
+                <div class="dropzone-icon"><svg class="icon"><use href="#i-image"/></svg></div>
+                <div class="dropzone-text">
+                  <div class="dropzone-title">Drop a photo here, or <span class="link">browse files</span></div>
+                  <div class="dropzone-hint" id="imgedit-dropzone-hint">One JPG, PNG or WEBP image. You can also paste it.</div>
+                </div>
+              </div>
+              <div class="edit-source" id="imgedit-source" hidden>
+                <div class="edit-source-thumb" id="imgedit-thumb"></div>
+                <div class="edit-source-meta">
+                  <strong id="imgedit-source-name"></strong>
+                  <span class="hint" id="imgedit-source-detail"></span>
+                  <div class="edit-source-actions">
+                    <button type="button" class="btn btn-ghost btn-xs" id="imgedit-change"><svg class="icon"><use href="#i-swap"/></svg>Change photo</button>
+                    <button type="button" class="btn btn-ghost btn-xs" id="imgedit-remove"><svg class="icon"><use href="#i-x"/></svg>Remove</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="field">
+              <div class="label"><label for="imgedit-prompt">Describe the change</label><span class="counter" id="imgedit-count">0 / 1000</span></div>
+              <textarea class="textarea" id="imgedit-prompt" rows="3" placeholder="e.g. Make it a watercolour painting and turn the sky into a warm sunset" aria-describedby="imgedit-hint imgedit-error"></textarea>
+              <p class="hint" id="imgedit-hint">Say what to add, remove or restyle; the rest of the photo stays as it is. Ctrl+Enter generates.</p>
+            </div>
+            <div class="generator-actions">
+              <button type="button" class="btn btn-primary" id="imgedit-button"><svg class="icon"><use href="#i-sparkles"/></svg><span id="imgedit-button-label">Generate updated image</span></button>
+              <button type="button" class="btn btn-ghost" id="imgedit-cancel" hidden>Cancel</button>
+            </div>
+            <p class="error-text" id="imgedit-error" role="alert" hidden></p>
+            <p class="hint" id="imgedit-status" role="status"></p>
+          </div>
           <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" multiple hidden>
+          <input type="file" id="imgedit-input" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden>
           <div class="capacity" aria-hidden="true">
             <div class="progress"><div class="progress-bar" id="capacity-bar"></div></div>
             <span id="capacity-label">0 of 25 slots used</span>

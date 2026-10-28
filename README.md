@@ -1,6 +1,6 @@
 # Poster
 
-Upload images (or generate them from a description), generate captions, hashtags, a category and an engagement score with an Ollama vision model, then schedule the posts through Buffer.
+Upload images (or generate them from a description, or have AI change an uploaded photo as you describe), generate captions, hashtags, a category and an engagement score with an Ollama vision model, then schedule the posts through Buffer.
 
 ## Layout
 
@@ -49,7 +49,8 @@ Tests never reach the real services or read your `.env`: the upstream APIs are r
 
 ## Notes
 
-- The **Add images** card has two modes: **Upload** (drag and drop, browse or paste) and **Generate with AI** (describe the image, pick a shape, and Pollinations creates it). Generated images join the gallery exactly like uploads. Generation needs `POLLINATIONS_API_KEY` (free at enter.pollinations.ai); in Demo mode it draws a placeholder instead.
+- The **Add images** card has three modes: **Upload** (drag and drop, browse or paste), **Generate with AI** (describe the image, pick a shape, and Pollinations creates it) and **Edit with AI** (add a photo, describe the change, and Pollinations makes an updated copy). Generated and edited images join the gallery exactly like uploads; the photo you edit is not changed or added, so you can try again or describe another change. Both need `POLLINATIONS_API_KEY` (free at enter.pollinations.ai); in Demo mode they draw a placeholder or tint the photo instead.
+- **Edit with AI** sends a copy of the photo shrunk to at most 1536 px (JPEG) through `/api/image/edit` to Pollinations' `/v1/images/edits`, using the model in `POLLINATIONS_EDIT_MODEL` (`kontext`, FLUX.1 Kontext, by default; any model that lists `/v1/images/edits` in gen.pollinations.ai/image/models works). An edit is billed per call and not cached, so it is retried only when Pollinations refuses it (HTTP 429/503), never after a timeout or another server error.
 - Buffer attaches images only from public URLs. Set `BLOB_READ_WRITE_TOKEN` to use a public Vercel Blob store, or configure another media host (for example a Cloudinary unsigned upload preset), or paste a public image URL per post in the editor.
 - **Scheduled posts** lists the account's posts read directly from Buffer (All, Upcoming or Published, 30 per page), including posts created in Buffer itself. Nothing is saved in the browser: the list loads when the page opens, on Refresh, when the filter or mode changes, and once after each scheduling run. Buffer's API allows few requests (100 per 15 minutes on the free plan), so it never reloads on its own, and a filter change waits for the load in flight instead of sending a request next to it. Demo mode keeps its simulated posts in memory for the tab. A post whose image is served by Poster (`<PUBLIC_BASE_URL>/api/media/image/<name>.jpg`) shows its stored Vercel Blob thumbnail instead of the full image.
 - Posts can be changed until they are published: the pencil edits a post's text and publish time, and the calendar-✕ deletes it from Buffer. Before each change the server reads the post's status from Buffer and refuses posts that are published (`sent`) or being published (`sending`). When all of an image's posts are deleted, the image can be scheduled again.

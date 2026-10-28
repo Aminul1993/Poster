@@ -108,6 +108,8 @@ class Config:
     blob_api_url: str = "https://vercel.com/api/blob"
     public_base_url: str = ""
     pollinations_api_key: str = ""
+    # The model that changes an uploaded image as described (see API["image_gen"]["edit_url"]).
+    pollinations_edit_model: str = "kontext"
     ollama_timeout: int = 120
     buffer_timeout: int = 30
     media_timeout: int = 120
@@ -150,6 +152,7 @@ class Config:
             blob_api_url=env.text("VERCEL_BLOB_API_URL", "https://vercel.com/api/blob"),
             public_base_url=env.text("PUBLIC_BASE_URL"),
             pollinations_api_key=env.text("POLLINATIONS_API_KEY"),
+            pollinations_edit_model=env.text("POLLINATIONS_EDIT_MODEL", "kontext"),
             ollama_timeout=env.number("OLLAMA_TIMEOUT", 120, 10, 600),
             buffer_timeout=env.number("BUFFER_TIMEOUT", 30, 5, 120),
             media_timeout=env.number("MEDIA_TIMEOUT", 120, 10, 600),
@@ -236,6 +239,8 @@ API: dict[str, Any] = {
     },
     "image_gen": {
         "url": "https://gen.pollinations.ai/image",
+        # OpenAI-compatible image editing: a source image and a description of the change in, a new image out.
+        "edit_url": "https://gen.pollinations.ai/v1/images/edits",
         # Shapes offered in the browser, as (width, height) in pixels.
         "aspects": {"square": (1024, 1024), "portrait": (1024, 1280), "landscape": (1280, 720), "story": (720, 1280)},
     },

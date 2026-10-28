@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import logging
 import mimetypes
@@ -319,6 +320,15 @@ def image_generate() -> Any:
     prompt = validation.parse_prompt(body.get("prompt"))
     aspect = validation.parse_aspect(body.get("aspect"))
     return run("Image generate", lambda retries: services().image_gen.generate(prompt, aspect, retries))
+
+
+@bp.post("/api/image/edit")
+def image_edit() -> Any:
+    """An updated copy of the image the browser sends (a downscaled JPEG), changed as the prompt describes."""
+    body = validation.json_body()
+    prompt = validation.parse_prompt(body.get("prompt"))
+    image = base64.b64decode(validation.parse_image_b64(body.get("image")))
+    return run("Image edit", lambda retries: services().image_gen.edit(image, prompt, retries))
 
 
 @bp.post("/api/buffer/validate")

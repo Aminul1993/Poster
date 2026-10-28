@@ -34,6 +34,7 @@ BASE_ENV: dict[str, str] = {
     "MEDIA_UPLOAD_ENDPOINT": "",
     "MEDIA_UPLOAD_PRESET": "",
     "POLLINATIONS_API_KEY": "test-pollinations-key",
+    "POLLINATIONS_EDIT_MODEL": "",
     "OLLAMA_TIMEOUT": "",
     "BUFFER_TIMEOUT": "",
     "MEDIA_TIMEOUT": "",

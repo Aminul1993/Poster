@@ -6,6 +6,7 @@ FakeUpstream replaces ``requests.Session.request``, so Poster's real HTTP client
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import re
@@ -176,6 +177,7 @@ class FakeUpstream:
         self.ollama_models = ["gemma4:31b", "llava:13b"]
         self.blobs: dict[str, bytes] = {}
         self.generated_image = image_bytes("PNG", (96, 96), (200, 80, 40))
+        self.edited_image = image_bytes("PNG", (64, 48), (240, 120, 180))
         self._failures: list[tuple[str, Callable[[Call], requests.Response]]] = []
 
     # -- scripting ------------------------------------------------------------------------------------------------
@@ -228,7 +230,7 @@ class FakeUpstream:
         if host == CLOUDINARY_HOST:
             return "media.upload"
         if host == POLLINATIONS_HOST:
-            return "pollinations"
+            return "pollinations.edit" if path == "/v1/images/edits" else "pollinations"
         return f"unknown.{host}"
 
     def dispatch(self, call: Call) -> requests.Response:
@@ -255,4 +257,9 @@ class FakeUpstream:
             return response(200, {"secure_url": "https://res.media.test/poster/uploaded.jpg"}, url=call.url)
         if call.op == "pollinations":
             return response(200, content=self.generated_image, headers={"Content-Type": "image/png"}, url=call.url)
+        if call.op == "pollinations.edit":
+            usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+                     "input_tokens_details": {"text_tokens": 0, "image_tokens": 0}}
+            return response(200, {"created": 1, "data": [{"b64_json": base64.b64encode(self.edited_image).decode()}],
+                                  "usage": usage}, url=call.url)
         raise requests.ConnectionError(f"FakeUpstream has no route for {call.url}")

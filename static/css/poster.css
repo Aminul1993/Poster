@@ -345,6 +345,22 @@ fieldset:disabled .tag-editor { opacity: .6; }
 .generator-actions { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
 .generator-actions .field { flex: 0 1 200px; }
 .generator .hint.is-warning { color: var(--warning); }
+.dropzone-compact { flex-direction: row; justify-content: flex-start; gap: 14px; padding: 16px 18px; text-align: left; }
+.dropzone-compact .dropzone-icon { width: 42px; height: 42px; flex: none; }
+.dropzone-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.edit-source {
+  display: flex; align-items: center; gap: 14px; padding: 10px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--surface-2); transition: border-color .15s, background .15s;
+}
+.edit-source-thumb {
+  width: 88px; height: 88px; flex: none; overflow: hidden; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--surface-3);
+}
+.edit-source-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.edit-source-meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.edit-source-meta strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edit-source-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.edit-drop.is-dragover .dropzone, .edit-drop.is-dragover .edit-source { border-color: var(--accent); background: var(--accent-soft); }
 .notice {
   margin-top: 14px; border-radius: 10px; padding: 12px 14px; font-size: 13px;
   border: 1px solid var(--danger-border); background: var(--danger-soft);

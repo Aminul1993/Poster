@@ -125,6 +125,39 @@ def test_generated_image_joins_the_gallery(demo: Page) -> None:
     expect(page.locator("#gallery .thumb-name")).to_have_text(["ai-a-cosy-coffee-shop-at-sunrise.jpg"])
 
 
+def test_edited_image_joins_the_gallery(demo: Page) -> None:
+    page = demo
+    page.click('label:has(input[name="image-source"][value="edit"])')
+    expect(page.locator("#source-edit")).to_be_visible()
+    expect(page.locator("#upload-sub")).to_contain_text("describe a change")
+    page.click("#imgedit-button")
+    expect(page.locator("#imgedit-error")).to_have_text("Add the photo to change first.")
+
+    page.set_input_files("#imgedit-input", files=[{"name": "harbour.jpg", "mimeType": "image/jpeg",
+                                                    "buffer": jpeg((40, 90, 160))}])
+    expect(page.locator("#imgedit-source-name")).to_have_text("harbour.jpg")
+    expect(page.locator("#imgedit-source-detail")).to_contain_text("320×240")
+    expect(page.locator("#imgedit-thumb img")).to_be_visible()
+    expect(page.locator("#imgedit-dropzone")).to_be_hidden()
+    expect(page.locator("#imgedit-error")).to_be_hidden()
+
+    page.click("#imgedit-button")
+    expect(page.locator("#imgedit-error")).to_have_text("Describe the change in a few words first.")
+    page.fill("#imgedit-prompt", "Make it a watercolour painting")
+    expect(page.locator("#imgedit-count")).to_have_text("30 / 1000")
+    page.click("#imgedit-button")
+    # Only the updated copy joins the gallery; the photo stays ready for another try.
+    expect(page.locator("#gallery .thumb-name")).to_have_text(["ai-edit-make-it-a-watercolour-painting.jpg"])
+    expect(page.locator("#imgedit-source-name")).to_have_text("harbour.jpg")
+    page.click("#imgedit-button")
+    expect(page.locator("#gallery .thumb-card")).to_have_count(2)
+
+    page.click("#imgedit-remove")
+    expect(page.locator("#imgedit-dropzone")).to_be_visible()
+    page.reload()
+    expect(page.locator("#source-edit")).to_be_visible()
+
+
 def test_settings_save_export_import(demo: Page, tmp_path: Path) -> None:
     page = demo
     page.click("#open-settings")

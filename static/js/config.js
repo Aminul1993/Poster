@@ -48,7 +48,7 @@ export const SERVER = (() => {
     ollama: { configured: false, problem: missing, model: 'gemma4:31b', models: [], host: '', timeout: 120, requestTimeout: 1000 },
     buffer: { configured: false, problem: missing, tokenId: '', host: '', timeout: 30, requestTimeout: 160 },
     media: { configured: false, problem: missing, host: '', requestTimeout: 500 },
-    imageGen: { configured: false, problem: missing, host: '', aspects: {}, maxPromptChars: 1000, requestTimeout: 260 },
+    imageGen: { configured: false, problem: missing, host: '', aspects: {}, editModel: '', maxPromptChars: 1000, requestTimeout: 260 },
     limits: {},
     rules: FALLBACK_RULES
   };
@@ -88,7 +88,8 @@ export const API_CONFIG = Object.freeze({
     bufferEditPosts: '/api/buffer/posts/edit',
     bufferDeletePosts: '/api/buffer/posts/delete',
     mediaUpload: '/api/media/upload',
-    imageGenerate: '/api/image/generate'
+    imageGenerate: '/api/image/generate',
+    imageEdit: '/api/image/edit'
   }),
   /** Multipart field the server reads the image from. */
   mediaFileField: 'file',
@@ -121,6 +122,8 @@ export const LIMITS = Object.freeze({
   /** How far the post preview may run past the caption maximum (hashtags included) before it is flagged. */
   previewSlackChars: 500,
   analysisMaxEdge: 1280,
+  /** Longest edge of the copy of a photo sent to be edited with AI; the models work at about 1 megapixel. */
+  editMaxEdge: 1536,
   /** Gallery and editor thumbnails; matches the thumbnails the server stores. */
   previewMaxEdge: 400,
   thumbMaxEdge: 160,

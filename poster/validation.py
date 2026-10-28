@@ -85,7 +85,7 @@ def parse_image_b64(value: Any) -> str:
         value = value.partition(",")[2]
     value = re.sub(r"\s+", "", value)
     if len(value) > LIMITS["max_analysis_bytes"] * 4 // 3 + 4:
-        raise ServiceError("The analysis image is too large. It should be a downscaled preview.", kind="validation")
+        raise ServiceError("The image is too large. Send a downscaled copy of it.", kind="validation")
     try:
         raw = base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError) as exc:

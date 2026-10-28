@@ -1,4 +1,4 @@
-/** The Add images card: drag and drop, browse, paste, and Generate with AI. */
+/** The Add images card: drag and drop, browse, paste, and Generate with AI (Edit with AI is ImageEditView). */
 import { showToast, validateImage } from '../app.js';
 import { LIMITS, SERVER } from '../config.js';
 import { isCancelled } from '../errors.js';
@@ -65,6 +65,7 @@ export class UploadView extends View {
     });
     byId('dismiss-upload-errors').addEventListener('click', () => { byId('upload-errors').hidden = true; });
     document.addEventListener('paste', (event) => {
+      if (this.ui.prefs.imageSource === 'edit') return; // ImageEditView takes it as the photo to change
       const target = event.target;
       if (target instanceof HTMLElement && target.closest('input, textarea, [contenteditable="true"], dialog[open]')) return;
       const files = Array.from(event.clipboardData?.files || []).filter((f) => f.type.startsWith('image/'));
@@ -170,7 +171,19 @@ export class UploadView extends View {
     byId('imggen-cancel').addEventListener('click', () => this.imageGenController?.abort());
   }
 
-  /** Upload / Generate panels, plus the generator's counter, button and status line. */
+  /**
+   * Adds an image made with AI to the gallery, like an upload, and selects it.
+   * @param {File} file @returns {Promise<object|undefined>} the gallery item, unless it was rejected
+   */
+  async addGeneratedImage(file) {
+    // handleFiles() takes one batch at a time; wait for an upload that is still being checked.
+    while (this.uploading) await this.idle;
+    const [item] = await this.handleFiles([file]);
+    if (item) this.store.setActive(item.id);
+    return item;
+  }
+
+  /** Upload / Generate / Edit panels, plus the generator's counter, button and status line. */
   renderGenerator() {
     const generating = this.imageGenController !== null;
     const source = this.ui.prefs.imageSource;
@@ -179,9 +192,13 @@ export class UploadView extends View {
     const service = this.app.getImageGen();
     byId('source-upload').hidden = source !== 'upload';
     byId('source-generate').hidden = source !== 'generate';
-    byId('upload-sub').textContent = source === 'upload'
-      ? `JPG, JPEG, PNG or WEBP · up to 20 MB each · maximum ${LIMITS.maxImages} images`
-      : `Describe a picture and AI creates it${demo ? ' (simulated in Demo mode)' : ''} · maximum ${LIMITS.maxImages} images`;
+    byId('source-edit').hidden = source !== 'edit';
+    const simulated = demo ? ' (simulated in Demo mode)' : '';
+    byId('upload-sub').textContent = {
+      upload: `JPG, JPEG, PNG or WEBP · up to 20 MB each · maximum ${LIMITS.maxImages} images`,
+      generate: `Describe a picture and AI creates it${simulated} · maximum ${LIMITS.maxImages} images`,
+      edit: `Add a photo, describe a change and AI makes an updated copy${simulated} · maximum ${LIMITS.maxImages} images`
+    }[source];
 
     const length = byId('imggen-prompt').value.trim().length;
     const counter = byId('imggen-count');
@@ -241,10 +258,7 @@ export class UploadView extends View {
         onRetry: ({ attempt, maxRetries, delayMs, error }) => this.notifier.log('warn', 'retry', `Image generation: retry ${attempt}/${maxRetries} in ${delayMs / 1000}s (${error.message})`)
       });
       this.notifier.log('success', 'image', `Generated "${file.name}" (${formatBytes(file.size)}) in ${formatDuration(Date.now() - started)}.`);
-      // handleFiles() takes one batch at a time; wait for an upload that is still being checked.
-      while (this.uploading) await this.idle;
-      const [item] = await this.handleFiles([file]);
-      if (item) this.store.setActive(item.id);
+      await this.addGeneratedImage(file);
     } catch (error) {
       if (isCancelled(error)) {
         this.notifier.log('info', 'image', 'Image generation cancelled.');

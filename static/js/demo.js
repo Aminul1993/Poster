@@ -1,7 +1,7 @@
 /** Demo mode: simulated AI, image generation and Buffer, with no network. */
 import { SERVER } from './config.js';
 import { ApiError, sleep } from './errors.js';
-import { canvasToBlob, hashString } from './image.js';
+import { canvasToBlob, decodeImage, drawScaled, hashString } from './image.js';
 import { SettingsModel } from './settings.js';
 import { clamp, truncate, uid } from './util.js';
 import { BufferService, POST_FILTERS, normalizePost, normalizePostResults, sortPosts } from './services/buffer.js';
@@ -178,6 +178,40 @@ export class DemoImageGenService extends ImageGenService {
     const blob = await canvasToBlob(canvas, 'image/jpeg', 0.9);
     if (!blob) throw new ApiError('The demo image could not be drawn.', { kind: 'client', service: 'Pollinations' });
     return generatedImageFile(blob, prompt, 'image/jpeg');
+  }
+
+  /** @returns {Promise<File>} the photo in a random colour cast, with the description written on it */
+  async editImage(file, prompt, { signal } = {}) {
+    await sleep(900 + (hashString(prompt) % 900), signal);
+    const source = await decodeImage(file);
+    let canvas;
+    try {
+      canvas = drawScaled(source, 1024);
+    } finally {
+      if (typeof source.close === 'function') source.close();
+    }
+    const { width, height } = canvas;
+    const ctx = canvas.getContext('2d');
+    // A random cast, so every run gives a new image (identical files are rejected as duplicates).
+    ctx.globalCompositeOperation = 'color';
+    ctx.fillStyle = `hsla(${Math.floor(Math.random() * 360)}, 75%, 50%, .45)`;
+    ctx.fillRect(0, 0, width, height);
+    ctx.globalCompositeOperation = 'source-over';
+    const size = Math.max(12, Math.round(Math.min(width, height) / 22));
+    ctx.font = `600 ${size}px system-ui, sans-serif`;
+    const lines = DemoImageGenService.wrap(ctx, truncate(prompt, 140), width * 0.86);
+    const band = (lines.length + 1.6) * size * 1.3;
+    ctx.fillStyle = 'rgba(0, 0, 0, .55)';
+    ctx.fillRect(0, height - band, width, band);
+    ctx.fillStyle = 'rgba(255, 255, 255, .94)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    lines.forEach((line, index) => ctx.fillText(line, width / 2, height - band + (index + 0.8) * size * 1.3));
+    ctx.font = `500 ${Math.round(size * 0.6)}px system-ui, sans-serif`;
+    ctx.fillText('Demo edit · not AI-generated', width / 2, height - size * 0.9);
+    const blob = await canvasToBlob(canvas, 'image/jpeg', 0.9);
+    if (!blob) throw new ApiError('The demo image could not be drawn.', { kind: 'client', service: 'Pollinations' });
+    return generatedImageFile(blob, prompt, 'image/jpeg', 'ai-edit');
   }
 
   /** Splits text into lines that fit `maxWidth` in the context's current font. */

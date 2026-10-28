@@ -281,6 +281,59 @@ class TestImageGenerate:
         assert response.status_code == 503
 
 
+class TestImageEdit:
+    def test_edits_an_image(self, client: Any, fake: Any) -> None:
+        source = image_bytes("JPEG", (80, 60), (20, 160, 90))
+        data = post(client, "/api/image/edit", {"prompt": "Make the  sky\npink", "image": b64(source)}).get_json()
+        assert data["mimeType"] == "image/png" and data["model"] == "kontext" and data["retries"] == []
+        assert base64.b64decode(data["image"]) == fake.edited_image
+        [call] = fake.calls
+        assert (call.method, call.op) == ("POST", "pollinations.edit")
+        assert call.kwargs["headers"]["Authorization"] == "Bearer test-pollinations-key"
+        body = call.json
+        assert body["prompt"] == "Make the sky pink" and body["model"] == "kontext" and body["seed"] == data["seed"]
+        assert body["response_format"] == "b64_json"
+        prefix, _, encoded = body["image"][0]["image_url"].partition(",")
+        assert prefix == "data:image/jpeg;base64" and base64.b64decode(encoded) == source
+
+    def test_edit_model_from_the_environment(self, make_app: Any, fake: Any) -> None:
+        client = make_app(POLLINATIONS_EDIT_MODEL="nanobanana").test_client()
+        assert page_config(client.get("/").get_data(as_text=True))["imageGen"]["editModel"] == "nanobanana"
+        post(client, "/api/image/edit", {"prompt": "add a hat", "image": b64(image_bytes("PNG"))})
+        assert fake.calls[0].json["model"] == "nanobanana"
+        assert fake.calls[0].json["image"][0]["image_url"].startswith("data:image/png;base64,")
+
+    @pytest.mark.parametrize("body", [{"prompt": "add a hat"}, {"prompt": "add a hat", "image": "not base64!"},
+                                      {"prompt": "add a hat", "image": b64(b"GIF89a not supported")},
+                                      {"prompt": "ab", "image": b64(image_bytes())}])
+    def test_validation(self, client: Any, fake: Any, body: dict[str, Any]) -> None:
+        assert post(client, "/api/image/edit", body).status_code == 400
+        assert fake.calls == []
+
+    def test_retries_a_refusal(self, client: Any, fake: Any) -> None:
+        fake.fail("pollinations.edit", 503)
+        data = post(client, "/api/image/edit", {"prompt": "add a hat", "image": b64(image_bytes())}).get_json()
+        assert base64.b64decode(data["image"]) == fake.edited_image and len(data["retries"]) == 1
+
+    def test_does_not_retry_what_may_have_been_billed(self, client: Any, fake: Any) -> None:
+        fake.fail("pollinations.edit", 500)
+        response = post(client, "/api/image/edit", {"prompt": "add a hat", "image": b64(image_bytes())})
+        assert response.status_code == 502 and response.get_json()["error"]["status"] == 500
+        assert fake.ops() == ["pollinations.edit"]
+
+    @pytest.mark.parametrize("reply", [{"data": []}, {"data": [{"b64_json": "%%%"}]},
+                                       {"data": [{"b64_json": base64.b64encode(b"<html>no</html>").decode()}]}])
+    def test_reply_without_an_image(self, client: Any, fake: Any, reply: dict[str, Any]) -> None:
+        fake.fail("pollinations.edit", 200, reply)
+        response = post(client, "/api/image/edit", {"prompt": "add a hat", "image": b64(image_bytes())})
+        assert response.status_code == 502 and response.get_json()["error"]["kind"] == "parse"
+
+    def test_not_configured(self, make_app: Any, fake: Any) -> None:
+        response = post(make_app(POLLINATIONS_API_KEY="").test_client(), "/api/image/edit",
+                        {"prompt": "add a hat", "image": b64(image_bytes())})
+        assert response.status_code == 503 and fake.calls == []
+
+
 # =============================================================================
 # Buffer
 # =============================================================================

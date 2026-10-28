@@ -8,7 +8,7 @@ import requests
 from playwright.sync_api import Browser, Page, expect
 
 from tests.browser.conftest import add_images, confirm, jpeg, local_input, toast
-from tests.fakes import DEFAULT_REPLY, FakeUpstream
+from tests.fakes import DEFAULT_REPLY, FakeUpstream, image_bytes
 
 
 def connect_buffer(page: Page) -> None:
@@ -83,6 +83,25 @@ def test_image_generation_and_connection_test(live: Page, fake: FakeUpstream) ->
     page.click("#test-ollama")
     expect(page.locator("#ollama-test-result")).to_contain_text("Connected to ollama.test. 2 models available")
     expect(page.locator("#pill-ollama-detail")).to_have_text("Connected")
+
+
+def test_image_edit(live: Page, fake: FakeUpstream) -> None:
+    page = live
+    page.click('label:has(input[name="image-source"][value="edit"])')
+    expect(page.locator("#imgedit-status")).to_contain_text("Pollinations (kontext)")
+    page.set_input_files("#imgedit-input", files=[{"name": "pier.png", "mimeType": "image/png",
+                                                    "buffer": image_bytes("PNG", (300, 200), (90, 40, 160))}])
+    page.fill("#imgedit-prompt", "Add a red sailing boat")
+    page.keyboard.press("Control+Enter")
+    expect(page.locator("#gallery .thumb-name")).to_have_text(["ai-edit-add-a-red-sailing-boat.png"])
+    [call] = [c for c in fake.calls if c.op == "pollinations.edit"]
+    assert call.json["prompt"] == "Add a red sailing boat" and call.json["model"] == "kontext"
+    assert call.json["image"][0]["image_url"].startswith("data:image/jpeg;base64,")
+
+    fake.fail("pollinations.edit", 400, {"error": {"message": "content_blocked"}})
+    page.click("#imgedit-button")
+    expect(page.locator("#imgedit-error")).to_contain_text("Pollinations rejected the request (HTTP 400)")
+    expect(page.locator("#gallery .thumb-card")).to_have_count(1)
 
 
 def test_a_lost_answer_does_not_schedule_twice(live: Page, fake: FakeUpstream) -> None:

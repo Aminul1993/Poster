@@ -12,7 +12,7 @@ export function normalizePrefs(stored) {
   if (['all', 'error', 'warn', 'success', 'user'].includes(stored.logFilter)) prefs.logFilter = stored.logFilter;
   prefs.plannerOpen = Boolean(stored.plannerOpen);
   if (Number.isInteger(stored.planInterval) && stored.planInterval > 0) prefs.planInterval = stored.planInterval;
-  if (['upload', 'generate'].includes(stored.imageSource)) prefs.imageSource = stored.imageSource;
+  if (['upload', 'generate', 'edit'].includes(stored.imageSource)) prefs.imageSource = stored.imageSource;
   if (['square', 'portrait', 'landscape', 'story'].includes(stored.imageAspect)) prefs.imageAspect = stored.imageAspect;
   return prefs;
 }
