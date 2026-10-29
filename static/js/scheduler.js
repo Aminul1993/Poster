@@ -1,7 +1,7 @@
 /** SchedulerService: bulk operations, progress and cancellation. */
 import { LIMITS, STORAGE_KEYS } from './config.js';
 import { ApiError, isCancelled, throwIfAborted } from './errors.js';
-import { emptyContent } from './store.js';
+import { countedResult, emptyContent, hasContent } from './store.js';
 import { TimeZoneUtil } from './time.js';
 import { clamp, pluralize, uid } from './util.js';
 
@@ -23,6 +23,9 @@ import { clamp, pluralize, uid } from './util.js';
  * @property {Array<{name: string, message: string}>} errors
  * @property {ApiError|null} abortReason fatal error that stopped the run
  * @property {boolean} cancelRequested
+ * @property {number[]} dueTimes publish times (ms) of the posts a scheduling run created
+ * @property {string[]} postIds Buffer post IDs a scheduling run created
+ * @property {boolean} demo whether a scheduling run went to Demo mode's simulated Buffer
  * @property {string} [state] done | partial | failed | cancelled
  */
 export class SchedulerService extends EventTarget {
@@ -59,7 +62,8 @@ export class SchedulerService extends EventTarget {
     /** @type {Operation} */
     const op = {
       id: uid('op'), kind, label, total: items.length, done: 0, succeeded: 0, failed: 0, skipped: 0, cancelled: 0, retries: 0,
-      startedAt: Date.now(), finishedAt: null, active: [], errors: [], abortReason: null, cancelRequested: false
+      startedAt: Date.now(), finishedAt: null, active: [], errors: [], abortReason: null, cancelRequested: false,
+      dueTimes: [], postIds: [], demo: false
     };
     this.current = op;
     this.controller = controller;
@@ -148,11 +152,12 @@ export class SchedulerService extends EventTarget {
     this.store.update(item.id, { busy: 'generating', error: null, errorHint: '', errorPhase: null }, { reason: 'status', persist: false });
     try {
       const result = await ollama.generateContent(item, { signal, onRetry, settings });
+      const replaced = hasContent(item) ? item.content : item.previousContent;
       this.store.update(item.id, {
-        busy: null, content: result.content, result: null, generatedAt: new Date().toISOString(), showErrors: false
+        busy: null, content: result.content, previousContent: replaced, result: null, generatedAt: new Date().toISOString(), showErrors: false
       }, { reason: 'generated' });
       const c = result.content;
-      this.notifier.log('success', 'ai', `Generated content for "${item.name}": ${c.category}, engagement ${c.engagement_score}/100, ${pluralize(c.hashtags.length, 'hashtag')}.`, [result.repaired ? 'Recovered from a malformed first reply.' : '', ...result.issues].filter(Boolean).join(' '));
+      this.notifier.log('success', 'ai', `Generated content for "${item.name}": ${c.category}, ${pluralize(c.hashtags.length, 'hashtag')}, estimated engagement ${c.engagement_score}/100.`, [result.repaired ? 'Recovered from a malformed first reply.' : '', ...result.issues].filter(Boolean).join(' '));
       return 'done';
     } catch (error) {
       if (isCancelled(error)) {
@@ -179,7 +184,7 @@ export class SchedulerService extends EventTarget {
     throwIfAborted(signal);
     const settings = this.getSettings();
     const buffer = this.getBuffer();
-    if (skipScheduled && item.result) {
+    if (skipScheduled && countedResult(item, settings.mode)) {
       this.store.update(item.id, { busy: null }, { reason: 'status', persist: false });
       this.notifier.log('info', 'schedule', `Skipped "${item.name}": already scheduled.`);
       return 'skipped';
@@ -204,7 +209,6 @@ export class SchedulerService extends EventTarget {
       if (mediaUrl && !item.mediaUrl && mediaUrl !== item.uploadedUrl) {
         // Simulated Demo URLs are never remembered, so Live mode cannot reuse them.
         if (!buffer.isDemo) this.store.update(item.id, { uploadedUrl: mediaUrl, uploadedThumbUrl: thumbnailUrl || '' }, { reason: 'status' });
-        this.notifier.log('info', 'schedule', `${buffer.isDemo ? '[Demo] Simulated upload of' : 'Uploaded'} "${item.name}" to the media host.`, mediaUrl);
       } else if (!mediaUrl) {
         this.notifier.log('warn', 'schedule', `"${item.name}" will be posted as text only (no public image URL).`);
       }
@@ -222,8 +226,13 @@ export class SchedulerService extends EventTarget {
           channels: result.posts.map((p) => buffer.channelName(p.channelId, settings)), partial: failures.length > 0, failures
         }
       }, { reason: 'scheduled' });
+      if (this.current) {
+        this.current.dueTimes.push(check.date.getTime());
+        this.current.postIds.push(...postIds);
+        this.current.demo = buffer.isDemo;
+      }
       const when = TimeZoneUtil.format(check.date, settings.timezone);
-      this.notifier.log('success', 'schedule', `${buffer.isDemo ? '[Demo] ' : ''}Scheduled "${item.name}" for ${when} on ${pluralize(postIds.length, 'channel')}.`, `Post IDs: ${postIds.join(', ')}`);
+      this.notifier.log('success', 'schedule', `${buffer.isDemo ? '[Demo] ' : ''}Scheduled "${item.name}" for ${when} on ${pluralize(postIds.length, 'channel')}.`);
       for (const failure of failures) {
         this.notifier.log('warn', 'schedule', `"${item.name}" was not scheduled on ${failure.name}: ${failure.message}`);
       }
@@ -311,8 +320,17 @@ export class SchedulerService extends EventTarget {
   }
 
   /**
+   * The posts the planner would give a time to: not scheduled, not busy, and without a time unless `overwrite`.
+   * @param {object[]} items @param {boolean} overwrite @returns {object[]}
+   */
+  plannable(items, overwrite) {
+    const { mode } = this.getSettings();
+    return items.filter((item) => !countedResult(item, mode) && !item.busy && (overwrite || !item.scheduleLocal));
+  }
+
+  /**
    * Assigns publish times in gallery order: start, start + interval, …
-   * Already-scheduled posts are never changed.
+   * Already-scheduled posts are never changed. A scheduling error left on a post is cleared, since its time changed.
    * @param {object[]} items @param {string} startLocal @param {number} intervalMinutes @param {boolean} overwrite
    * @returns {number} number of items updated
    */
@@ -320,15 +338,17 @@ export class SchedulerService extends EventTarget {
     const settings = this.getSettings();
     const start = TimeZoneUtil.zonedToUtc(startLocal, settings.timezone);
     if (!start) throw new Error('Choose a valid start date and time.');
-    let slot = 0;
-    for (const item of items) {
-      if (item.result || item.busy) continue;
-      if (item.scheduleLocal && !overwrite) continue;
+    const targets = this.plannable(items, overwrite);
+    targets.forEach((item, slot) => {
       const when = new Date(start.date.getTime() + slot * intervalMinutes * 60000);
-      this.store.update(item.id, { scheduleLocal: TimeZoneUtil.toLocalInput(when, settings.timezone), showErrors: false }, { reason: 'planned' });
-      slot += 1;
-    }
-    return slot;
+      const clears = {
+        ...(item.errorPhase === 'schedule' ? { error: null, errorHint: '', errorPhase: null } : {}),
+        // A post deleted from Buffer comes back into the batch once it has a new time.
+        ...(item.result?.removed ? { result: null } : {})
+      };
+      this.store.update(item.id, { scheduleLocal: TimeZoneUtil.toLocalInput(when, settings.timezone), showErrors: false, ...clears }, { reason: 'planned' });
+    });
+    return targets.length;
   }
 
   #emit(type, op) {

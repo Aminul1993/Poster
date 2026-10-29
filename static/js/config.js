@@ -105,7 +105,7 @@ export const API_CONFIG = Object.freeze({
 
 /** Hard limits and tunables. */
 export const LIMITS = Object.freeze({
-  maxImages: 25,
+  maxImages: 10,
   maxImageBytes: 20 * 1024 * 1024,
   /** Largest upload the server accepts (4 MB on Vercel); bigger images are re-encoded to fit. */
   maxUploadBytes: Number(SERVER.limits.maxUploadBytes) || 20 * 1024 * 1024,
@@ -121,6 +121,8 @@ export const LIMITS = Object.freeze({
   maxCategoryChars: RULES.maxCategoryChars,
   /** How far the post preview may run past the caption maximum (hashtags included) before it is flagged. */
   previewSlackChars: 500,
+  /** Longest planner interval: 7 days, in minutes. */
+  maxPlanMinutes: 10080,
   analysisMaxEdge: 1280,
   /** Longest edge of the copy of a photo sent to be edited with AI; the models work at about 1 megapixel. */
   editMaxEdge: 1536,

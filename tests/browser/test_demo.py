@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from playwright.sync_api import Page, expect
@@ -21,7 +22,7 @@ def test_upload_generate_plan_schedule_edit_delete(demo: Page) -> None:
     add_images(page, ("beach.jpg", jpeg((20, 120, 220))), ("forest.jpg", jpeg((30, 160, 60))),
                ("food.jpg", jpeg((220, 120, 30))))
     expect(page.locator("#gallery .thumb-card")).to_have_count(3)
-    expect(page.locator("#kpi-images")).to_have_text("3 / 25")
+    expect(page.locator("#kpi-images")).to_have_text("3 / 10")
 
     add_images(page, ("again.jpg", jpeg((20, 120, 220))))
     expect(page.locator("#upload-errors")).to_contain_text("Duplicate")
@@ -31,6 +32,15 @@ def test_upload_generate_plan_schedule_edit_delete(demo: Page) -> None:
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
     expect(page.locator("#kpi-generated")).to_have_text("3")
     expect(page.locator("#ed-description")).not_to_have_value("")
+    # Captions alone are not ready: nothing can be scheduled until each post has a time.
+    expect(page.locator("#gallery .thumb-status", has_text="Needs time")).to_have_count(3)
+    expect(page.locator("#kpi-needs-time")).to_have_text("3")
+    expect(page.locator("#sched-all")).to_be_disabled()
+    expect(page.locator("#sched-needs-time")).to_contain_text("3 posts need a publish time")
+    expect(page.locator("#planner")).to_have_attribute("open", "")
+    expect(page.locator("#ai-section .btn-primary")).to_have_count(1)
+    expect(page.locator("#plan-all")).to_have_class(re.compile("btn-primary"))
+    expect(page.locator("#upload-section")).to_have_class(re.compile("is-collapsed"))
 
     page.fill("#ed-description", "My own caption for this lovely picture")
     expect(page.locator("#ed-preview")).to_contain_text("My own caption for this lovely picture")
@@ -41,49 +51,124 @@ def test_upload_generate_plan_schedule_edit_delete(demo: Page) -> None:
     page.press("#ed-tag-input", "Enter")
     expect(page.locator("#ed-tags .tag-text", has_text="#sunny")).to_have_count(1)
 
-    page.click("#planner summary")
     start = local_input(2)
     page.fill("#plan-start", start)
+    expect(page.locator("#plan-preview")).to_contain_text("Apply to all: 3 posts")
     page.click("#plan-all")
     toast(page, "Publish times set for 3 posts.")
     expect(page.locator("#ed-schedule")).to_have_value(start)
+    expect(page.locator("#sched-all-count")).to_have_text("3")
+    expect(page.locator("#sched-needs-time")).to_be_hidden()
+    expect(page.locator("#sched-all")).to_have_class(re.compile("btn-primary"))
+    expect(page.locator("#ai-section .btn-primary")).to_have_count(1)
 
     page.click("#sched-all")
     expect(page.locator("#op-title")).to_have_text("Scheduling complete")
-    expect(page.locator("#sched-list > li")).to_have_count(6)
+    # One row per image: each of the 3 posts went to 2 channels.
+    expect(page.locator("#sched-list > li")).to_have_count(3)
+    expect(page.locator("#sched-list > li").first.locator(".sched-channel")).to_have_count(2)
     expect(page.locator("#gallery .thumb-status", has_text="Scheduled")).to_have_count(3)
-    expect(page.locator("#kpi-scheduled")).to_have_text("6")
+    expect(page.locator("#kpi-scheduled")).to_have_text("3")
+    expect(page.locator("#kpi-scheduled-label")).to_contain_text("6 channel posts")
+    expect(page.locator("#op-current")).to_contain_text("3 posts queued in Demo mode (not in Buffer)")
+    expect(page.locator("#op-view")).to_be_visible()
+    # A post already in Buffer is not edited in the editor: its fields are locked.
+    expect(page.locator("#ed-description")).to_be_disabled()
+    expect(page.locator("#planner")).not_to_have_attribute("open", "")
 
     page.evaluate("window.secondRow = document.querySelector('#sched-list > li:nth-child(2)')")
     page.locator("#sched-list [data-action=edit]").first.click()
     expect(page.locator("#post-dialog")).to_be_visible()
     page.fill("#post-text", "Edited text for the first post")
     page.click("#post-save")
-    toast(page, "The post was updated in Buffer.")
+    toast(page, "The post was updated in Demo mode (not in Buffer).")
+    # The batch mirrors Buffer: the image's card now shows the edited text.
+    expect(page.locator("#gallery .thumb-caption", has_text="Edited text for the first post")).to_have_count(1)
     expect(page.locator("#sched-list .sched-text", has_text="Edited text for the first post")).to_have_count(1)
     assert page.evaluate("document.querySelector('#sched-list > li:nth-child(2)') === window.secondRow"), "unchanged rows are kept"
 
     page.locator("#sched-list [data-action=delete-post]").first.click()
-    confirm(page, "Delete post")
-    toast(page, "The post was deleted from Buffer.")
-    expect(page.locator("#sched-list > li")).to_have_count(5)
+    confirm(page, "Delete post (2 channels)")
+    toast(page, "The post was deleted in Demo mode (not in Buffer).")
+    expect(page.locator("#sched-list > li")).to_have_count(2)
+    # A post deleted on purpose waits out of "All ready" until it gets a new time.
+    expect(page.locator("#gallery .thumb-status", has_text="Removed from Buffer")).to_have_count(1)
+    expect(page.locator("#sched-all")).to_be_disabled()
 
     page.click('label:has(input[name="sched-filter"][value="published"])')
     expect(page.locator("#sched-empty-title")).to_have_text("Nothing published yet")
     page.click('label:has(input[name="sched-filter"][value="upcoming"])')
-    expect(page.locator("#sched-list > li")).to_have_count(5)
+    expect(page.locator("#sched-list > li")).to_have_count(2)
 
 
 def test_unicode_hashtags_survive(demo: Page) -> None:
     page = demo
     add_images(page, ("dhaka.jpg", jpeg((200, 40, 90))))
-    page.click("#gen-active")
+    page.click("#ed-generate")
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
-    make_room_for_tags(page, 2)
-    page.fill("#ed-tag-input", "#বাংলাদেশ हिन्दी")
+    make_room_for_tags(page, 3)
+    rally = "#র\u200d্যালি"  # the zero-width joiner picks the ra-phala form and must survive
+    page.fill("#ed-tag-input", f"#বাংলাদেশ हिन्दी {rally}")
     page.press("#ed-tag-input", "Enter")
     expect(page.locator("#ed-tags .tag-text", has_text="#বাংলাদেশ")).to_have_text("#বাংলাদেশ")
     expect(page.locator("#ed-tags .tag-text", has_text="#हिन्दी")).to_have_text("#हिन्दी")
+    expect(page.locator("#ed-tags .tag-text", has_text=rally)).to_have_attribute("lang", "bn")
+
+
+def test_posts_without_a_time_are_caught_before_scheduling(demo: Page) -> None:
+    page = demo
+    add_images(page, ("one.jpg", jpeg((90, 20, 20))), ("two.jpg", jpeg((20, 90, 20))))
+    page.click("#gen-all")
+    expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    page.check("#select-all")
+    page.click("#sched-selected")
+    dialog = page.locator("#confirm-dialog")
+    expect(dialog).to_contain_text("2 posts can't be scheduled yet")
+    expect(dialog).to_contain_text("Choose a date and time to publish.")
+    confirm(page, "Set times in the planner")
+    expect(page.locator("#plan-start")).to_be_focused()
+    expect(page.locator("#log-list")).not_to_contain_text("Not scheduled")
+
+
+def test_regenerated_content_can_be_restored(demo: Page) -> None:
+    page = demo
+    add_images(page, ("cafe.jpg", jpeg((120, 80, 40))))
+    page.click("#ed-generate")
+    expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    page.fill("#ed-description", "My own words, written by hand")
+    page.click("#ed-generate")
+    expect(page.locator("#confirm-dialog #confirm-actions button", has_text="Cancel")).to_be_focused()
+    confirm(page, "Regenerate")
+    expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    expect(page.locator("#ed-description")).not_to_have_value("My own words, written by hand")
+    page.click("#ed-restore")
+    expect(page.locator("#ed-description")).to_have_value("My own words, written by hand")
+    expect(page.locator("#ed-restore")).to_be_hidden()
+
+
+def test_switching_to_live_asks_first(demo: Page) -> None:
+    page = demo
+    page.click("#mode-badge")
+    expect(page.locator("#confirm-title")).to_have_text("Switch to Live mode?")
+    confirm(page, "Cancel")
+    expect(page.locator("#mode-badge-label")).to_have_text("Demo mode")
+
+
+def test_list_view_edits_captions_and_times_in_place(demo: Page) -> None:
+    page = demo
+    add_images(page, ("one.jpg", jpeg((90, 20, 20))), ("two.jpg", jpeg((20, 90, 20))))
+    page.click("#gen-all")
+    expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    page.click('label:has(input[name="gallery-view"][value="list"])')
+    expect(page.locator("#gallery")).to_have_class(re.compile("is-list"))
+    second = page.locator("#gallery .thumb-card").nth(1)
+    second.locator(".list-caption").fill("Hand-written caption for the second photo")
+    second.locator(".list-time").fill(local_input(2))
+    expect(second.locator(".list-status")).to_have_text("Ready")
+    second.locator("[data-action=activate]").click()
+    expect(page.locator("#ed-description")).to_have_value("Hand-written caption for the second photo")
+    page.reload()
+    expect(page.locator("#gallery")).to_have_class(re.compile("is-list"))
 
 
 def test_gallery_management(demo: Page) -> None:
@@ -112,7 +197,7 @@ def test_gallery_management(demo: Page) -> None:
     page.click("#clear-images")
     confirm(page, "Remove all")
     expect(page.locator("#gallery-empty")).to_be_visible()
-    expect(page.locator("#kpi-images")).to_have_text("0 / 25")
+    expect(page.locator("#kpi-images")).to_have_text("0 / 10")
 
 
 def test_generated_image_joins_the_gallery(demo: Page) -> None:

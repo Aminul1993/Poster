@@ -83,6 +83,11 @@ export const TimeZoneUtil = {
     return { date, exists: this.toLocalInput(date, zone) === normalizedInput };
   },
 
+  /** Whether `date` falls between 11 pm and 6 am in `zone`, when few people see a post. */
+  isNight(date, zone) {
+    const { hour } = this.parts(date, zone);
+    return hour >= 23 || hour < 6;
+  },
   /** Formats an instant as a datetime-local value in `zone`. */
   toLocalInput(date, zone) {
     const p = this.parts(date, zone);
@@ -90,12 +95,16 @@ export const TimeZoneUtil = {
     return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
   },
 
-  /** Human readable date/time in `zone`, including the zone abbreviation. */
+  /**
+   * Human readable date/time in `zone`, the one format the dashboard shows ("Fri, 30 Oct, 4:00 pm"). The year
+   * appears only when it is not this year; the zone is named once beside the fields, not in every date.
+   */
   format(date, zone, options = {}) {
     try {
+      const otherYear = this.parts(date, zone).year !== this.parts(new Date(), zone).year;
       return dateTimeFormat(undefined, {
-        timeZone: zone, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
-        hour: 'numeric', minute: '2-digit', timeZoneName: 'short', ...options
+        timeZone: zone, weekday: 'short', month: 'short', day: 'numeric', ...(otherYear ? { year: 'numeric' } : {}),
+        hour: 'numeric', minute: '2-digit', ...options
       }).format(date);
     } catch {
       return date.toISOString();

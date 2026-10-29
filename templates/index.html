@@ -113,24 +113,13 @@
   <!-- Error / status banners -->
   <div class="banners" id="banners"></div>
 
-  <!-- KPIs -->
-  <section class="kpis" aria-label="Overview">
-    <div class="kpi">
-      <div class="kpi-icon"><svg class="icon"><use href="#i-images"/></svg></div>
-      <div><div class="kpi-value" id="kpi-images">0 / 25</div><div class="kpi-label">Images uploaded</div></div>
-    </div>
-    <div class="kpi">
-      <div class="kpi-icon kpi-blue"><svg class="icon"><use href="#i-sparkles"/></svg></div>
-      <div><div class="kpi-value" id="kpi-generated">0</div><div class="kpi-label">Content generated</div></div>
-    </div>
-    <div class="kpi">
-      <div class="kpi-icon kpi-amber"><svg class="icon"><use href="#i-clock"/></svg></div>
-      <div><div class="kpi-value" id="kpi-ready">0</div><div class="kpi-label">Ready to schedule</div></div>
-    </div>
-    <div class="kpi">
-      <div class="kpi-icon kpi-green"><svg class="icon"><use href="#i-calendar-check"/></svg></div>
-      <div><div class="kpi-value" id="kpi-scheduled">—</div><div class="kpi-label" id="kpi-scheduled-label">Upcoming in Buffer</div></div>
-    </div>
+  <!-- The batch at a glance: where each post stands -->
+  <section class="batch-strip" aria-label="Batch overview">
+    <p class="batch-stat"><strong id="kpi-images">0 / 10</strong> images</p>
+    <p class="batch-stat"><strong id="kpi-generated">0</strong> with captions</p>
+    <p class="batch-stat" id="kpi-needs-time-stat"><strong id="kpi-needs-time">0</strong> <span id="kpi-needs-time-label">need a publish time</span></p>
+    <p class="batch-stat"><strong id="kpi-ready">0</strong> ready to schedule</p>
+    <p class="batch-stat"><strong id="kpi-scheduled">—</strong> <span id="kpi-scheduled-label">upcoming in Buffer (all channels)</span></p>
   </section>
 
   <div class="workspace">
@@ -140,15 +129,16 @@
         <div class="card-header">
           <div>
             <h2 class="card-title" id="upload-title"><svg class="icon"><use href="#i-upload-cloud"/></svg>Add images</h2>
-            <p class="card-sub" id="upload-sub">JPG, JPEG, PNG or WEBP · up to 20 MB each · maximum 25 images</p>
+            <p class="card-sub" id="upload-sub">JPG, JPEG, PNG or WEBP · up to 20 MB each · maximum 10 images</p>
           </div>
           <div class="segmented" role="radiogroup" aria-label="How to add images">
             <label><input type="radio" name="image-source" value="upload" checked><span>Upload</span></label>
             <label><input type="radio" name="image-source" value="generate"><span>Generate with AI</span></label>
             <label><input type="radio" name="image-source" value="edit"><span>Edit with AI</span></label>
           </div>
+          <button type="button" class="btn btn-sm" id="upload-toggle" aria-controls="upload-body" aria-expanded="true" hidden><svg class="icon"><use href="#i-upload-cloud"/></svg><span id="upload-toggle-label">Add more</span></button>
         </div>
-        <div class="card-body">
+        <div class="card-body" id="upload-body">
           <div id="source-upload">
             <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-describedby="dropzone-hint" aria-label="Upload images: drag and drop files or press Enter to browse">
               <div class="dropzone-icon"><svg class="icon"><use href="#i-image"/></svg></div>
@@ -216,7 +206,7 @@
           <input type="file" id="imgedit-input" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden>
           <div class="capacity" aria-hidden="true">
             <div class="progress"><div class="progress-bar" id="capacity-bar"></div></div>
-            <span id="capacity-label">0 of 25 slots used</span>
+            <span id="capacity-label">0 of 10 slots used</span>
           </div>
           <div class="upload-busy" id="upload-busy" role="status" hidden><span class="spinner"></span><span id="upload-busy-label">Checking images…</span></div>
           <div class="notice" id="upload-errors" role="alert" hidden>
@@ -241,13 +231,19 @@
           <label class="checkbox"><input type="checkbox" id="select-all"><span>Select all</span></label>
           <span class="muted" id="selection-info" aria-live="polite">None selected</span>
           <span class="spacer"></span>
-          <span class="hint">Drag cards to reorder, or use the arrow buttons</span>
+          <span class="hint gallery-hint" id="gallery-hint">Drag cards to reorder, or Alt+← / Alt+→ on a card</span>
+          <div class="segmented" role="radiogroup" aria-label="Gallery view">
+            <label><input type="radio" name="gallery-view" value="grid" checked><span>Grid</span></label>
+            <label><input type="radio" name="gallery-view" value="list"><span>List</span></label>
+          </div>
+          <a class="jump-link" href="#ai-section">Skip to scheduling</a>
+          <p class="sr-only" id="gallery-announce" aria-live="polite"></p>
         </div>
         <div class="gallery" id="gallery" role="list" aria-label="Uploaded images" hidden></div>
         <div class="empty" id="gallery-empty">
           <div class="empty-icon"><svg class="icon"><use href="#i-images"/></svg></div>
           <p class="empty-title">No images yet</p>
-          <p>Upload or generate up to 25 images. Poster writes captions and hashtags for each one, then schedules them through Buffer.</p>
+          <p>Upload or generate up to 10 images. Poster writes captions and hashtags for each one, then schedules them through Buffer.</p>
         </div>
       </section>
     </div>
@@ -261,39 +257,17 @@
         </div>
       </div>
 
+      <!-- The batch in order: generate captions, give every post a time, then schedule. -->
       <div class="ops">
         <div class="ops-row" role="group" aria-labelledby="ops-gen-label">
-          <span class="ops-label" id="ops-gen-label"><svg class="icon"><use href="#i-sparkles"/></svg>Generate</span>
-          <button type="button" class="btn btn-sm" id="gen-active" disabled>This image</button>
+          <h3 class="ops-label" id="ops-gen-label"><svg class="icon"><use href="#i-sparkles"/></svg>Generate</h3>
           <button type="button" class="btn btn-sm" id="gen-selected" disabled>Selected <span class="btn-count" id="gen-selected-count">0</span></button>
-          <button type="button" class="btn btn-sm btn-primary" id="gen-all" disabled><svg class="icon"><use href="#i-sparkles"/></svg>All images <span class="btn-count" id="gen-all-count">0</span></button>
-        </div>
-        <div class="ops-row" role="group" aria-labelledby="ops-sched-label">
-          <span class="ops-label" id="ops-sched-label"><svg class="icon"><use href="#i-calendar"/></svg>Schedule</span>
-          <button type="button" class="btn btn-sm" id="sched-active" disabled>This post</button>
-          <button type="button" class="btn btn-sm" id="sched-selected" disabled>Selected <span class="btn-count" id="sched-selected-count">0</span></button>
-          <button type="button" class="btn btn-sm btn-primary" id="sched-all" disabled><svg class="icon"><use href="#i-send"/></svg>All ready <span class="btn-count" id="sched-all-count">0</span></button>
-        </div>
-
-        <div class="op-status" id="op-status" data-state="running" hidden>
-          <div class="op-head">
-            <div class="op-title"><span id="op-icon"><span class="spinner"></span></span><span id="op-title">Generating content</span></div>
-            <div class="row-actions">
-              <button type="button" class="btn btn-sm btn-danger" id="cancel-op"><svg class="icon"><use href="#i-stop"/></svg>Cancel</button>
-              <button type="button" class="btn btn-sm btn-ghost" id="dismiss-op" hidden>Dismiss</button>
-            </div>
-          </div>
-          <div class="progress" id="op-progress" role="progressbar" aria-labelledby="op-title" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-            <div class="progress-bar" id="op-bar"></div>
-          </div>
-          <div class="op-current" id="op-current" aria-live="polite">Starting…</div>
-          <div class="op-stats" id="op-stats"></div>
-          <ul class="op-errors" id="op-errors" hidden></ul>
+          <button type="button" class="btn btn-sm" id="gen-all" disabled><svg class="icon"><use href="#i-sparkles"/></svg>All images <span class="btn-count" id="gen-all-count">0</span></button>
         </div>
       </div>
 
       <details class="planner" id="planner">
-        <summary><svg class="icon"><use href="#i-clock"/></svg>Schedule planner <span class="hint" style="font-weight:500">— set publish times for many posts at once</span><svg class="icon chev"><use href="#i-chevron-right"/></svg></summary>
+        <summary><svg class="icon"><use href="#i-clock"/></svg><h3 class="planner-title">Schedule planner</h3> <span class="hint planner-summary-hint">set publish times for many posts at once</span><svg class="icon chev"><use href="#i-chevron-right"/></svg></summary>
         <div class="planner-body">
           <div class="field-row">
             <div class="field">
@@ -301,10 +275,18 @@
               <input type="datetime-local" class="input" id="plan-start">
             </div>
             <div class="field">
-              <label class="label" for="plan-interval">Then every (minutes)</label>
-              <input type="number" class="input" id="plan-interval" min="1" max="10080" step="1" value="60" inputmode="numeric">
+              <label class="label" for="plan-interval">Then every</label>
+              <div class="input-group">
+                <input type="number" class="input" id="plan-interval" min="1" max="10080" step="1" value="1" inputmode="numeric">
+                <select class="select select-unit" id="plan-unit" aria-label="Interval unit">
+                  <option value="1">minutes</option>
+                  <option value="60" selected>hours</option>
+                  <option value="1440">days</option>
+                </select>
+              </div>
             </div>
           </div>
+          <p class="plan-preview" id="plan-preview" aria-live="polite"></p>
           <div class="planner-actions">
             <label class="checkbox"><input type="checkbox" id="plan-overwrite"><span>Replace times already set</span></label>
             <span class="spacer"></span>
@@ -315,6 +297,33 @@
         </div>
       </details>
 
+      <div class="ops">
+        <div class="ops-row" role="group" aria-labelledby="ops-sched-label">
+          <h3 class="ops-label" id="ops-sched-label"><svg class="icon"><use href="#i-calendar"/></svg>Schedule</h3>
+          <button type="button" class="btn btn-sm" id="sched-selected" disabled>Selected <span class="btn-count" id="sched-selected-count">0</span></button>
+          <button type="button" class="btn btn-sm" id="sched-all" disabled><svg class="icon"><use href="#i-send"/></svg>All ready <span class="btn-count" id="sched-all-count">0</span></button>
+          <button type="button" class="btn btn-ghost btn-sm ops-needs" id="sched-needs-time" hidden><svg class="icon"><use href="#i-clock"/></svg><span id="sched-needs-time-label"></span><span aria-hidden="true">·</span><span class="link">Plan times</span></button>
+        </div>
+
+        <p class="sr-only" id="op-announce" aria-live="polite"></p>
+        <div class="op-status" id="op-status" data-state="running" hidden>
+          <div class="op-head">
+            <div class="op-title"><span id="op-icon"><span class="spinner"></span></span><span id="op-title">Generating content</span></div>
+            <div class="row-actions">
+              <button type="button" class="btn btn-sm" id="cancel-op"><svg class="icon"><use href="#i-stop"/></svg>Cancel</button>
+              <a class="btn btn-sm" id="op-view" href="#schedules-section" hidden><svg class="icon"><use href="#i-calendar-check"/></svg>View in Scheduled posts</a>
+              <button type="button" class="btn btn-sm btn-ghost" id="dismiss-op" hidden>Dismiss</button>
+            </div>
+          </div>
+          <div class="progress" id="op-progress" role="progressbar" aria-labelledby="op-title" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div class="progress-bar" id="op-bar"></div>
+          </div>
+          <div class="op-current" id="op-current">Starting…</div>
+          <div class="op-stats" id="op-stats"></div>
+          <ul class="op-errors" id="op-errors" hidden></ul>
+        </div>
+      </div>
+
       <div class="card-body">
         <div class="empty" id="editor-empty">
           <div class="empty-icon"><svg class="icon"><use href="#i-sparkles"/></svg></div>
@@ -322,13 +331,19 @@
           <p id="editor-empty-text">Upload images, then pick one in the gallery to generate and edit its post.</p>
         </div>
 
-        <form class="editor" id="editor" hidden novalidate aria-label="Post editor">
+        <h3 class="sr-only" id="editor-title">Post editor</h3>
+        <p class="sr-only" id="ed-announce" aria-live="polite"></p>
+        <form class="editor" id="editor" hidden novalidate aria-labelledby="editor-title">
           <div class="editor-preview">
             <div class="frame"><img id="ed-image" alt=""></div>
             <div class="editor-nav">
-              <button type="button" class="btn btn-sm btn-icon" id="ed-prev" aria-label="Previous image"><svg class="icon"><use href="#i-chevron-left"/></svg></button>
-              <span id="ed-position" aria-live="polite">1 of 1</span>
-              <button type="button" class="btn btn-sm btn-icon" id="ed-next" aria-label="Next image"><svg class="icon"><use href="#i-chevron-right"/></svg></button>
+              <button type="button" class="btn btn-sm btn-icon" id="ed-prev" aria-label="Previous post" aria-keyshortcuts="Alt+ArrowUp" title="Previous post (Alt+↑)"><svg class="icon"><use href="#i-chevron-left"/></svg></button>
+              <span id="ed-position">1 of 1</span>
+              <button type="button" class="btn btn-sm btn-icon" id="ed-next" aria-label="Next post" aria-keyshortcuts="Alt+ArrowDown" title="Next post (Alt+↓)"><svg class="icon"><use href="#i-chevron-right"/></svg></button>
+            </div>
+            <div class="editor-attention" id="ed-attention" hidden>
+              <button type="button" class="btn btn-ghost btn-xs" id="ed-next-attention" aria-describedby="ed-attention-detail">Next to fix <span class="btn-count" id="ed-attention-count">0</span></button>
+              <p class="hint" id="ed-attention-detail"></p>
             </div>
             <dl class="meta-list">
               <div><dt>File</dt><dd id="ed-name" title=""></dd></div>
@@ -338,9 +353,24 @@
             </dl>
             <div class="editor-actions">
               <button type="button" class="btn btn-sm" id="ed-generate"><svg class="icon"><use href="#i-sparkles"/></svg><span id="ed-generate-label">Generate content</span></button>
-              <button type="button" class="btn btn-sm btn-primary" id="ed-schedule-post"><svg class="icon"><use href="#i-send"/></svg>Schedule post</button>
+              <button type="button" class="btn btn-sm" id="ed-schedule-post"><svg class="icon"><use href="#i-send"/></svg><span id="ed-schedule-label">Schedule post</span></button>
+              <button type="button" class="btn btn-ghost btn-sm" id="ed-restore" hidden><svg class="icon"><use href="#i-refresh"/></svg>Restore previous content</button>
             </div>
           </div>
+
+          <div class="editor-blank" id="ed-blank">
+            <p class="editor-blank-title">No caption yet</p>
+            <p>Generate this post with AI, or write it yourself. The full editor opens once there is a caption.</p>
+            <button type="button" class="btn btn-sm" id="ed-write"><svg class="icon"><use href="#i-edit"/></svg>Write it myself</button>
+          </div>
+
+          <div class="editor-main">
+            <!-- Outside the fieldset: a locked post still needs its way out. -->
+            <div class="inline-alert is-success" id="ed-result" hidden>
+              <svg class="icon"><use href="#i-calendar-check"/></svg>
+              <div><strong id="ed-result-title"></strong><div class="sub" id="ed-result-text"></div>
+                <button type="button" class="btn btn-sm result-edit" id="ed-result-edit" hidden><svg class="icon"><use href="#i-edit"/></svg>Edit in Scheduled posts</button></div>
+            </div>
 
           <fieldset class="editor-fields" id="ed-fieldset">
             <legend class="sr-only">Post content</legend>
@@ -379,9 +409,9 @@
             <div class="field">
               <div class="label"><label for="ed-tag-input">Hashtags</label><span class="counter" id="ed-tags-count">0 / 15</span></div>
               <div class="tag-editor" id="ed-tags">
-                <input class="tag-input" id="ed-tag-input" type="text" autocomplete="off" spellcheck="false" placeholder="Add a hashtag and press Enter" aria-describedby="ed-tags-hint ed-tags-error">
+                <input class="tag-input" id="ed-tag-input" type="text" autocomplete="off" spellcheck="false" placeholder="Add a hashtag" aria-describedby="ed-tags-hint ed-tags-error">
               </div>
-              <p class="hint" id="ed-tags-hint">Enter, comma or space adds a tag · Backspace removes the last one · duplicates are ignored</p>
+              <p class="hint" id="ed-tags-hint">Enter, comma or space adds a tag · ← from the empty field moves to the tags, Delete removes one</p>
               <p class="error-text" id="ed-tags-error" hidden></p>
             </div>
 
@@ -399,11 +429,9 @@
                 <p class="error-text" id="ed-category-error" hidden></p>
               </div>
               <div class="field">
-                <label class="label" for="ed-score">Engagement score (1–100)</label>
-                <div class="score">
-                  <input type="range" id="ed-score" min="1" max="100" step="1" value="50">
-                  <output class="score-value" id="ed-score-value" for="ed-score">50</output>
-                </div>
+                <span class="label">Engagement estimate</span>
+                <p class="estimate" id="ed-score-value">—</p>
+                <p class="hint">The model's guess, not a measurement. It is not posted.</p>
               </div>
             </div>
 
@@ -432,11 +460,8 @@
               <div class="post-preview" id="ed-preview"></div>
             </div>
 
-            <div class="inline-alert is-success" id="ed-result" hidden>
-              <svg class="icon"><use href="#i-calendar-check"/></svg>
-              <div><strong id="ed-result-title"></strong><div class="sub" id="ed-result-text"></div></div>
-            </div>
           </fieldset>
+          </div>
         </form>
       </div>
     </section>
@@ -484,7 +509,7 @@
           <button type="button" class="btn btn-ghost btn-sm" id="clear-log" disabled><svg class="icon"><use href="#i-trash"/></svg>Clear</button>
         </div>
       </div>
-      <ol class="list-reset scroll-area" id="log-list" role="log" aria-label="Activity entries, newest first" hidden></ol>
+      <ol class="list-reset scroll-area" id="log-list" aria-label="Activity entries, newest first" hidden></ol>
       <div class="empty" id="log-empty">
         <div class="empty-icon"><svg class="icon"><use href="#i-activity"/></svg></div>
         <p class="empty-title" id="log-empty-title">No activity yet</p>
@@ -521,7 +546,7 @@
 
       <section class="settings-section" id="settings-ollama" aria-labelledby="set-ollama-title">
         <h3 id="set-ollama-title"><svg class="icon"><use href="#i-cpu"/></svg>Ollama · AI generation</h3>
-        <p class="section-desc">Images are resized in the browser, sent to the Poster server as Base64, and analysed with Ollama's <code>/api/chat</code>. The endpoint and API key are set on the server.</p>
+        <p class="section-desc">Each image is shrunk in your browser and sent to the Poster server, which asks Ollama to write the post. The Ollama address and key are set on the server.</p>
         <dl class="server-info" id="ollama-server-info" aria-label="Ollama server configuration"></dl>
         <div class="field-row">
           <div class="field">
@@ -561,7 +586,7 @@
 
       <section class="settings-section" id="settings-buffer" aria-labelledby="set-buffer-title">
         <h3 id="set-buffer-title"><svg class="icon"><use href="#i-layers"/></svg>Buffer · scheduling</h3>
-        <p class="section-desc">The server uses your Buffer personal access token with Buffer's GraphQL API. Connect to load your channels, then choose where posts go.</p>
+        <p class="section-desc">The server connects to Buffer with your personal access token. Connect to load your channels, then choose where posts go.</p>
         <dl class="server-info" id="buffer-server-info" aria-label="Buffer server configuration"></dl>
         <div class="row-actions">
           <button type="button" class="btn btn-sm" id="connect-buffer"><svg class="icon"><use href="#i-link"/></svg><span id="connect-buffer-label">Connect &amp; load channels</span></button>
@@ -584,15 +609,12 @@
         <h3 id="set-schedule-title"><svg class="icon"><use href="#i-clock"/></svg>Scheduling</h3>
         <div class="field">
           <label class="label" for="set-timezone">Timezone</label>
-          <select class="select" id="set-timezone" aria-describedby="set-timezone-error"></select>
+          <input class="input" id="set-timezone" type="text" list="timezone-options" autocomplete="off" spellcheck="false" aria-describedby="set-timezone-hint set-timezone-error">
+          <datalist id="timezone-options"></datalist>
+          <p class="hint" id="set-timezone-hint">Type a city to search, for example Dhaka or London.</p>
           <p class="error-text" id="set-timezone-error" hidden></p>
         </div>
         <div class="field-row">
-          <div class="field">
-            <label class="label" for="set-interval">Default planner interval (minutes)</label>
-            <input class="input" id="set-interval" type="number" min="1" max="10080" step="1" inputmode="numeric" aria-describedby="set-interval-error">
-            <p class="error-text" id="set-interval-error" hidden></p>
-          </div>
           <div class="field">
             <label class="label" for="set-lead">Minimum lead time (minutes)</label>
             <input class="input" id="set-lead" type="number" min="0" max="1440" step="1" inputmode="numeric" aria-describedby="set-lead-error">
@@ -628,7 +650,7 @@
         </div>
         <div class="data-actions">
           <button type="button" class="btn btn-sm btn-danger" id="clear-drafts"><svg class="icon"><use href="#i-trash"/></svg>Clear saved drafts</button>
-          <button type="button" class="btn btn-sm btn-danger" id="reset-all"><svg class="icon"><use href="#i-alert"/></svg>Reset All Settings</button>
+          <button type="button" class="btn btn-sm btn-danger" id="reset-all"><svg class="icon"><use href="#i-alert"/></svg>Reset all settings</button>
         </div>
         <p class="hint" id="storage-usage"></p>
       </section>

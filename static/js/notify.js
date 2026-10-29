@@ -76,7 +76,8 @@ export class NotificationService extends EventTarget {
 
     this.toastRegion.append(toast);
     // Keep the stack short so toasts never bury the page (tighter on phones).
-    const maxToasts = window.matchMedia?.('(max-width: 560px)').matches ? 2 : 4;
+    // Two at most, so toasts never stack over the cards being reviewed.
+    const maxToasts = 2;
     while (this.toastRegion.children.length > maxToasts) this.toastRegion.firstElementChild.remove();
     start();
     return toast;

@@ -45,8 +45,8 @@ export class LogView extends View {
     list.replaceChildren(...filtered.slice().reverse().map((entry) => {
       const date = new Date(entry.ts);
       const time = date.toDateString() === today
-        ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        : date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        ? date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })
+        : date.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
       return el('li', { class: 'log-item', dataset: { level: entry.level } }, [
         el('time', { class: 'log-time', datetime: entry.ts, title: date.toLocaleString(), text: time }),
         el('span', { class: 'log-cat', text: entry.category }),

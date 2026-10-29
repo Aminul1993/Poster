@@ -2,6 +2,7 @@
 import { showToast, validateImage } from '../app.js';
 import { LIMITS, SERVER } from '../config.js';
 import { isCancelled } from '../errors.js';
+import { hasContent } from '../store.js';
 import { el, formatBytes, formatDuration, pluralize, truncate } from '../util.js';
 import { byId, hasFiles } from './dom.js';
 import { View } from './view.js';
@@ -15,11 +16,37 @@ export class UploadView extends View {
     this.idle = Promise.resolve();
     /** @type {AbortController|null} set while an image is being generated */
     this.imageGenController = null;
+    /** Whether the owner reopened the card after it folded away for review. */
+    this.expanded = false;
   }
 
   bind() {
     this.bindUpload();
     this.bindGenerator();
+    byId('upload-toggle').addEventListener('click', () => {
+      this.expanded = byId('upload-section').classList.contains('is-collapsed');
+      this.renderGenerator();
+      if (this.expanded) byId('upload-body').querySelector('.dropzone:not([hidden]), textarea')?.focus();
+    });
+  }
+
+  /**
+   * Once posts have captions the batch is being reviewed, so the card folds to one line ("6 of 10 images")
+   * and gives the editor the room. "Add more" opens it again.
+   */
+  renderCollapse() {
+    const items = this.store.all();
+    const reviewing = items.some(hasContent);
+    if (!reviewing) this.expanded = false;
+    const collapsed = reviewing && !this.expanded;
+    byId('upload-section').classList.toggle('is-collapsed', collapsed);
+    byId('upload-body').hidden = collapsed;
+    byId('upload-section').querySelector('.card-header .segmented').hidden = collapsed;
+    const toggle = byId('upload-toggle');
+    toggle.hidden = !reviewing;
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    byId('upload-toggle-label').textContent = collapsed ? 'Add more' : 'Done adding';
+    if (collapsed) byId('upload-sub').textContent = `${items.length} of ${LIMITS.maxImages} images in this batch.`;
   }
 
   bindUpload() {
@@ -139,6 +166,9 @@ export class UploadView extends View {
     byId('upload-errors-title').textContent = `${errors.length} of ${pluralize(total, 'file')} not added`;
     byId('upload-error-list').replaceChildren(...errors.map((e) => el('li', {}, [el('strong', { text: e.name }), ` — ${e.message}`])));
     box.hidden = false;
+    // The reasons live in the card body, so a folded card opens to show them.
+    this.expanded = true;
+    this.renderCollapse();
   }
 
   /* ------------------------------------------------------- image generator */
@@ -218,6 +248,7 @@ export class UploadView extends View {
     else if (full) status.textContent = `The gallery is full (${LIMITS.maxImages} images). Remove an image to generate another.`;
     else if (demo) status.textContent = 'Demo mode draws a placeholder instead of calling the image AI.';
     else status.textContent = 'Images are created by Pollinations and added to the gallery like uploads. Each run makes a new image.';
+    this.renderCollapse();
   }
 
   /** @param {string} message empty hides the error @param {{invalid?: boolean}} [options] invalid marks the description field */

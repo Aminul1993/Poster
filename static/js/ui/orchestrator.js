@@ -1,7 +1,8 @@
 /** Starts generation and scheduling runs: pre-flight checks, confirmations, then SchedulerService. */
 import { showToast } from '../app.js';
-import { hasContent } from '../store.js';
-import { pluralize } from '../util.js';
+import { countedResult, hasContent } from '../store.js';
+import { TimeZoneUtil } from '../time.js';
+import { pluralize, truncate } from '../util.js';
 import { byId } from './dom.js';
 import { View } from './view.js';
 
@@ -45,20 +46,22 @@ export class Orchestrator extends View {
     if (withContent.length) {
       if (items.length === 1) {
         const item = items[0];
+        const scheduled = countedResult(item, settings.mode);
         const ok = await this.ui.confirm({
           title: 'Replace the existing content?',
-          message: `"${item.name}" already has a caption${item.result ? ' and has been scheduled' : ''}. Generating again replaces the captions, hashtags, category and score, including your edits.${item.result ? ' The post already in Buffer is not changed.' : ''}`,
-          confirmLabel: 'Regenerate'
+          message: `"${item.name}" already has a caption${scheduled ? ' and has been scheduled' : ''}. Generating again replaces the captions, hashtags and category, including your edits. You can restore the previous content once from the editor.${scheduled ? ' The post already in Buffer is not changed.' : ''}`,
+          confirmLabel: 'Regenerate',
+          danger: true
         });
         if (!ok) return null;
       } else {
         const fresh = items.length - withContent.length;
         const choice = await this.ui.choose({
           title: 'Some images already have content',
-          message: `${pluralize(withContent.length, 'image')} of ${items.length} already ${withContent.length === 1 ? 'has' : 'have'} content. Regenerating replaces it, including your edits.`,
+          message: `${pluralize(withContent.length, 'image')} of ${items.length} already ${withContent.length === 1 ? 'has' : 'have'} content. Regenerating replaces it, including your edits; each image's previous content can be restored once from the editor.`,
           choices: [
-            { value: 'new', label: `Only new (${fresh})`, disabled: fresh === 0 },
-            { value: 'all', label: `Regenerate all ${items.length}`, primary: true }
+            { value: 'all', label: `Regenerate all ${items.length}`, danger: true },
+            { value: 'new', label: `Only new (${fresh})`, primary: true, disabled: fresh === 0 }
           ]
         });
         if (!choice) return null;
@@ -128,25 +131,28 @@ export class Orchestrator extends View {
         byId(fieldMap[Object.keys(check.errors)[0]])?.focus();
         return null;
       }
-      if (item.result) {
-        const ok = await this.ui.confirm({ title: 'Schedule this post again?', message: `"${item.name}" was already scheduled. Scheduling again creates another post in Buffer.`, confirmLabel: 'Schedule again' });
+      if (countedResult(item, settings.mode)) {
+        // A second copy in Buffer is rarely wanted: the danger variant opens on Cancel.
+        const ok = await this.ui.confirm({ title: 'Schedule this post again?', message: `"${item.name}" is already scheduled. Scheduling again creates a second copy in Buffer.`, confirmLabel: 'Schedule a second copy', danger: true });
         if (!ok) return null;
       }
     } else {
-      targets = items.filter((i) => !i.result);
+      targets = items.filter((i) => !countedResult(i, settings.mode));
       const already = items.length - targets.length;
       if (!targets.length) {
         showToast('These posts are already scheduled.', 'info');
         return null;
       }
       if (already) skipNote = ` ${pluralize(already, 'post')} already scheduled will be skipped.`;
+      targets = await this.checkBeforeScheduling(targets);
+      if (!targets) return null;
     }
 
     const channelNames = channelIds.map((id) => buffer.channelName(id, settings)).join(', ');
     if (settings.mode === 'live') {
       const ok = await this.ui.confirm({
         title: `Schedule ${pluralize(targets.length, 'post')} in Buffer?`,
-        message: `Each post goes to ${channelNames} at its publish time (${settings.timezone}).${skipNote}`,
+        message: `${this.describeTimes(targets)} Each post goes to ${channelNames}.${skipNote}`,
         confirmLabel: `Schedule ${pluralize(targets.length, 'post')}`
       });
       if (!ok) return null;
@@ -160,5 +166,44 @@ export class Orchestrator extends View {
       concurrency: 1,
       worker: (item, ctx) => this.scheduler.scheduleItem(item, ctx, { skipScheduled: scope !== 'single' })
     });
+  }
+
+  /**
+   * Checks every post before a bulk run, so a missing or past publish time is caught before anything is
+   * sent instead of failing post by post. Offers to schedule the valid ones or to open the planner.
+   * @param {object[]} targets @returns {Promise<object[]|null>} the posts to schedule, or null to stop
+   */
+  async checkBeforeScheduling(targets) {
+    const checks = targets.map((item) => ({ item, check: this.validation.validatePost(item, this.settings) }));
+    const invalid = checks.filter((c) => !c.check.valid);
+    if (!invalid.length) return targets;
+    for (const { item } of invalid) this.store.update(item.id, { showErrors: true }, { reason: 'validation', persist: false });
+    const reasons = new Map();
+    for (const { item, check } of invalid) reasons.set(check.message, [...(reasons.get(check.message) || []), item.name]);
+    const names = (list) => list.slice(0, 3).map((name) => truncate(name, 28)).join(', ') + (list.length > 3 ? ` and ${list.length - 3} more` : '');
+    const valid = checks.filter((c) => c.check.valid).map((c) => c.item);
+    const timeProblem = invalid.some((c) => c.check.errors.schedule);
+    const choice = await this.ui.choose({
+      title: `${pluralize(invalid.length, 'post')} can't be scheduled yet`,
+      message: [...reasons].map(([message, list]) => `• ${message} (${names(list)})`).join('\n'),
+      choices: [
+        timeProblem ? { value: 'plan', label: 'Set times in the planner', primary: !valid.length } : null,
+        valid.length ? { value: 'valid', label: `Schedule the ${pluralize(valid.length, 'ready post')}`, primary: true } : null
+      ].filter(Boolean)
+    });
+    if (choice === 'plan') this.ui.openPlanner();
+    return choice === 'valid' ? valid : null;
+  }
+
+  /** @param {object[]} targets validated posts @returns {string} when they will be published */
+  describeTimes(targets) {
+    const zone = this.settings.timezone;
+    const times = targets.map((item) => TimeZoneUtil.zonedToUtc(item.scheduleLocal, zone)?.date.getTime()).filter(Number.isFinite).sort((a, b) => a - b);
+    if (!times.length) return '';
+    const format = (ms) => TimeZoneUtil.format(new Date(ms), zone);
+    const night = times.filter((ms) => TimeZoneUtil.isNight(new Date(ms), zone)).length;
+    const late = night ? ` ${pluralize(night, 'post')} ${night === 1 ? 'lands' : 'land'} between 11 pm and 6 am.` : '';
+    if (times.length === 1 || times[0] === times[times.length - 1]) return `It publishes ${format(times[0])} (${zone}).${late}`;
+    return `The first publishes ${format(times[0])} and the last ${format(times[times.length - 1])} (${zone}).${late}`;
   }
 }

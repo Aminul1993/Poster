@@ -14,6 +14,8 @@ from poster.errors import ServiceError
     ("#বাংলাদেশ", "#বাংলাদেশ"),  # Bengali vowel signs
     ("हिन्दी", "#हिन्दी"),  # Devanagari virama
     ("#தமிழ்", "#தமிழ்"),  # Tamil
+    ("#র\u200d্যালি", "#র\u200d্যালি"),  # zero-width joiner picks the ra-phala form
+    ("#\u200cনাম\u200d", "#নাম"),  # joiners at the edges are dropped
     ("#café", "#café"),
     ("café", "#café"),  # decomposed accent, normalised to NFC
     ("#hello-world!", "#helloworld"),

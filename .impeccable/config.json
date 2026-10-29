@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "templates/index.html"
+        ],
+        "createdAt": "2026-10-29T07:29:02.366Z",
+        "reason": "Claude, from the critique's detector run: the only img is #ed-image in the hidden editor form; editor.js showThumbnail sets its src at runtime, so it never renders without one"
+      },
+      {
+        "rule": "flat-type-hierarchy",
+        "value": "*",
+        "files": [
+          "templates/index.html"
+        ],
+        "createdAt": "2026-10-29T07:45:51.715Z",
+        "reason": "Claude: DESIGN.md Typography sets a one-family hierarchy carried by weight and small size steps for this dense Operate dashboard; the finding predates this session (critique run, 2026-10-29)"
+      }
+    ]
+  }
+}

@@ -7,7 +7,7 @@
 import { saveSettings, showToast } from '../app.js';
 import { LIMITS, SERVER, STORAGE_KEYS, TIMING } from '../config.js';
 import { POST_FILTERS } from '../services/buffer.js';
-import { hasContent } from '../store.js';
+import { hasContent, isReady, needsTime } from '../store.js';
 import { $, formatDuration, icon, pluralize } from '../util.js';
 import { Dialogs } from './dialogs.js';
 import { byId, hasFiles } from './dom.js';
@@ -17,7 +17,7 @@ import { ImageEditView } from './imageedit.js';
 import { LogView } from './log.js';
 import { OperationsView } from './operations.js';
 import { Orchestrator } from './orchestrator.js';
-import { PostsView } from './posts.js';
+import { PostsView, groupPosts } from './posts.js';
 import { defaultPrefs, normalizePrefs } from './prefs.js';
 import { SettingsView } from './settings.js';
 import { UploadView } from './upload.js';
@@ -80,6 +80,7 @@ export class UIController {
   confirm(options) { return this.dialogs.confirm(options); }
   choose(options) { return this.dialogs.choose(options); }
   renderEditor() { this.editor.render(); }
+  openPlanner() { this.operations.openPlanner(); }
   /** @param {File[]} files */
   handleFiles(files) { return this.upload.handleFiles(files); }
   startGeneration(ids, scope) { return this.orchestrator.startGeneration(ids, scope); }
@@ -118,7 +119,8 @@ export class UIController {
     byId('imggen-aspect').value = this.prefs.imageAspect;
     byId('log-filter').value = this.prefs.logFilter;
     byId('planner').open = this.prefs.plannerOpen;
-    byId('plan-interval').value = String(this.prefs.planInterval || this.settings.intervalMinutes);
+    this.operations.showInterval(this.prefs.planInterval || this.settings.intervalMinutes);
+    this.gallery.setView(this.prefs.galleryView);
   }
 
   saveUiPrefs() {
@@ -159,7 +161,10 @@ export class UIController {
     setPill('pill-ollama', this.ollamaState());
     setPill('pill-buffer', this.bufferState());
     byId('pill-network').hidden = navigator.onLine !== false;
-    byId('ai-sub').textContent = `${s.model} · ${demo ? 'Demo mode (simulated)' : 'Live'} · ${s.tone.charAt(0).toUpperCase()}${s.tone.slice(1)} tone`;
+    // In Demo the badge already says it; the service labels would only repeat "Demo" twice more.
+    byId('pill-ollama').hidden = demo;
+    byId('pill-buffer').hidden = demo;
+    byId('ai-sub').textContent = `${s.model}${demo ? ' (simulated)' : ''} · ${s.tone.charAt(0).toUpperCase()}${s.tone.slice(1)} tone`;
   }
 
   /** @returns {{state: string, detail: string, title: string}} */
@@ -186,17 +191,27 @@ export class UIController {
     return { state: 'ok', detail: pluralize(selected, 'channel'), title: connection ? `Connected as ${connection.account?.email || 'Buffer user'}.` : 'Channels selected (connection not verified in this browser).' };
   }
 
+  /** The batch line: images, captions, posts waiting for a time, posts ready, and what Buffer holds. */
   renderKpis() {
     const items = this.store.all();
     const generated = items.filter(hasContent).length;
-    const ready = items.filter((i) => hasContent(i) && !i.result).length;
+    const ready = items.filter((i) => isReady(i, this.settings)).length;
+    const waiting = items.filter((i) => needsTime(i, this.settings)).length;
     // Upcoming posts in Buffer, counted whenever the posts list includes them ("+" while more pages exist).
     if (this.feed.loaded && this.feed.filter !== 'published') {
-      this.upcomingKpi = { count: this.feed.posts.filter((p) => POST_FILTERS.upcoming.includes(p.status)).length, more: Boolean(this.feed.next) };
+      // The owner counts posts (images); Buffer counts one per channel, given in brackets.
+      const upcoming = this.feed.posts.filter((p) => POST_FILTERS.upcoming.includes(p.status));
+      this.upcomingKpi = { count: groupPosts(upcoming).length, copies: upcoming.length, more: Boolean(this.feed.next) };
     }
     byId('kpi-images').textContent = `${items.length} / ${LIMITS.maxImages}`;
     byId('kpi-generated').textContent = String(generated);
+    byId('kpi-needs-time').textContent = String(waiting);
+    byId('kpi-needs-time-label').textContent = waiting === 1 ? 'needs a publish time' : 'need a publish time';
+    byId('kpi-needs-time-stat').classList.toggle('is-warning', waiting > 0);
     byId('kpi-ready').textContent = String(ready);
+    const copies = this.upcomingKpi && this.upcomingKpi.copies !== this.upcomingKpi.count ? ` (${pluralize(this.upcomingKpi.copies, 'channel post')})` : '';
+    byId('kpi-scheduled-label').textContent = this.settings.mode === 'demo' ? `upcoming in Demo mode, not in Buffer${copies}` : `upcoming in Buffer${copies}`;
+    byId('kpi-scheduled-label').title = 'Buffer keeps one post per channel; Poster counts one per image.';
     byId('kpi-scheduled').textContent = this.upcomingKpi ? `${this.upcomingKpi.count}${this.upcomingKpi.more ? '+' : ''}` : '—';
     byId('capacity-bar').style.width = `${(items.length / LIMITS.maxImages) * 100}%`;
     byId('capacity-label').textContent = `${items.length} of ${LIMITS.maxImages} slots used`;
@@ -274,6 +289,8 @@ export class UIController {
       this.operations.render();
       const touchesActive = ids.includes(this.store.activeId) || ['active', 'remove', 'clear', 'add', 'reorder'].includes(reason);
       if (reason !== 'edit' && touchesActive) this.editor.render();
+      if (['planned', 'add', 'remove', 'clear', 'active'].includes(reason)) this.operations.compactStatus();
+      if (reason === 'reorder') this.gallery.announceMove(ids[0]);
     });
     this.scheduler.addEventListener('start', (event) => {
       this.lastOp = event.detail;
@@ -298,6 +315,13 @@ export class UIController {
   /** @param {import('../scheduler.js').Operation} op */
   onOperationComplete(op) {
     this.operations.renderStatus(op);
+    // Captions are ready but nothing can be scheduled without a time: the planner is the next step.
+    if (op.kind === 'generate' && op.succeeded && this.store.all().some((i) => needsTime(i, this.settings))) {
+      byId('planner').open = true;
+      // The planner is the next step; the finished run shrinks so it does not push the editor down.
+      this.operations.compactStatus();
+    }
+    if (op.kind === 'schedule' && op.succeeded) byId('planner').open = false;
     this.renderAll();
     // Show the new posts as Buffer has them: one reload per scheduling run.
     if (op.kind === 'schedule' && op.succeeded) this.feed.load();
@@ -320,11 +344,14 @@ export class UIController {
       showToast(`${isGen ? 'Generation' : 'Scheduling'} cancelled after ${op.succeeded} of ${pluralize(op.total, noun)}.`, 'warning');
       this.notifier.log('warn', isGen ? 'ai' : 'schedule', `${op.label} cancelled.`, stats);
     } else if (op.failed) {
-      showToast(`${op.succeeded} of ${pluralize(op.total, noun)} ${isGen ? 'generated' : 'scheduled'}; ${op.failed} failed. Details are in the activity log.`, op.succeeded ? 'warning' : 'error', { title: `${isGen ? 'Generation' : 'Scheduling'} finished with errors` });
+      showToast(`${op.succeeded} of ${pluralize(op.total, noun)} ${isGen ? 'generated' : 'scheduled'}; ${op.failed} failed. The reasons are listed under the progress bar.`, op.succeeded ? 'warning' : 'error', { title: `${isGen ? 'Generation' : 'Scheduling'} finished with errors` });
       this.notifier.log(op.succeeded ? 'warn' : 'error', isGen ? 'ai' : 'schedule', `${op.label} finished with errors.`, stats);
     } else {
       const verb = isGen ? 'Generated content for' : 'Scheduled';
-      showToast(`${verb} ${pluralize(op.succeeded, noun)}${op.skipped ? ` (${op.skipped} skipped)` : ''}${op.retries ? ` after ${pluralize(op.retries, 'retry', 'retries')}` : ''}.`, 'success', { title: isGen ? 'Content ready' : 'Posts scheduled' });
+      const where = !isGen && op.demo ? ' in Demo mode (not in Buffer)' : '';
+      const title = isGen ? 'Content ready' : op.demo ? 'Scheduled in Demo mode' : 'Posts scheduled';
+      // The progress panel already says this when it is on screen; a toast would only cover the page.
+      if (!this.operations.statusInView()) showToast(`${verb} ${pluralize(op.succeeded, noun)}${where}${op.skipped ? ` (${op.skipped} skipped)` : ''}${op.retries ? ` after ${pluralize(op.retries, 'retry', 'retries')}` : ''}.`, 'success', { title });
       this.notifier.log('success', isGen ? 'ai' : 'schedule', `${op.label} complete.`, stats);
     }
   }
@@ -380,7 +407,7 @@ export class UIController {
           ? 'AI captions and Buffer scheduling are simulated. The server is configured, so you can switch to Live mode whenever you are ready.'
           : 'AI captions and Buffer scheduling are simulated, so you can try everything safely. To go live, add OLLAMA_API_KEY and BUFFER_ACCESS_TOKEN to the .env file next to app.py and restart Poster.',
         actions: ready
-          ? [{ label: 'Switch to Live mode', onClick: () => this.setMode('live'), primary: true }]
+          ? [{ label: 'Switch to Live mode', onClick: () => this.setMode('live') }]
           : [{ label: 'Open settings', onClick: () => this.openSettings() }]
       });
       return;
@@ -398,10 +425,11 @@ export class UIController {
   }
 
   /**
-   * Switches between Demo and Live mode (Live requires valid AI settings).
+   * Switches between Demo and Live mode (Live requires valid AI settings and a confirmation, since posts
+   * then go to real accounts).
    * @param {'demo'|'live'} mode
    */
-  setMode(mode) {
+  async setMode(mode) {
     if (this.scheduler.isRunning) {
       showToast('Wait for the current operation to finish before switching modes.', 'warning');
       return;
@@ -414,6 +442,19 @@ export class UIController {
         this.openSettings('settings-ollama');
         return;
       }
+      const live = { ...this.settings, mode: 'live' };
+      const channels = this.app.liveBuffer.selectedChannelIds(live).map((id) => this.app.liveBuffer.channelName(id, live));
+      const rehearsed = this.store.all().filter((i) => i.result?.mode === 'demo').length;
+      const ok = await this.confirm({
+        title: 'Switch to Live mode?',
+        message: [
+          `Captions will come from ${this.settings.model} on Ollama, and scheduling creates real posts in Buffer on ${channels.length ? channels.join(', ') : 'the channels you choose in Settings → Buffer'}.`,
+          rehearsed ? `${pluralize(rehearsed, 'post')} scheduled in Demo mode ${rehearsed === 1 ? 'is' : 'are'} not in Buffer, so ${rehearsed === 1 ? 'it' : 'they'} can be scheduled for real.` : ''
+        ].filter(Boolean).join('\n\n'),
+        confirmLabel: 'Switch to Live',
+        symbol: 'zap'
+      });
+      if (!ok || this.settings.mode === 'live') return;
     }
     const result = saveSettings({ ...this.settings, mode });
     if (!result.ok) {

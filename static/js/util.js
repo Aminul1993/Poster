@@ -124,10 +124,71 @@ export function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** @param {string} text @param {number} max @returns {string} */
+let graphemes = null;
+
+/**
+ * Shortens text to at most `max` user-perceived characters, cutting only between whole graphemes so a
+ * Bengali conjunct or an emoji is never split in half.
+ * @param {string} text @param {number} max @returns {string}
+ */
 export function truncate(text, max) {
   const value = String(text ?? '');
-  return value.length > max ? `${value.slice(0, Math.max(0, max - 1)).trimEnd()}…` : value;
+  if (value.length <= max) return value;
+  let parts;
+  try {
+    graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    parts = Array.from(graphemes.segment(value), (s) => s.segment);
+  } catch {
+    parts = [...value];
+  }
+  return parts.length > max ? `${parts.slice(0, Math.max(0, max - 1)).join('').trimEnd()}…` : value;
+}
+
+/** Scripts Poster's posts are written in, and the language tag that makes screen readers pick the right voice. */
+const SCRIPT_LANGS = [
+  [/\p{Script=Bengali}/gu, 'bn'], [/\p{Script=Devanagari}/gu, 'hi'], [/\p{Script=Tamil}/gu, 'ta'],
+  [/\p{Script=Telugu}/gu, 'te'], [/\p{Script=Gujarati}/gu, 'gu'], [/\p{Script=Gurmukhi}/gu, 'pa'],
+  [/\p{Script=Kannada}/gu, 'kn'], [/\p{Script=Malayalam}/gu, 'ml'], [/\p{Script=Sinhala}/gu, 'si'], [/\p{Script=Oriya}/gu, 'or']
+];
+
+/**
+ * The language of text written mostly in one South Asian script, or '' for Latin or mixed text.
+ * @param {string} text @returns {string}
+ */
+export function scriptLang(text) {
+  const value = String(text ?? '');
+  const letters = (value.match(/\p{L}/gu) || []).length;
+  if (!letters) return '';
+  for (const [pattern, lang] of SCRIPT_LANGS) {
+    if ((value.match(pattern) || []).length * 2 > letters) return lang;
+  }
+  return '';
+}
+
+/**
+ * Fills `node` with `text`, giving each run of words in a South Asian script its own lang, so a screen reader
+ * switches voice between Bengali and English inside one caption.
+ * @param {HTMLElement} node @param {string} text @returns {HTMLElement} node
+ */
+export function scriptRuns(node, text) {
+  node.removeAttribute('lang');
+  const runs = [];
+  for (const part of String(text ?? '').split(/(\s+)/)) {
+    // Whitespace and punctuation stay in the run they sit in.
+    const lang = /\p{L}/u.test(part) ? scriptLang(part) : null;
+    const last = runs[runs.length - 1];
+    if (last && (lang === null || lang === last.lang)) last.text += part;
+    else runs.push({ lang: lang ?? '', text: part });
+  }
+  node.replaceChildren(...runs.map((run) => (run.lang ? el('span', { lang: run.lang, text: run.text }) : document.createTextNode(run.text))));
+  return node;
+}
+
+/** Sets or clears an element's lang attribute from the script of its text. @param {HTMLElement} node @param {string} text */
+export function applyScriptLang(node, text) {
+  const lang = scriptLang(text);
+  if (lang) node.setAttribute('lang', lang);
+  else node.removeAttribute('lang');
 }
 
 /** @param {number} count @param {string} singular @param {string} [plural] @returns {string} */
@@ -135,7 +196,7 @@ export function pluralize(count, singular, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
-/** Number of user-perceived characters (code points). */
+/** Number of Unicode code points, the unit the length limits are checked in (a Bengali conjunct counts as several). */
 export function charCount(text) {
   return [...String(text ?? '')].length;
 }

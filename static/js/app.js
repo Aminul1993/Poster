@@ -4,7 +4,7 @@
  */
 import { APP_VERSION, STORAGE_KEYS } from './config.js';
 import { SettingsModel } from './settings.js';
-import { hasContent } from './store.js';
+import { isReady } from './store.js';
 import { downloadFile, isPlainObject } from './util.js';
 
 /** Services, state and the UI, filled in by main.js at start-up. */
@@ -66,9 +66,9 @@ export function scheduleSelectedPosts() {
   return app.ui.startScheduling(app.store.selected().map((i) => i.id), 'selected');
 }
 
-/** Schedules every post that has content and is not yet scheduled. @returns {Promise<import('./scheduler.js').Operation|null>} */
+/** Schedules every post that has a caption and a publish time and is not yet scheduled. @returns {Promise<import('./scheduler.js').Operation|null>} */
 export function scheduleAllPosts() {
-  return app.ui.startScheduling(app.store.all().filter((i) => hasContent(i) && !i.result).map((i) => i.id), 'all');
+  return app.ui.startScheduling(app.store.all().filter((i) => isReady(i, app.settings)).map((i) => i.id), 'all');
 }
 
 /**

@@ -104,11 +104,13 @@ export class ValidationService {
 
   /**
    * Turns user or model input into a canonical "#tag": letters, combining marks (the vowel signs of
-   * Bengali, Hindi, Tamil...), digits and _.
+   * Bengali, Hindi, Tamil...), digits and _, plus the zero-width joiner and non-joiner inside a word, which
+   * choose a conjunct's shape (র\u200d্য versus র্য) and so change how the word reads.
    * @param {string} raw @returns {string|null}
    */
   normalizeHashtag(raw) {
-    const tag = String(raw ?? '').normalize('NFC').trim().replace(/^#+/, '').replace(/[^\p{L}\p{M}\p{N}_]/gu, '');
+    const tag = String(raw ?? '').normalize('NFC').trim().replace(/^#+/, '').replace(/[^\p{L}\p{M}\p{N}_\u200c\u200d]/gu, '')
+      .replace(/^[\u200c\u200d]+|[\u200c\u200d]+$/g, '');
     if (!tag || /^\d+$/.test(tag) || tag.length > 80) return null;
     return `#${tag}`;
   }
@@ -138,7 +140,7 @@ export class ValidationService {
     const list = Array.isArray(tags) ? tags : [];
     if (list.length > LIMITS.maxHashtags) return `Too many hashtags: ${list.length}. The maximum is ${LIMITS.maxHashtags}.`;
     const invalid = list.filter((tag) => this.normalizeHashtag(tag) !== tag);
-    if (invalid.length) return `Invalid hashtag${invalid.length > 1 ? 's' : ''}: ${invalid.slice(0, 3).join(', ')}. Use letters, numbers and underscores only.`;
+    if (invalid.length) return `Invalid hashtag${invalid.length > 1 ? 's' : ''}: ${invalid.slice(0, 3).join(', ')}. Use letters in any script, numbers and underscores only.`;
     const lower = list.map((tag) => tag.toLowerCase());
     const dupes = [...new Set(lower.filter((tag, i) => lower.indexOf(tag) !== i))];
     if (dupes.length) return `Duplicate hashtags: ${dupes.join(', ')}. Each hashtag must be unique.`;
@@ -228,7 +230,7 @@ export class ValidationService {
       let text = value.replace(/\r\n/g, '\n').split('\n').map((line) => line.replace(/[ \t]+/g, ' ').trim()).join('\n').trim();
       const stripQuotes = (s) => s.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
       text = stripQuotes(text);
-      const trailing = /(?:\s*#[\p{L}\p{M}\p{N}_]+)+\s*$/u.exec(text);
+      const trailing = /(?:\s*#[\p{L}\p{M}\p{N}_\u200c\u200d]+)+\s*$/u.exec(text);
       if (trailing && trailing.index > 0) {
         inlineTags.push(...trailing[0].trim().split(/\s+/));
         text = stripQuotes(text.slice(0, trailing.index).trim());
@@ -337,7 +339,7 @@ export class ValidationService {
 
     if (scope === 'all') {
       if (!TimeZoneUtil.isValid(s.timezone)) errors.timezone = 'Choose a valid timezone.';
-      inRange('intervalMinutes', 1, 10080, 'Planner interval');
+      inRange('intervalMinutes', 1, LIMITS.maxPlanMinutes, 'Planner interval');
       inRange('minLeadMinutes', 0, 1440, 'Minimum lead time');
       inRange('descMin', RULES.caption.minLow, RULES.caption.minHigh, 'Caption minimum length');
       inRange('descMax', RULES.caption.maxLow, RULES.caption.maxHigh, 'Caption maximum length');

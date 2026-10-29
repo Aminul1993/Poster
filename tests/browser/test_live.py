@@ -28,7 +28,7 @@ def test_connect_generate_schedule_edit_delete(live: Page, fake: FakeUpstream) -
     connect_buffer(page)
 
     add_images(page, ("harbour.jpg", jpeg((40, 90, 160))))
-    page.click("#gen-active")
+    page.click("#ed-generate")
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
     expect(page.locator("#ed-description")).to_have_value(DEFAULT_REPLY["description"])
     expect(page.locator("#ed-tags .tag")).to_have_count(11)
@@ -38,8 +38,10 @@ def test_connect_generate_schedule_edit_delete(live: Page, fake: FakeUpstream) -
     page.click("#ed-schedule-post")
     confirm(page, "Schedule 1 post")
     expect(page.locator("#op-title")).to_have_text("Scheduling complete")
-    expect(page.locator("#sched-list > li")).to_have_count(2)
-    expect(page.locator("#ed-result-title")).to_contain_text("Scheduled in Buffer")
+    expect(page.locator("#sched-list > li")).to_have_count(1)
+    expect(page.locator("#sched-list .sched-channel")).to_have_count(2)
+    expect(page.locator("#ed-result-title")).to_contain_text("In Buffer")
+    expect(page.locator("#ed-result-edit")).to_be_enabled()
 
     posts = list(fake.buffer.posts.values())
     assert len(posts) == 2 and {p["channelId"] for p in posts} == {"ch1", "ch2"}
@@ -54,10 +56,12 @@ def test_connect_generate_schedule_edit_delete(live: Page, fake: FakeUpstream) -
     toast(page, "The post was updated in Buffer.")
     assert any(p["dueAt"].endswith("T15:00:00Z") for p in fake.buffer.posts.values())
 
-    page.locator("#sched-list [data-action=delete-post]").first.click()
-    confirm(page, "Delete post")
+    # Delete only one channel's copy: the post stays, on the other channel.
+    page.locator("#sched-list [data-action=delete-one]").first.click()
+    confirm(page, "copy")
     toast(page, "The post was deleted from Buffer.")
     expect(page.locator("#sched-list > li")).to_have_count(1)
+    expect(page.locator("#sched-list .sched-channel")).to_have_count(1)
     assert len(fake.buffer.posts) == 1
 
 
@@ -108,7 +112,7 @@ def test_a_lost_answer_does_not_schedule_twice(live: Page, fake: FakeUpstream) -
     page = live
     connect_buffer(page)
     add_images(page, ("pier.jpg", jpeg((90, 40, 160))))
-    page.click("#gen-active")
+    page.click("#ed-generate")
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
 
     # Buffer creates the post on the first channel, but its answer never arrives.
@@ -136,7 +140,7 @@ def test_password_protected_dashboard(serve: Callable[..., str], browser: Browse
     page.goto(url)
     expect(page.locator("#mode-badge-label")).to_have_text("Live mode")
     add_images(page, ("locked.jpg", jpeg((5, 50, 5))))
-    page.click("#gen-active")
+    page.click("#ed-generate")
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
     context.close()
     assert not errors

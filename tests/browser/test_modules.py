@@ -22,7 +22,8 @@ def js(demo: Page) -> Any:
     return run
 
 
-HASHTAGS = ["#বাংলাদেশ", "हिन्दी", "#தமிழ்", "#café", "café", "#hello-world!", "##snake_case", "2026", "!!!", "#Ünïcödé", "#東京"]
+HASHTAGS = ["#বাংলাদেশ", "हिन्दी", "#தமிழ்", "#র\u200d্যালি", "#\u200cনাম\u200d", "#café", "café", "#hello-world!",
+            "##snake_case", "2026", "!!!", "#Ünïcödé", "#東京"]
 
 
 def test_hashtags_match_the_server(js: Any) -> None:

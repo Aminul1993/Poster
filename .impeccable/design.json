@@ -1,0 +1,666 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-29T12:07:02Z",
+  "title": "Design System: Poster",
+  "extensions": {
+    "colorMeta": {
+      "dispatch-indigo": {
+        "role": "primary",
+        "displayName": "Dispatch Indigo",
+        "canonical": "#4f46e5",
+        "tonalRamp": [
+          "#312e81",
+          "#3730a3",
+          "#4338ca",
+          "#4f46e5",
+          "#818cf8",
+          "#a5b4fc",
+          "#c7d2fe",
+          "#eef2ff"
+        ]
+      },
+      "dispatch-indigo-deep": {
+        "role": "primary",
+        "displayName": "Dispatch Indigo Deep",
+        "canonical": "#4338ca",
+        "tonalRamp": [
+          "#312e81",
+          "#3730a3",
+          "#4338ca",
+          "#4f46e5",
+          "#818cf8",
+          "#a5b4fc",
+          "#c7d2fe",
+          "#eef2ff"
+        ]
+      },
+      "indigo-wash": {
+        "role": "primary",
+        "displayName": "Indigo Wash",
+        "canonical": "#eef2ff",
+        "tonalRamp": [
+          "#312e81",
+          "#3730a3",
+          "#4338ca",
+          "#4f46e5",
+          "#818cf8",
+          "#a5b4fc",
+          "#c7d2fe",
+          "#eef2ff"
+        ]
+      },
+      "indigo-ink": {
+        "role": "primary",
+        "displayName": "Indigo Ink",
+        "canonical": "#3730a3",
+        "tonalRamp": [
+          "#312e81",
+          "#3730a3",
+          "#4338ca",
+          "#4f46e5",
+          "#818cf8",
+          "#a5b4fc",
+          "#c7d2fe",
+          "#eef2ff"
+        ]
+      },
+      "night-indigo": {
+        "role": "primary",
+        "displayName": "Night Indigo (dark theme accent)",
+        "canonical": "#818cf8",
+        "tonalRamp": [
+          "#312e81",
+          "#3730a3",
+          "#4338ca",
+          "#4f46e5",
+          "#818cf8",
+          "#a5b4fc",
+          "#c7d2fe",
+          "#eef2ff"
+        ]
+      },
+      "desk-grey": {
+        "role": "neutral",
+        "displayName": "Desk Grey",
+        "canonical": "#f5f6f8",
+        "tonalRamp": [
+          "#101828",
+          "#344054",
+          "#475467",
+          "#667085",
+          "#98a2b3",
+          "#d0d5dd",
+          "#e4e7ec",
+          "#f9fafb"
+        ]
+      },
+      "sheet-white": {
+        "role": "neutral",
+        "displayName": "Sheet White",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#101828",
+          "#344054",
+          "#475467",
+          "#667085",
+          "#98a2b3",
+          "#d0d5dd",
+          "#e4e7ec",
+          "#f9fafb"
+        ]
+      },
+      "tray-grey": {
+        "role": "neutral",
+        "displayName": "Tray Grey",
+        "canonical": "#f9fafb",
+        "tonalRamp": [
+          "#101828",
+          "#344054",
+          "#475467",
+          "#667085",
+          "#98a2b3",
+          "#d0d5dd",
+          "#e4e7ec",
+          "#f9fafb"
+        ]
+      },
+      "well-grey": {
+        "role": "neutral",
+        "displayName": "Well Grey",
+        "canonical": "#f2f4f7",
+        "tonalRamp": [
+          "#101828",
+          "#344054",
+          "#475467",
+          "#667085",
+          "#98a2b3",
+          "#d0d5dd",
+          "#e4e7ec",
+          "#f9fafb"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#e4e7ec",
+        "tonalRamp": [
+          "#101828",
+          "#344054",
+          "#475467",
+          "#667085",
+          "#98a2b3",
+          "#d0d5dd",
+          "#e4e7ec",
+          "#f9fafb"
+        ]
+      },
+      "hairline-strong": {
+        "role": "neutral",
+        "displayName": "Hairline Strong",
+        "canonical": "#d0d5dd",
+        "tonalRamp": [
+          "#101828",
+          "#344054",
+          "#475467",
+          "#667085",
+          "#98a2b3",
+          "#d0d5dd",
+          "#e4e7ec",
+          "#f9fafb"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#101828",
+        "tonalRamp": [
+          "#101828",
+          "#344054",
+          "#475467",
+          "#667085",
+          "#98a2b3",
+          "#d0d5dd",
+          "#e4e7ec",
+          "#f9fafb"
+        ]
+      },
+      "ink-soft": {
+        "role": "neutral",
+        "displayName": "Ink Soft",
+        "canonical": "#344054",
+        "tonalRamp": [
+          "#101828",
+          "#344054",
+          "#475467",
+          "#667085",
+          "#98a2b3",
+          "#d0d5dd",
+          "#e4e7ec",
+          "#f9fafb"
+        ]
+      },
+      "muted-slate": {
+        "role": "neutral",
+        "displayName": "Muted Slate",
+        "canonical": "#636d82",
+        "tonalRamp": [
+          "#101828",
+          "#344054",
+          "#475467",
+          "#667085",
+          "#98a2b3",
+          "#d0d5dd",
+          "#e4e7ec",
+          "#f9fafb"
+        ]
+      },
+      "faint-slate": {
+        "role": "neutral",
+        "displayName": "Faint Slate (icons and dots only)",
+        "canonical": "#737b8c",
+        "tonalRamp": [
+          "#101828",
+          "#344054",
+          "#475467",
+          "#667085",
+          "#98a2b3",
+          "#d0d5dd",
+          "#e4e7ec",
+          "#f9fafb"
+        ]
+      },
+      "night-desk": {
+        "role": "neutral",
+        "displayName": "Night Desk (dark theme background)",
+        "canonical": "#0b0d12",
+        "tonalRamp": [
+          "#0b0d12",
+          "#13161d",
+          "#171b23",
+          "#1e232d",
+          "#252b37",
+          "#343b4a",
+          "#656f83",
+          "#8f98aa"
+        ]
+      },
+      "night-sheet": {
+        "role": "neutral",
+        "displayName": "Night Sheet (dark theme surface)",
+        "canonical": "#13161d",
+        "tonalRamp": [
+          "#0b0d12",
+          "#13161d",
+          "#171b23",
+          "#1e232d",
+          "#252b37",
+          "#343b4a",
+          "#656f83",
+          "#8f98aa"
+        ]
+      },
+      "success-green": {
+        "role": "status",
+        "displayName": "Success Green",
+        "canonical": "#067647",
+        "tonalRamp": [
+          "#074d31",
+          "#067647",
+          "#079455",
+          "#17b26a",
+          "#47cd89",
+          "#75e0a7",
+          "#abefc6",
+          "#ecfdf3"
+        ]
+      },
+      "success-wash": {
+        "role": "status",
+        "displayName": "Success Wash",
+        "canonical": "#ecfdf3",
+        "tonalRamp": [
+          "#074d31",
+          "#067647",
+          "#079455",
+          "#17b26a",
+          "#47cd89",
+          "#75e0a7",
+          "#abefc6",
+          "#ecfdf3"
+        ]
+      },
+      "caution-amber": {
+        "role": "status",
+        "displayName": "Caution Amber",
+        "canonical": "#b54708",
+        "tonalRamp": [
+          "#7a2e0e",
+          "#b54708",
+          "#dc6803",
+          "#f79009",
+          "#fdb022",
+          "#fec84b",
+          "#fedf89",
+          "#fffaeb"
+        ]
+      },
+      "caution-wash": {
+        "role": "status",
+        "displayName": "Caution Wash",
+        "canonical": "#fffaeb",
+        "tonalRamp": [
+          "#7a2e0e",
+          "#b54708",
+          "#dc6803",
+          "#f79009",
+          "#fdb022",
+          "#fec84b",
+          "#fedf89",
+          "#fffaeb"
+        ]
+      },
+      "alert-red": {
+        "role": "status",
+        "displayName": "Alert Red",
+        "canonical": "#c4261b",
+        "tonalRamp": [
+          "#7a271a",
+          "#b42318",
+          "#d92d20",
+          "#f04438",
+          "#f97066",
+          "#fda29b",
+          "#fecdca",
+          "#fef3f2"
+        ]
+      },
+      "alert-wash": {
+        "role": "status",
+        "displayName": "Alert Wash",
+        "canonical": "#fef3f2",
+        "tonalRamp": [
+          "#7a271a",
+          "#b42318",
+          "#d92d20",
+          "#f04438",
+          "#f97066",
+          "#fda29b",
+          "#fecdca",
+          "#fef3f2"
+        ]
+      },
+      "notice-blue": {
+        "role": "status",
+        "displayName": "Notice Blue",
+        "canonical": "#175cd3",
+        "tonalRamp": [
+          "#194185",
+          "#175cd3",
+          "#1570ef",
+          "#2e90fa",
+          "#53b1fd",
+          "#84caff",
+          "#b2ddff",
+          "#eff8ff"
+        ]
+      },
+      "notice-wash": {
+        "role": "status",
+        "displayName": "Notice Wash",
+        "canonical": "#eff8ff",
+        "tonalRamp": [
+          "#194185",
+          "#175cd3",
+          "#1570ef",
+          "#2e90fa",
+          "#53b1fd",
+          "#84caff",
+          "#b2ddff",
+          "#eff8ff"
+        ]
+      },
+      "field-edge": {
+        "role": "neutral",
+        "displayName": "Field Edge (dark: #646e80)",
+        "canonical": "#848c9c",
+        "tonalRamp": [
+          "#101828",
+          "#344054",
+          "#475467",
+          "#667085",
+          "#98a2b3",
+          "#d0d5dd",
+          "#e4e7ec",
+          "#f9fafb"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Title",
+        "purpose": "Card titles with an 18px Muted Slate icon; dialogs and the drawer step up to 16–17px at 700."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "The base size for running text and form values."
+      },
+      "body-sm": {
+        "displayName": "Body Small",
+        "purpose": "The batch line, toasts, banners, empty-state copy, the planner preview and hashtag pills."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field labels, segmented options and small buttons."
+      },
+      "overline": {
+        "displayName": "Overline",
+        "purpose": "Only the GENERATE and SCHEDULE row labels; log category tags at 10px."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Log timestamps, Buffer post IDs and inline code."
+      },
+      "post": {
+        "displayName": "Post",
+        "purpose": "A post's own words: the post preview and scheduled-post text."
+      }
+    },
+    "shadows": [
+      {
+        "name": "whisper",
+        "value": "0 1px 2px rgba(16,24,40,.05)",
+        "purpose": "Resting cards, KPI tiles, default buttons. Dark theme: 0 1px 2px rgba(0,0,0,.3)."
+      },
+      {
+        "name": "lift",
+        "value": "0 1px 3px rgba(16,24,40,.08), 0 1px 2px rgba(16,24,40,.04)",
+        "purpose": "Hovered gallery cards, the selected segmented option, controls over photos. Dark theme: 0 1px 3px rgba(0,0,0,.4)."
+      },
+      {
+        "name": "float",
+        "value": "0 20px 40px -12px rgba(16,24,40,.22), 0 4px 10px -4px rgba(16,24,40,.08)",
+        "purpose": "Toasts, the Settings drawer, dialogs. Dark theme: 0 24px 48px -12px rgba(0,0,0,.65), 0 4px 12px -4px rgba(0,0,0,.4)."
+      },
+      {
+        "name": "focus-ring",
+        "value": "0 0 0 3px rgba(79,70,229,.35)",
+        "purpose": "Focused inputs, selects, textareas and the hashtag editor. Dark theme: rgba(129,140,248,.5)."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(.2, .8, .2, 1)",
+        "purpose": "Entrances, progress-bar width, the planner chevron, thumbnail zoom."
+      },
+      {
+        "name": "state",
+        "value": "150ms",
+        "purpose": "Hover, border, colour and shadow changes."
+      },
+      {
+        "name": "enter",
+        "value": "200–250ms",
+        "purpose": "Fades, the 12px toast rise, the 32px drawer slide, the 8px dialog rise at 0.98 scale."
+      },
+      {
+        "name": "press",
+        "value": "translateY(1px), 50ms",
+        "purpose": "Button press feedback."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms; spinners 1.6s",
+        "purpose": "With prefers-reduced-motion, everything snaps; spinners keep turning slowly."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sticky-panel",
+        "value": "1181px"
+      },
+      {
+        "name": "columns",
+        "value": "1180px"
+      },
+      {
+        "name": "header-compact",
+        "value": "900px"
+      },
+      {
+        "name": "phone",
+        "value": "720px"
+      },
+      {
+        "name": "narrow",
+        "value": "560px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Default Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "The standard outlined, neutral action.",
+      "html": "<button class='ds-btn'><svg class='ds-icon' viewBox='0 0 24 24'><path d='M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16'/></svg>Refresh</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-strong, #d0d5dd); background: var(--surface, #fff); color: var(--text-2, #344054); font: 600 13.5px/1 var(--font, system-ui, sans-serif); box-shadow: var(--shadow-sm, 0 1px 2px rgba(16,24,40,.05)); cursor: pointer; transition: background .15s, color .15s, transform .05s; } .ds-btn:hover { background: var(--surface-3, #f2f4f7); color: var(--text, #101828); } .ds-btn:active { transform: translateY(1px); } .ds-btn:focus-visible { outline: 2px solid var(--accent, #4f46e5); outline-offset: 2px; } .ds-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action in a group, with an optional count.",
+      "html": "<button class='ds-btn-primary'><svg class='ds-icon' viewBox='0 0 24 24'><path d='m22 2-7 20-4-9-9-4z'/><path d='M22 2 11 13'/></svg>All ready <span class='ds-btn-count'>12</span></button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--accent, #4f46e5); background: var(--accent, #4f46e5); color: var(--on-accent, #fff); font: 600 13.5px/1 var(--font, system-ui, sans-serif); box-shadow: var(--shadow-sm, 0 1px 2px rgba(16,24,40,.05)); cursor: pointer; transition: background .15s, border-color .15s, transform .05s; } .ds-btn-primary:hover { background: var(--accent-hover, #4338ca); border-color: var(--accent-hover, #4338ca); } .ds-btn-primary:active { transform: translateY(1px); } .ds-btn-primary:focus-visible { outline: 2px solid var(--accent, #4f46e5); outline-offset: 2px; } .ds-btn-count { display: inline-grid; place-items: center; min-width: 20px; height: 18px; padding: 0 5px; border-radius: 999px; background: rgba(255,255,255,.22); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; } .ds-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Low-weight secondary actions: Dismiss, Remove all, Refresh, Clear.",
+      "html": "<button class='ds-btn-ghost'><svg class='ds-icon' viewBox='0 0 24 24'><path d='M3 6h18M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2'/></svg>Clear</button>",
+      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--muted, #636d82); font: 600 12.5px/1 var(--font, system-ui, sans-serif); cursor: pointer; transition: background .15s, color .15s; } .ds-btn-ghost:hover { background: var(--surface-3, #f2f4f7); color: var(--text, #101828); } .ds-btn-ghost:focus-visible { outline: 2px solid var(--accent, #4f46e5); outline-offset: 2px; } .ds-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive actions; outlined red, never filled, always confirmed.",
+      "html": "<button class='ds-btn-danger'><svg class='ds-icon' viewBox='0 0 24 24'><rect x='6' y='6' width='12' height='12' rx='1.5'/></svg>Cancel</button>",
+      "css": ".ds-btn-danger { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--danger-border, #fecdca); background: var(--surface, #fff); color: var(--danger, #c4261b); font: 600 12.5px/1 var(--font, system-ui, sans-serif); box-shadow: var(--shadow-sm, 0 1px 2px rgba(16,24,40,.05)); cursor: pointer; transition: background .15s; } .ds-btn-danger:hover { background: var(--danger-soft, #fef3f2); } .ds-btn-danger:focus-visible { outline: 2px solid var(--accent, #4f46e5); outline-offset: 2px; } .ds-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Label row with counter, a bordered control, and a hint.",
+      "html": "<div class='ds-field'><div class='ds-label'><label for='ds-cat'>Category</label><span class='ds-counter'>6 / 40</span></div><input id='ds-cat' class='ds-input' value='Travel' placeholder='e.g. Travel'><p class='ds-hint'>Pick a suggestion or type your own.</p></div>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; font-family: var(--font, system-ui, sans-serif); max-width: 320px; } .ds-label { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; font-weight: 650; color: var(--text-2, #344054); } .ds-counter { font-size: 12px; font-weight: 550; color: var(--muted, #636d82); font-variant-numeric: tabular-nums; } .ds-input { min-height: 38px; padding: 8px 12px; border: 1px solid var(--border-strong, #d0d5dd); border-radius: 8px; background: var(--surface, #fff); color: var(--text, #101828); font: 400 14px/1.5 var(--font, system-ui, sans-serif); transition: border-color .15s, box-shadow .15s; } .ds-input::placeholder { color: var(--faint, #737b8c); } .ds-input:focus { outline: none; border-color: var(--accent, #4f46e5); box-shadow: 0 0 0 3px var(--focus-ring, rgba(79,70,229,.35)); } .ds-hint { margin: 0; font-size: 12px; color: var(--muted, #636d82); }"
+    },
+    {
+      "name": "Header Status Cluster",
+      "kind": "nav",
+      "refersTo": "service-pill",
+      "description": "The mode badge (a button) and the service labels (plain text with a state dot) that keep Demo/Live and service state in view.",
+      "html": "<div class='ds-status'><button class='ds-mode' data-mode='demo'><svg class='ds-icon' viewBox='0 0 24 24'><path d='m6 3 14 9-14 9z'/></svg>Demo mode</button><span class='ds-pill' data-state='ok'><span class='ds-dot'></span>Ollama<span class='ds-pill-detail'>Ready</span></span><span class='ds-pill' data-state='error'><span class='ds-dot'></span>Buffer<span class='ds-pill-detail'>Token rejected</span></span></div>",
+      "css": ".ds-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--font, system-ui, sans-serif); } .ds-mode { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid transparent; background: var(--accent-soft, #eef2ff); color: var(--accent-text, #3730a3); font-size: 12px; font-weight: 650; cursor: pointer; } .ds-mode:focus-visible { outline: 2px solid var(--accent, #4f46e5); outline-offset: 2px; } .ds-pill { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px; border-radius: 999px; border: 1px solid transparent; background: transparent; color: var(--text-2, #344054); font-size: 12px; font-weight: 550; } .ds-pill-detail { color: var(--muted, #636d82); font-weight: 500; } .ds-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint, #737b8c); } .ds-pill[data-state='ok'] .ds-dot { background: var(--success, #067647); box-shadow: 0 0 0 3px var(--success-soft, #ecfdf3); } .ds-pill[data-state='error'] { color: var(--danger, #c4261b); border-color: var(--danger-border, #fecdca); background: var(--danger-soft, #fef3f2); padding: 0 10px; } .ds-pill[data-state='error'] .ds-dot { background: var(--danger, #c4261b); box-shadow: 0 0 0 3px var(--danger-soft, #fef3f2); } .ds-icon { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }"
+    },
+    {
+      "name": "Status Chips",
+      "kind": "chip",
+      "refersTo": "chip-success",
+      "description": "Per-image and per-post state; a dot plus text in the status trio.",
+      "html": "<div class='ds-chips'><span class='ds-chip ds-chip-success'>Scheduled</span><span class='ds-chip ds-chip-warning'>Retrying</span><span class='ds-chip ds-chip-danger'>Failed</span><span class='ds-chip ds-chip-neutral'>Draft</span></div>",
+      "css": ".ds-chips { display: flex; gap: 6px; flex-wrap: wrap; font-family: var(--font, system-ui, sans-serif); } .ds-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid transparent; font-size: 11.5px; font-weight: 650; white-space: nowrap; } .ds-chip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; } .ds-chip-success { background: var(--success-soft, #ecfdf3); color: var(--success, #067647); border-color: var(--success-border, #abefc6); } .ds-chip-warning { background: var(--warning-soft, #fffaeb); color: var(--warning, #b54708); border-color: var(--warning-border, #fedf89); } .ds-chip-danger { background: var(--danger-soft, #fef3f2); color: var(--danger, #c4261b); border-color: var(--danger-border, #fecdca); } .ds-chip-neutral { background: var(--surface-3, #f2f4f7); color: var(--text-2, #344054); border-color: var(--border, #e4e7ec); }"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "custom",
+      "refersTo": "segmented-selected",
+      "description": "Radio-backed switcher for image source, caption choice and post filters.",
+      "html": "<div class='ds-seg' role='radiogroup' aria-label='Show posts'><label><input type='radio' name='ds-seg' checked><span>All</span></label><label><input type='radio' name='ds-seg'><span>Upcoming</span></label><label><input type='radio' name='ds-seg'><span>Published</span></label></div>",
+      "css": ".ds-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 9px; background: var(--surface-3, #f2f4f7); font-family: var(--font, system-ui, sans-serif); } .ds-seg label { position: relative; cursor: pointer; } .ds-seg input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; } .ds-seg span { display: block; padding: 5px 12px; border-radius: 7px; font-size: 12.5px; font-weight: 600; color: var(--muted, #636d82); transition: background .15s, color .15s; } .ds-seg input:checked + span { background: var(--surface, #fff); color: var(--text, #101828); box-shadow: var(--shadow, 0 1px 3px rgba(16,24,40,.08), 0 1px 2px rgba(16,24,40,.04)); } .ds-seg input:focus-visible + span { outline: 2px solid var(--accent, #4f46e5); outline-offset: 1px; }"
+    },
+    {
+      "name": "Hashtag Editor",
+      "kind": "custom",
+      "refersTo": "hashtag",
+      "description": "Removable Indigo Wash tags followed by a borderless input; South Asian scripts are normal content.",
+      "html": "<div class='ds-tags'><span class='ds-tag'><span>#travel</span><button aria-label='Remove #travel'><svg class='ds-icon' viewBox='0 0 24 24'><path d='M18 6 6 18M6 6l12 12'/></svg></button></span><span class='ds-tag'><span>#বাংলাদেশ</span><button aria-label='Remove #বাংলাদেশ'><svg class='ds-icon' viewBox='0 0 24 24'><path d='M18 6 6 18M6 6l12 12'/></svg></button></span><input class='ds-tag-input' placeholder='Add a hashtag and press Enter'></div>",
+      "css": ".ds-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 42px; padding: 6px; max-width: 420px; border: 1px solid var(--border-strong, #d0d5dd); border-radius: 8px; background: var(--surface, #fff); font-family: var(--font, system-ui, sans-serif); transition: border-color .15s, box-shadow .15s; } .ds-tags:focus-within { border-color: var(--accent, #4f46e5); box-shadow: 0 0 0 3px var(--focus-ring, rgba(79,70,229,.35)); } .ds-tag { display: inline-flex; align-items: center; gap: 2px; height: 26px; padding: 0 3px 0 10px; border-radius: 999px; background: var(--accent-soft, #eef2ff); color: var(--accent-text, #3730a3); font-size: 12.5px; font-weight: 600; } .ds-tag button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; } .ds-tag button:hover { background: rgba(79,70,229,.16); } .ds-tag-input { flex: 1; min-width: 140px; height: 26px; padding: 0 6px; border: 0; outline: none; background: transparent; color: var(--text, #101828); font-size: 13px; } .ds-icon { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }"
+    },
+    {
+      "name": "Card and batch line",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "A desk station (hairline card with a header row) under the batch line that says where the batch stands.",
+      "html": "<div class='ds-wrap'><p class='ds-batch'><span><strong>6 / 25</strong> images</span><span><strong>6</strong> with captions</span><span class='is-warning'><strong>2</strong> need a publish time</span><span><strong>4</strong> ready to schedule</span></p><section class='ds-card'><header class='ds-card-head'><h2 class='ds-card-title'><svg class='ds-icon' viewBox='0 0 24 24'><rect x='3' y='4' width='18' height='18' rx='2'/><path d='M16 2v4M8 2v4M3 10h18'/><path d='m9 16 2 2 4-4'/></svg>Scheduled posts <span class='ds-count'>8</span></h2></header><div class='ds-card-body'>Posts read directly from Buffer.</div></section></div>",
+      "css": ".ds-wrap { display: grid; gap: 16px; padding: 20px; background: var(--bg, #f5f6f8); font-family: var(--font, system-ui, sans-serif); color: var(--text, #101828); } .ds-batch { display: flex; flex-wrap: wrap; gap: 4px 0; margin: 0; font-size: 13px; color: var(--muted, #636d82); } .ds-batch span { white-space: nowrap; } .ds-batch span + span::before { content: '·'; margin: 0 10px; color: var(--faint, #737b8c); } .ds-batch strong { color: var(--text, #101828); font-weight: 650; font-variant-numeric: tabular-nums; } .ds-batch .is-warning, .ds-batch .is-warning strong { color: var(--warning, #b54708); } .ds-card { background: var(--surface, #fff); border: 1px solid var(--border, #e4e7ec); border-radius: 14px; box-shadow: var(--shadow-sm, 0 1px 2px rgba(16,24,40,.05)); } .ds-card-head { padding: 16px 20px; border-bottom: 1px solid var(--border, #e4e7ec); } .ds-card-title { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -.005em; } .ds-card-title .ds-icon { color: var(--muted, #636d82); } .ds-count { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--surface-3, #f2f4f7); color: var(--text-2, #344054); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; } .ds-card-body { padding: 20px; font-size: 13px; color: var(--muted, #636d82); } .ds-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Dispatch Desk",
+    "overview": "Poster is a desk where one person prepares a batch of posts, checks every one, and sends the set off. The design is calm, precise and trustworthy: these posts go out under the owner's name, so nothing on screen may surprise them or overstate itself. Sheet-white cards sit on a pale Desk Grey background, one card per station on the desk: adding images, the gallery, AI content and scheduling, scheduled posts, and the activity log. A single line above the cards reads like a dispatch slip: how many images, how many have captions, how many still need a publish time, how many are ready, and what Buffer holds. Hairlines separate everything, and colour is held back for two jobs. Dispatch Indigo marks the next action, the current selection and focus. Four status colours report what has happened.\n\nThe density is that of a working tool, not a landing page. Text is 12–15px, controls are 26–38px tall, and status is visible at all times: the mode badge and service labels in the header, the batch line, counts on every action button, progress on every run. The work runs top to bottom in the order it happens: generate captions, plan the times, schedule. Numbers are exact and use tabular figures. Light and dark themes are both first-class. Every colour is a CSS custom property, redefined for dark under `[data-theme=\"dark\"]` in `static/css/poster.css`.\n\nPoster rejects three looks: growth-hacker SaaS (gradients, glows, purple-to-pink washes, sparkle decoration), copies of the social networks it posts to (Instagram, X, Buffer's own UI), and analytics dashboards (charts, trend arrows, hero metrics that suggest measured performance).",
+    "keyCharacteristics": [
+      "One flat accent, Dispatch Indigo, used only for the next action, selection and focus.",
+      "Four status colours (green, amber, red, blue), each paired with a label or icon.",
+      "Flat cards with 1px hairlines. Real shadows appear only on layers that float.",
+      "The operating system's UI font, small and dense, with tabular numbers everywhere.",
+      "Rounded rectangles that grow with size (6 → 16px), and pills for status.",
+      "No gradients and no coloured glow anywhere.",
+      "Light and dark themes built from the same tokens."
+    ],
+    "rules": [
+      {
+        "name": "The One Signal Rule",
+        "body": "Dispatch Indigo means \"act here\" or \"this is selected\". There is one next action per stage, and only it is filled indigo. In the AI panel that is **All images** while posts lack captions, **Apply to all** while posts need a time, and **All ready** while posts are ready; when the batch is done, nothing in the panel is indigo. The editor's **Schedule post** is never indigo. Dialogs and the Settings drawer each have their own single primary (**Save settings**). Never use indigo as decoration or as a background for a whole region.",
+        "section": "colors"
+      },
+      {
+        "name": "The Status Speaks Twice Rule",
+        "body": "A status colour never stands alone. Chips carry a dot and text, service labels carry a dot and a name, log lines carry a category tag tinted by level (errors also use red text), banners carry an icon and a title, and the batch line's \"need a publish time\" is words as well as amber. List items never get a coloured side stripe.",
+        "section": "colors"
+      },
+      {
+        "name": "The Flat Colour Rule",
+        "body": "Every fill is one flat colour. No gradients, including on the brand mark and progress bars, and no coloured glow.",
+        "section": "colors"
+      },
+      {
+        "name": "The Estimate Is Not a Metric Rule",
+        "body": "The engagement score is the model's guess. It is shown as plain \"89 / 100\" text with the words \"estimate\" and \"not a measurement\", never with a slider, a colour scale or success-green.",
+        "section": "colors"
+      },
+      {
+        "name": "The System Voice Rule",
+        "body": "Poster ships no web fonts. Its Content Security Policy only allows files from its own server, so a new face would have to be self-hosted and justified. Use `var(--font)` and `var(--mono)`.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Numbers Rule",
+        "body": "Every count, counter, score, position, time and duration uses `font-variant-numeric: tabular-nums`. This covers the batch line, count badges, button counts, character counters, the estimate, \"3 of 12\", the gallery card's time line and op stats.",
+        "section": "typography"
+      },
+      {
+        "name": "The In-Between Weights Note",
+        "body": "Weights 550, 650 and 750 render exactly only with variable system fonts (Segoe UI Variable, SF Pro). Elsewhere they round to the nearest available weight. That's acceptable, but never rely on 650 versus 700 to carry meaning.",
+        "section": "typography"
+      },
+      {
+        "name": "The South Asian Script Rule",
+        "body": "Captions and hashtags in Bengali, Hindi, Tamil and other South Asian scripts are normal content. Text that shows a post's words is 13px or larger with a line-height of at least 1.5, and never clips vertically. Poster sets `lang` from the script of the text (bn, hi, ta and others), so screen readers use the right voice and the browser picks the right font. The system stack falls back to Nirmala UI on Windows and the Sangam or Kohinoor faces on Apple. Don't set a font stack that blocks those fallbacks. Text is shortened only between whole graphemes, and hashtags keep the zero-width joiner and non-joiner.",
+        "section": "typography"
+      },
+      {
+        "name": "The Hairline First Rule",
+        "body": "Separate things with a 1px Hairline or a tonal step before reaching for a shadow. A shadow at rest never exceeds Whisper, and no shadow is ever coloured. Fields are the exception to the hairline: their edge is Field Edge, because it has to be seen.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** take every colour from the CSS custom properties, and define any new colour in both the light (`:root, [data-theme=\"light\"]`) and dark (`[data-theme=\"dark\"]`) blocks.",
+      "**Do** give each action group exactly one primary (Dispatch Indigo) button. Everything else is default, ghost or danger.",
+      "**Do** pair every status colour with a label, dot or icon (The Status Speaks Twice Rule).",
+      "**Do** use tabular numbers for every count, counter, score and time.",
+      "**Do** build new panels as a card with a header row, a hairline and a 20px body, on 14px corners with the Whisper shadow.",
+      "**Do** show a post's own words at 13px or larger with a line-height of at least 1.5, and set `lang` from its script.",
+      "**Do** keep the 2px focus outline (or the 3px field ring) on everything interactive, and keep reduced-motion support.",
+      "**Do** keep Muted Slate for any secondary text that has to be read; it passes 4.5:1 everywhere.",
+      "**Do** say \"Demo mode (not in Buffer)\" wherever Demo results are reported, and nowhere else more than once: in Demo the service labels are hidden and the AI panel says \"(simulated)\".",
+      "**Do** count posts the way the owner does, one per image, and give Buffer's per-channel count in brackets."
+    ],
+    "donts": [
+      "**Don't** drift into growth-hacker SaaS: no gradients, glows, purple-to-pink washes or decorative sparkles. The sparkles icon labels AI generation actions and is never used as ornament.",
+      "**Don't** imitate Instagram, X or Buffer's interface. The post preview shows the text plainly, not as a fake network card.",
+      "**Don't** turn Poster into an analytics dashboard: no charts, trend arrows, hero numbers or KPI tiles. The batch line counts the work, and the engagement score is always presented as the model's estimate.",
+      "**Don't** fill a button red. Destructive actions are outlined red, confirmed in a dialog, and the dialog opens with Cancel focused.",
+      "**Don't** use Faint Slate for text. It's for icons, grips and dots.",
+      "**Don't** call a post \"Ready\" unless it has a caption and a publish time ahead.",
+      "**Don't** load fonts, icons or styles from another origin. The Content Security Policy forbids it, and the icon sprite lives in `templates/index.html`.",
+      "**Don't** raise resting shadows above Whisper, or colour a shadow.",
+      "**Don't** give list items or alerts a coloured side stripe.",
+      "**Don't** let a post that is already in Buffer be edited anywhere but its own Scheduled-posts dialog."
+    ]
+  }
+}

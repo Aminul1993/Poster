@@ -108,9 +108,13 @@ export class BufferPostsFeed extends EventTarget {
     const updated = result.posts.find((p) => p.postId === postId);
     if (!updated) throw this.#failure(result, 'The post was not changed');
     this.#replace(postId, updated);
-    if (changes.dueAt) this.store.updateResultsForPosts([postId], { dueAt: updated.dueAt || changes.dueAt.toISOString() });
+    // The batch mirrors Buffer: the image's card and editor show the post as it is now.
+    const patch = { edited: true };
+    if (changes.dueAt) patch.dueAt = updated.dueAt || changes.dueAt.toISOString();
+    if (changes.text !== undefined) patch.text = updated.text || changes.text;
+    this.store.updateResultsForPosts([postId], patch);
     const what = [changes.text !== undefined && 'text', changes.dueAt && 'publish time'].filter(Boolean).join(' and ');
-    this.notifier.log('success', 'schedule', `${this.#label(updated)}: changed the ${what} in Buffer.`, `Post ID: ${postId}`);
+    this.notifier.log('success', 'schedule', `${this.#label(updated)}: changed the ${what} ${this.getBuffer().isDemo ? 'in Demo mode (not in Buffer)' : 'in Buffer'}.`);
     return updated;
   }
 
@@ -125,7 +129,7 @@ export class BufferPostsFeed extends EventTarget {
     if (!result.deleted.includes(postId)) throw this.#failure(result, 'The post was not deleted');
     this.posts = this.posts.filter((p) => p.postId !== postId);
     this.store.updateResultsForPosts([postId], null);
-    this.notifier.log('success', 'schedule', `${post ? this.#label(post) : 'Post'}: deleted from Buffer.`, `Post ID: ${postId}`);
+    this.notifier.log('success', 'schedule', `${post ? this.#label(post) : 'Post'}: deleted ${this.getBuffer().isDemo ? 'in Demo mode (not in Buffer)' : 'from Buffer'}.`);
     this.#emit();
   }
 

@@ -1,6 +1,7 @@
 /** ImageStore: gallery state, ordering, selection and draft persistence. */
 import { LIMITS, STORAGE_KEYS, TIMING } from './config.js';
 import { canvasToBlob, computeImageStats, decodeImage, drawScaled } from './image.js';
+import { TimeZoneUtil } from './time.js';
 import { clamp, debounce, isPlainObject, uid } from './util.js';
 
 /** @returns {object} an empty content object */
@@ -14,19 +15,57 @@ export function hasContent(item) {
 }
 
 /**
+ * The item's schedule result as it counts in `mode`: a post scheduled in Demo mode is not in Buffer, so it
+ * does not count once Poster is live.
+ * @param {object} item @param {'demo'|'live'} mode @returns {object|null}
+ */
+export function countedResult(item, mode) {
+  return item.result && !item.result.removed && !(mode === 'live' && item.result.mode === 'demo') ? item.result : null;
+}
+
+/** @param {object} item @param {string} timezone @returns {boolean} whether the publish time is set and still ahead */
+function timeAhead(item, timezone) {
+  const due = item.scheduleLocal ? TimeZoneUtil.zonedToUtc(item.scheduleLocal, timezone) : null;
+  return Boolean(due) && due.date.getTime() > Date.now();
+}
+
+/**
+ * @param {object} item @param {{mode: 'demo'|'live', timezone: string}} settings
+ * @returns {boolean} whether the post has a caption but no publish time ahead, so it cannot be scheduled yet
+ */
+export function needsTime(item, settings) {
+  return hasContent(item) && !countedResult(item, settings.mode) && !item.result?.removed && !item.busy && !timeAhead(item, settings.timezone);
+}
+
+/**
+ * @param {object} item @param {{mode: 'demo'|'live', timezone: string}} settings
+ * @returns {boolean} whether the post has a caption and a publish time ahead and is not scheduled yet
+ */
+export function isReady(item, settings) {
+  return hasContent(item) && !countedResult(item, settings.mode) && !item.result?.removed && timeAhead(item, settings.timezone);
+}
+
+/**
  * Derived display status of an image.
  * @param {object} item
+ * @param {{mode: 'demo'|'live', timezone: string}} settings
  * @returns {{key: string, label: string, chip: string}}
  */
-export function itemStatus(item) {
+export function itemStatus(item, settings) {
   if (item.busy === 'generating') return { key: 'generating', label: 'Generating…', chip: 'info' };
   if (item.busy === 'scheduling') return { key: 'scheduling', label: 'Scheduling…', chip: 'info' };
   if (item.busy === 'queued') return { key: 'queued', label: 'Queued', chip: 'neutral' };
   if (item.error) return { key: 'error', label: 'Failed', chip: 'danger' };
-  if (item.result?.partial) return { key: 'partial', label: 'Partly scheduled', chip: 'warning' };
-  if (item.result) return { key: 'scheduled', label: 'Scheduled', chip: 'success' };
-  if (hasContent(item)) return { key: 'ready', label: 'Ready', chip: 'accent' };
-  return { key: 'new', label: 'No content', chip: 'neutral' };
+  // Deleted from Buffer on purpose: it waits, out of "All ready", until the owner plans it again.
+  if (item.result?.removed) return { key: 'removed', label: 'Removed from Buffer', chip: 'neutral', hint: 'Its posts were deleted. Give it a new time to schedule it again.' };
+  const result = countedResult(item, settings.mode);
+  if (result?.partial) return { key: 'partial', label: 'Partly scheduled', chip: 'warning', hint: 'Scheduled on some channels; the others failed. The editor lists why.' };
+  if (result?.mode === 'demo') return { key: 'scheduled', label: 'Scheduled · Demo', chip: 'success' };
+  if (result) return { key: 'scheduled', label: 'Scheduled', chip: 'success' };
+  if (!hasContent(item)) return { key: 'new', label: 'No content', chip: 'neutral' };
+  if (!item.scheduleLocal) return { key: 'needs-time', label: 'Needs time', chip: 'warning' };
+  if (!timeAhead(item, settings.timezone)) return { key: 'time-passed', label: 'Time passed', chip: 'warning' };
+  return { key: 'ready', label: 'Ready', chip: 'accent' };
 }
 
 /**
@@ -97,6 +136,8 @@ export class ImageStore extends EventTarget {
       errorPhase: null,
       showErrors: false,
       content,
+      // The content a regeneration replaced, so it can be restored once (kept for this session only).
+      previousContent: null,
       useAlternative: Boolean(draft?.useAlternative),
       scheduleLocal: typeof draft?.scheduleLocal === 'string' ? draft.scheduleLocal : '',
       mediaUrl: typeof draft?.mediaUrl === 'string' ? draft.mediaUrl : '',
@@ -235,7 +276,9 @@ export class ImageStore extends EventTarget {
       if (patch) return { ...result, ...patch };
       const keep = result.postIds.map((id) => !postIds.includes(id));
       const remaining = result.postIds.filter((_, i) => keep[i]);
-      return remaining.length ? { ...result, postIds: remaining, channels: (result.channels || []).filter((_, i) => keep[i]) } : null;
+      return remaining.length
+        ? { ...result, postIds: remaining, channels: (result.channels || []).filter((_, i) => keep[i]) }
+        : { mode: result.mode, removed: true, removedAt: new Date().toISOString() };
     };
     for (const item of this.items) {
       if (matches(item.result)) this.update(item.id, { result: apply(item.result) }, { reason: 'status' });

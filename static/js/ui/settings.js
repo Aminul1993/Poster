@@ -17,7 +17,6 @@ const SETTINGS_FIELDS = Object.freeze([
   ['extraInstructions', 'set-extra', 'text'],
   ['requireMedia', 'set-require-media', 'checkbox'],
   ['timezone', 'set-timezone', 'text'],
-  ['intervalMinutes', 'set-interval', 'number', 'Planner interval'],
   ['minLeadMinutes', 'set-lead', 'number', 'Minimum lead time'],
   ['descMin', 'set-desc-min', 'number', 'Caption minimum length'],
   ['descMax', 'set-desc-max', 'number', 'Caption maximum length']
@@ -30,11 +29,16 @@ export class SettingsView extends View {
     this.snapshot = '';
   }
 
+  /** Fills the timezone suggestions: typing "Dhaka" or "London" finds the zone among about 400. */
   populateTimezones() {
-    const select = byId('set-timezone');
     const zones = TimeZoneUtil.list();
     const browser = TimeZoneUtil.browserZone();
-    select.replaceChildren(...zones.map((zone) => el('option', { value: zone, text: zone === browser ? `${zone} (this device)` : zone })));
+    byId('timezone-options').replaceChildren(...zones.map((zone) => el('option', { value: zone, label: zone === browser ? 'This device' : undefined })));
+    byId('set-timezone').addEventListener('change', (event) => {
+      // Accept any spelling the browser knows ("asia/dhaka") and store its canonical name.
+      const value = event.target.value.trim();
+      if (TimeZoneUtil.isValid(value)) event.target.value = Intl.DateTimeFormat('en-US', { timeZone: value }).resolvedOptions().timeZone;
+    });
   }
 
   bind() {
@@ -141,10 +145,6 @@ export class SettingsView extends View {
       const input = byId(id);
       if (type === 'checkbox') input.checked = Boolean(s[key]);
       else input.value = s[key] ?? '';
-    }
-    if (!Array.from(byId('set-timezone').options).some((o) => o.value === s.timezone) && s.timezone) {
-      byId('set-timezone').append(el('option', { value: s.timezone, text: s.timezone }));
-      byId('set-timezone').value = s.timezone;
     }
     document.querySelector(`input[name="mode"][value="${s.mode}"]`).checked = true;
     this.channelDraft = { live: [...s.channelIds.live], demo: [...s.channelIds.demo] };
@@ -301,7 +301,8 @@ export class SettingsView extends View {
       const status = channel.isDisconnected ? 'disconnected' : channel.isLocked ? 'locked' : channel.isQueuePaused ? 'queue paused' : '';
       return el('label', { class: `channel${disabled ? ' is-disabled' : ''}` }, [
         el('input', { type: 'checkbox', checked: selected.has(channel.id), disabled, dataset: { channelId: channel.id }, 'aria-label': `${channel.name} on ${meta.label}` }),
-        el('span', { class: 'channel-avatar', style: `background:${meta.color}`, 'aria-hidden': 'true', text: meta.label.charAt(0) }),
+        // A touch darker than the brand colour, so the white initial passes 4.5:1 on every network's colour.
+        el('span', { class: 'channel-avatar', style: `background:color-mix(in srgb, ${meta.color} 76%, #000)`, 'aria-hidden': 'true', text: meta.label.charAt(0) }),
         el('span', { class: 'channel-info' }, [
           el('span', { class: 'channel-name', text: channel.name, style: 'display:block' }),
           el('span', { class: 'channel-sub', style: 'display:block', text: [meta.label, channel.handle ? `@${channel.handle}` : '', channel.organizationName, status].filter(Boolean).join(' · ') })

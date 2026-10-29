@@ -34,7 +34,7 @@ export function statusChip(status) {
   return el('span', { class: `chip chip-${status.chip}`, text: status.label });
 }
 
-/** @param {string} color @returns {HTMLElement} the small square in a channel's colour */
+/** @param {string} color @returns {HTMLElement} the small dot in a channel's colour */
 export function colorDot(color) {
-  return el('span', { style: `width:8px;height:8px;border-radius:2px;background:${color};flex:none` });
+  return el('span', { style: `width:8px;height:8px;border-radius:50%;background:${color};flex:none` });
 }

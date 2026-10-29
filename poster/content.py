@@ -18,8 +18,10 @@ MARKS = "".join(chr(c) for c in itertools.chain(range(0x300, 0x1E950), range(0xE
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.S | re.I)
 _FENCE_RE = re.compile(r"```(?:json)?", re.I)
-_NON_TAG_RE = re.compile(rf"[^\w{MARKS}]")
-_TRAILING_TAGS_RE = re.compile(rf"(?:\s*#[\w{MARKS}]+)+\s*$")
+# Zero-width non-joiner and joiner: inside a word they choose a conjunct's shape (র\u200d্য versus র্য), so hashtags keep them.
+JOINERS = "\u200c\u200d"
+_NON_TAG_RE = re.compile(rf"[^\w{MARKS}{JOINERS}]")
+_TRAILING_TAGS_RE = re.compile(rf"(?:\s*#[\w{MARKS}{JOINERS}]+)+\s*$")
 _WORD_RE = re.compile(rf"(?:[^\W_]|[{MARKS}]){{4,}}")
 STOP_WORDS = frozenset(
     "this that with from your have what when into just like more than they them their there here about every some "
@@ -31,7 +33,7 @@ FALLBACK_TAGS = ("#instagood", "#photooftheday", "#contentcreator", "#dailyinspi
 
 def normalize_hashtag(raw: Any) -> str | None:
     """Canonical ``#tag`` (letters, combining marks, digits, underscore) or None."""
-    tag = _NON_TAG_RE.sub("", unicodedata.normalize("NFC", str(raw or "")).strip().lstrip("#"))
+    tag = _NON_TAG_RE.sub("", unicodedata.normalize("NFC", str(raw or "")).strip().lstrip("#")).strip(JOINERS)
     if not tag or tag.isdigit() or len(tag) > 80:
         return None
     return f"#{tag}"

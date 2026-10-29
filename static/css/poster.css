@@ -20,8 +20,10 @@
   --border-strong: #d0d5dd;
   --text: #101828;
   --text-2: #344054;
-  --muted: #667085;
-  --faint: #98a2b3;
+  /* Muted passes 4.5:1 on every surface, the selected-option wash included. Faint is for icons and dots
+     only (3:1 and up); text that has to be read is never faint. */
+  --muted: #636d82;
+  --faint: #737b8c;
   --accent: #4f46e5;
   --accent-hover: #4338ca;
   --accent-soft: #eef2ff;
@@ -33,7 +35,7 @@
   --warning: #b54708;
   --warning-soft: #fffaeb;
   --warning-border: #fedf89;
-  --danger: #d92d20;
+  --danger: #c4261b;
   --danger-soft: #fef3f2;
   --danger-border: #fecdca;
   --info: #175cd3;
@@ -43,6 +45,8 @@
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, .05);
   --shadow: 0 1px 3px rgba(16, 24, 40, .08), 0 1px 2px rgba(16, 24, 40, .04);
   --shadow-lg: 0 20px 40px -12px rgba(16, 24, 40, .22), 0 4px 10px -4px rgba(16, 24, 40, .08);
+  /* Field edges must read at 3:1 against the surface; card hairlines stay lighter. */
+  --field-border: #848c9c;
   --header-bg: rgba(255, 255, 255, .86);
   color-scheme: light;
 }
@@ -56,7 +60,7 @@
   --text: #edf0f5;
   --text-2: #c9cfda;
   --muted: #8f98aa;
-  --faint: #656f83;
+  --faint: #7a8396;
   --accent: #818cf8;
   --accent-hover: #a5b4fc;
   --accent-soft: rgba(129, 140, 248, .14);
@@ -78,6 +82,7 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
   --shadow: 0 1px 3px rgba(0, 0, 0, .4);
   --shadow-lg: 0 24px 48px -12px rgba(0, 0, 0, .65), 0 4px 12px -4px rgba(0, 0, 0, .4);
+  --field-border: #646e80;
   --header-bg: rgba(19, 22, 29, .86);
   color-scheme: dark;
 }
@@ -98,10 +103,13 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+html { scrollbar-color: var(--border-strong) transparent; }
+input, textarea { caret-color: var(--accent); }
 img { display: block; max-width: 100%; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 h1, h2, h3, p { margin: 0; }
+p { text-wrap: pretty; }
 a { color: var(--accent); }
 [hidden] { display: none !important; }
 :focus { outline: none; }
@@ -125,7 +133,7 @@ a { color: var(--accent); }
 .muted { color: var(--muted); }
 .mono { font-family: var(--mono); font-size: 12px; }
 .spacer { flex: 1 1 auto; }
-.optional { font-weight: 500; color: var(--faint); font-size: 11.5px; }
+.optional { font-weight: 500; color: var(--muted); font-size: 11.5px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes toast-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
@@ -151,9 +159,7 @@ a { color: var(--accent); }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .brand-mark {
   width: 34px; height: 34px; border-radius: 10px; flex: none;
-  display: grid; place-items: center; color: #fff;
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 45%, #7c3aed 100%);
-  box-shadow: 0 4px 12px -4px rgba(79, 70, 229, .6);
+  display: grid; place-items: center; color: var(--on-accent); background: var(--accent);
 }
 .brand-mark .icon { width: 18px; height: 18px; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
@@ -172,10 +178,10 @@ a { color: var(--accent); }
 .mode-badge .icon { width: 14px; height: 14px; }
 .mode-badge[data-mode="demo"] { color: var(--accent-text); background: var(--accent-soft); border-color: transparent; }
 .mode-badge[data-mode="live"] { color: var(--success); background: var(--success-soft); border-color: var(--success-border); }
+/* Service pills report state; they are labels, so unlike the mode badge they carry no button fill or border. */
 .pill {
   display: inline-flex; align-items: center; gap: 6px;
-  height: 28px; padding: 0 10px; border-radius: 999px;
-  border: 1px solid var(--border); background: var(--surface-2);
+  height: 28px; padding: 0 6px; border-radius: 999px; border: 1px solid transparent;
   font-size: 12px; font-weight: 550; color: var(--text-2); white-space: nowrap;
 }
 .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
@@ -183,7 +189,7 @@ a { color: var(--accent); }
 .pill[data-state="demo"] .dot { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .pill[data-state="warn"] .dot { background: var(--warning); box-shadow: 0 0 0 3px var(--warning-soft); }
 .pill[data-state="error"] .dot { background: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
-.pill[data-state="error"] { color: var(--danger); border-color: var(--danger-border); }
+.pill[data-state="error"] { color: var(--danger); border-color: var(--danger-border); background: var(--danger-soft); padding: 0 10px; }
 .pill-detail { color: var(--muted); font-weight: 500; }
 
 /* ==========================================================================
@@ -194,23 +200,15 @@ a { color: var(--accent); }
   padding: 20px 24px 56px;
   display: flex; flex-direction: column; gap: 20px;
 }
-.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
-.kpi {
-  display: flex; align-items: center; gap: 14px; padding: 16px 18px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); min-width: 0;
+/* One line that says where the batch stands, read left to right like a dispatch slip. */
+.batch-strip {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 0;
+  padding: 0 4px; font-size: 13px; color: var(--muted);
 }
-.kpi-icon {
-  width: 42px; height: 42px; border-radius: 11px; flex: none;
-  display: grid; place-items: center;
-  background: var(--accent-soft); color: var(--accent);
-}
-.kpi-icon.kpi-green { background: var(--success-soft); color: var(--success); }
-.kpi-icon.kpi-amber { background: var(--warning-soft); color: var(--warning); }
-.kpi-icon.kpi-blue { background: var(--info-soft); color: var(--info); }
-.kpi > div { min-width: 0; }
-.kpi-value { font-size: 22px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; font-variant-numeric: tabular-nums; }
-.kpi-label { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.batch-stat { white-space: nowrap; }
+.batch-stat + .batch-stat::before { content: "·" / ""; margin: 0 10px; color: var(--faint); }
+.batch-stat strong { color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
+.batch-stat.is-warning, .batch-stat.is-warning strong { color: var(--warning); }
 .workspace { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 20px; align-items: start; }
 .stack { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
@@ -253,7 +251,9 @@ a { color: var(--accent); }
 }
 .btn:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
 .btn:active:not(:disabled) { transform: translateY(1px); }
+a.btn { text-decoration: none; }
 .btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+.btn-primary:disabled { opacity: 1; background: var(--surface-3); border-color: var(--border); color: var(--muted); }
 .btn .icon { width: 16px; height: 16px; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--on-accent); }
@@ -296,14 +296,15 @@ a { color: var(--accent); }
 .error-text { font-size: 12px; color: var(--danger); font-weight: 500; }
 .input, .select, .textarea {
   width: 100%; min-height: 38px; padding: 8px 12px;
-  border: 1px solid var(--border-strong); border-radius: 8px;
+  border: 1px solid var(--field-border); border-radius: 8px;
   background: var(--surface); color: var(--text);
   transition: border-color .15s, box-shadow .15s;
 }
-.input::placeholder, .textarea::placeholder { color: var(--faint); }
+.input::placeholder, .textarea::placeholder { color: var(--muted); opacity: 1; }
 .textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
 .select { cursor: pointer; padding-right: 8px; }
 .select-sm { min-height: 30px; height: 30px; padding: 0 8px; font-size: 12.5px; width: auto; border-radius: 7px; }
+.select-unit { width: auto; flex: none; }
 .input:focus, .select:focus, .textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); outline: none; }
 .input[aria-invalid="true"], .select[aria-invalid="true"], .textarea[aria-invalid="true"], .tag-editor[aria-invalid="true"] { border-color: var(--danger); }
 .input[aria-invalid="true"]:focus, .textarea[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px var(--danger-soft); }
@@ -400,7 +401,8 @@ fieldset:disabled .tag-editor { opacity: .6; }
 }
 .thumb-media img { width: 100%; height: 100%; object-fit: cover; transition: transform .25s var(--ease); }
 .thumb-card:hover .thumb-media img { transform: scale(1.03); }
-.thumb-media:focus-visible { outline-offset: -3px; }
+/* On a photo an indigo ring alone can vanish; a white inner ring keeps it visible on any image. */
+.thumb-media:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; box-shadow: inset 0 0 0 5px var(--surface); }
 .thumb-check {
   position: absolute; top: 8px; left: 8px; z-index: 2;
   display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px;
@@ -418,9 +420,14 @@ fieldset:disabled .tag-editor { opacity: .6; }
   position: absolute; inset: 0; z-index: 3; display: grid; place-items: center;
   background: rgba(11, 13, 18, .45); animation: fade-in .2s ease;
 }
-.thumb-info { padding: 8px 10px 2px; min-width: 0; }
+.thumb-info { display: grid; gap: 1px; padding: 8px 10px 2px; min-width: 0; }
 .thumb-name { font-size: 12.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.thumb-meta { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.thumb-caption {
+  font-size: 13px; line-height: 1.5; color: var(--text-2); overflow: hidden; word-break: break-word;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; height: 2lh;
+}
+.thumb-caption.is-empty { color: var(--muted); font-style: italic; }
+.thumb-meta { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .thumb-actions { display: flex; align-items: center; gap: 2px; padding: 4px 6px 6px; }
 .thumb-actions .grip { color: var(--faint); cursor: grab; display: grid; place-items: center; width: 22px; }
 .thumb-actions .grip .icon { width: 14px; height: 14px; }
@@ -459,6 +466,9 @@ fieldset:disabled .tag-editor { opacity: .6; }
   font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted);
 }
 .ops-label .icon { width: 15px; height: 15px; }
+.ops-needs { color: var(--warning); white-space: normal; text-align: left; height: auto; min-height: 30px; }
+.ops-needs:hover:not(:disabled) { color: var(--warning); background: var(--warning-soft); }
+.ops-needs .link { text-decoration: underline; text-underline-offset: 3px; }
 .op-status { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; background: var(--surface); animation: fade-in .2s ease; }
 .op-status[data-state="done"] { border-color: var(--success-border); }
 .op-status[data-state="failed"] { border-color: var(--danger-border); }
@@ -472,7 +482,7 @@ fieldset:disabled .tag-editor { opacity: .6; }
 .progress { position: relative; height: 8px; margin: 12px 0 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
 .progress-bar {
   height: 100%; width: 0; border-radius: inherit;
-  background: linear-gradient(90deg, var(--accent), #8b5cf6);
+  background: var(--accent);
   transition: width .35s var(--ease);
 }
 .progress.is-indeterminate .progress-bar { width: 40% !important; animation: indeterminate 1.2s ease-in-out infinite; }
@@ -493,7 +503,11 @@ fieldset:disabled .tag-editor { opacity: .6; }
 .planner > summary .chev { margin-left: auto; transition: transform .2s var(--ease); color: var(--muted); }
 .planner[open] > summary .chev { transform: rotate(90deg); }
 .planner > summary .icon:first-child { color: var(--muted); }
+.planner-summary-hint { font-weight: 500; }
 .planner-body { display: flex; flex-direction: column; gap: 12px; padding: 0 20px 16px; }
+.plan-preview { font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.plan-preview:empty { display: none; }
+.plan-preview.is-warning { color: var(--warning); }
 .planner-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .editor { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 22px; }
 .editor-preview { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -505,6 +519,8 @@ fieldset:disabled .tag-editor { opacity: .6; }
 }
 .frame img { width: 100%; height: 100%; object-fit: contain; }
 .editor-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.editor-attention { display: grid; justify-items: center; gap: 2px; text-align: center; }
+.editor-attention .hint { font-size: 12px; }
 .meta-list { display: grid; gap: 6px; margin: 0; font-size: 12.5px; }
 .meta-list > div { display: flex; justify-content: space-between; gap: 10px; min-width: 0; }
 .meta-list dt { color: var(--muted); flex: none; }
@@ -537,13 +553,13 @@ fieldset:disabled .tag-editor { opacity: .6; }
 .segmented input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tag-editor {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 42px; padding: 6px;
-  border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); cursor: text;
+  border: 1px solid var(--field-border); border-radius: 8px; background: var(--surface); cursor: text;
   transition: border-color .15s, box-shadow .15s;
 }
 .tag-editor:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
 .tag {
-  display: inline-flex; align-items: center; gap: 2px; height: 26px; padding: 0 3px 0 10px; border-radius: 999px;
-  background: var(--accent-soft); color: var(--accent-text); font-size: 12.5px; font-weight: 600; max-width: 100%;
+  display: inline-flex; align-items: center; gap: 2px; min-height: 26px; padding: 0 3px 0 10px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent-text); font-size: 13px; font-weight: 600; line-height: 1.5; max-width: 100%;
 }
 .tag-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag button {
@@ -554,22 +570,15 @@ fieldset:disabled .tag-editor { opacity: .6; }
 .tag button .icon { width: 12px; height: 12px; stroke-width: 2.5; }
 .tag-input { flex: 1; min-width: 140px; height: 26px; border: 0; outline: none; background: transparent; padding: 0 6px; font-size: 13px; }
 .tag-input:focus-visible { outline: none; }
-.score { display: flex; align-items: center; gap: 12px; min-height: 38px; }
-.score input[type="range"] { flex: 1; min-width: 0; }
-.score-value {
-  min-width: 52px; padding: 4px 8px; border-radius: 8px; text-align: center;
-  font-weight: 750; font-variant-numeric: tabular-nums; background: var(--surface-3);
-}
-.score-value.is-high { background: var(--success-soft); color: var(--success); }
-.score-value.is-mid { background: var(--warning-soft); color: var(--warning); }
-.score-value.is-low { background: var(--danger-soft); color: var(--danger); }
+/* The engagement score is the model's guess, so it reads as plain text: no slider, no traffic-light colour. */
+.estimate { min-height: 38px; display: flex; align-items: center; font-size: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .channel-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .post-preview {
-  white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6;
   padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2);
   max-height: 200px; overflow: auto; color: var(--text-2);
 }
-.post-preview.is-empty { color: var(--faint); font-style: italic; }
+.post-preview.is-empty { color: var(--muted); font-style: italic; }
 
 /* ==========================================================================
    12. Scheduled posts & activity log
@@ -582,34 +591,30 @@ fieldset:disabled .tag-editor { opacity: .6; }
 .sched-item:last-child { border-bottom: 0; }
 .sched-thumb { width: 52px; height: 52px; border-radius: 10px; object-fit: cover; background: var(--surface-3); border: 1px solid var(--border); }
 .sched-text {
-  font-size: 13px; color: var(--text); overflow: hidden;
+  font-size: 14px; line-height: 1.55; color: var(--text); overflow: hidden;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word;
 }
 .sched-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 6px; font-size: 12px; color: var(--muted); }
 .sched-meta .icon { width: 13px; height: 13px; }
 .sched-meta span { display: inline-flex; align-items: center; gap: 4px; }
-.sched-ids { margin-top: 4px; font-family: var(--mono); font-size: 11px; color: var(--faint); word-break: break-all; }
 .sched-actions { display: flex; gap: 2px; }
 .sched-item .error-text { margin-top: 4px; }
 .sched-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 20px 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
 .log-item {
   display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 10px; align-items: baseline;
-  padding: 7px 20px; font-size: 12.5px; border-left: 3px solid transparent;
+  padding: 7px 20px; font-size: 12.5px;
 }
 .log-item:hover { background: var(--surface-2); }
-.log-item[data-level="error"] { border-left-color: var(--danger); }
-.log-item[data-level="warn"] { border-left-color: var(--warning); }
-.log-item[data-level="success"] { border-left-color: var(--success); }
-.log-time { font-family: var(--mono); font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+.log-time { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .log-cat {
-  font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
   padding: 1px 6px; border-radius: 5px; background: var(--surface-3); color: var(--muted); white-space: nowrap;
 }
 .log-msg { color: var(--text-2); word-break: break-word; }
 .log-item[data-level="error"] .log-msg { color: var(--danger); }
-.log-item[data-level="warn"] .log-msg { color: var(--warning); }
-.log-item[data-level="success"] .log-msg { color: var(--success); }
-.log-detail { display: block; margin-top: 2px; font-size: 11.5px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+.log-item[data-level="error"] .log-cat { background: var(--danger-soft); color: var(--danger); }
+.log-item[data-level="warn"] .log-cat { background: var(--warning-soft); color: var(--warning); }
+.log-detail { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
 
 /* ==========================================================================
    13. Empty states, banners, toasts
@@ -697,7 +702,7 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
 .settings-section:last-child { border-bottom: 0; }
 .settings-section h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
 .settings-section h3 .icon { color: var(--accent); }
-.section-desc { font-size: 12.5px; color: var(--muted); margin-top: -8px; }
+.section-desc { font-size: 12.5px; color: var(--muted); margin-top: -8px; max-width: 72ch; }
 .mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .mode-option {
   position: relative; display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px;
@@ -760,6 +765,14 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
 /* ==========================================================================
    15. Responsive
    ========================================================================== */
+/* Beside the gallery the AI panel stays on screen while you scroll through 25 cards; it scrolls inside itself. */
+@media (min-width: 1181px) {
+  #ai-section {
+    position: sticky; top: calc(var(--header-h) + 16px);
+    max-height: calc(100vh - var(--header-h) - 32px); max-height: calc(100dvh - var(--header-h) - 32px);
+    overflow: auto; overscroll-behavior: contain;
+  }
+}
 @media (max-width: 1180px) {
   .workspace, .lower { grid-template-columns: minmax(0, 1fr); }
 }
@@ -775,12 +788,9 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
   .pill-label { display: none; }
   .hide-sm { display: none; }
   .main { padding: 16px 16px 40px; gap: 16px; }
-  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .kpi { padding: 12px 14px; gap: 10px; }
-  .kpi-icon { width: 36px; height: 36px; }
-  .kpi-value { font-size: 19px; }
   .card-header, .card-body, .ops, .gallery-toolbar { padding-left: 16px; padding-right: 16px; }
   .planner > summary, .planner-body { padding-left: 16px; padding-right: 16px; }
+  .planner-summary-hint { display: none; }
   .gallery { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; padding: 16px; }
   .editor { grid-template-columns: minmax(0, 1fr); }
   .editor-preview { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: start; }
@@ -803,7 +813,9 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
   .sched-actions { grid-column: 2; }
   .log-item { grid-template-columns: auto minmax(0, 1fr); }
   .log-item .log-cat { display: none; }
-  .kpi-label { white-space: normal; line-height: 1.3; }
+  .batch-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; padding: 0; }
+  .batch-stat { white-space: normal; }
+  .batch-stat + .batch-stat::before { content: none; }
   .banner { flex-wrap: wrap; }
   .banner-body { flex: 1 1 calc(100% - 64px); }
   .banner-actions { flex-basis: 100%; justify-content: flex-start; padding-left: 30px; }
@@ -817,4 +829,131 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
 }
 @media print {
   .app-header, .toast-region, .ops, .planner, #upload-section { display: none !important; }
+}
+
+/* ==========================================================================
+   16. Review: folded cards, the List view, headings, captions that grow
+   ========================================================================== */
+.ops-label { margin: 0; }
+.planner-title { display: inline; font: inherit; margin: 0; }
+/* Once posts are being reviewed, Add images folds to its header line. */
+#upload-section.is-collapsed .card-header { border-bottom: 0; }
+/* A finished run shrinks to its title and closing line once the batch moves on. */
+.op-status.is-compact .progress, .op-status.is-compact .op-stats, .op-status.is-compact .op-errors { display: none; }
+.op-status.is-compact .op-current { margin-top: 6px; }
+/* Long captions (Bengali runs long) grow with their text instead of scrolling inside a scrolling panel. */
+#ed-description, #ed-alt { field-sizing: content; min-height: calc(4lh + 18px); max-height: calc(10lh + 18px); }
+/* Skip past the gallery's cards: shown where the panel sits below the gallery, kept for keyboard users elsewhere. */
+.jump-link { font-size: 12.5px; font-weight: 600; color: var(--accent); text-underline-offset: 3px; }
+
+/* List view: one row per post, caption and time editable in place, so a batch is read in one scroll. */
+.gallery.is-list { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0; }
+.gallery.is-list .thumb-card {
+  display: grid; grid-template-columns: 112px minmax(0, 1fr); column-gap: 14px; align-items: start;
+  padding: 14px 20px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+}
+.gallery.is-list .thumb-card:last-child { border-bottom: 0; }
+.gallery.is-list .thumb-card.is-active { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 12px; }
+.gallery.is-list .thumb-card:hover { box-shadow: none; }
+.gallery.is-list .thumb-card.is-active:hover { box-shadow: inset 0 0 0 2px var(--accent); }
+.gallery.is-list .thumb-media-wrap { grid-row: span 2; border-radius: 10px; overflow: hidden; }
+.gallery.is-list .thumb-status { left: 4px; bottom: 4px; max-width: calc(100% - 8px); }
+.gallery.is-list .thumb-check { top: 4px; left: 4px; }
+.gallery.is-list .thumb-index { top: 4px; right: 4px; }
+.gallery.is-list .thumb-info { padding: 0; gap: 8px; }
+.gallery.is-list .thumb-caption, .gallery.is-list .thumb-meta, .gallery.is-list .thumb-status { display: none; }
+.gallery.is-list .thumb-actions { padding: 6px 0 0; }
+.gallery.is-list .grip { display: none; }
+.list-fields { display: none; }
+.gallery.is-list .list-fields { display: grid; gap: 8px; }
+/* The whole caption is shown: reading it in full is what the List view is for. */
+.list-caption { min-height: calc(2lh + 18px); field-sizing: content; font-size: 14px; line-height: 1.6; }
+.list-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.list-tags:empty { display: none; }
+.tag-static { min-height: 22px; padding: 0 8px; font-size: 12.5px; }
+.list-caption[readonly], .list-time[readonly] { background: var(--surface-2); color: var(--text-2); }
+.list-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.list-time { width: auto; min-height: 34px; padding: 4px 10px; }
+.list-meta { font-size: 12px; color: var(--muted); }
+.list-status { display: inline-flex; }
+/* The closing line of a finished run wraps instead of cutting off the last publish time. */
+.op-status:not([data-state="running"]) .op-current { white-space: normal; }
+
+@media (min-width: 1181px) {
+  /* The panel is beside the gallery and stays on screen: the toasts move to the gallery side, off the editor. */
+  .toast-region { right: auto; left: 20px; }
+  .jump-link {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .jump-link:focus { position: static; width: auto; height: auto; clip: auto; }
+}
+@media (max-width: 720px) {
+  .gallery.is-list .thumb-card { grid-template-columns: 96px minmax(0, 1fr); padding: 12px 16px; }
+  .gallery-hint { display: none; }
+}
+
+/* Windows high contrast: selection, progress and the open post must not depend on background colour. */
+@media (forced-colors: active) {
+  .segmented input:checked + span { outline: 2px solid Highlight; outline-offset: -2px; }
+  .mode-option:has(input:checked), .channel:has(input:checked) { outline: 2px solid Highlight; }
+  .progress { border: 1px solid CanvasText; }
+  .progress-bar { forced-color-adjust: none; background: Highlight; }
+  .thumb-card.is-active, .gallery.is-list .thumb-card.is-active { outline: 3px solid Highlight; outline-offset: 1px; }
+  .chip, .tag, .count-badge, .btn-count { border: 1px solid CanvasText; }
+  /* The stage's next action must still stand out when colours are forced. */
+  .btn-primary { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; }
+  .btn-primary:disabled { background: Canvas; color: GrayText; border-color: GrayText; }
+  .pill .dot, .chip::before { forced-color-adjust: none; background: CanvasText; }
+}
+
+/* Touch screens: every control is at least 44px to hit with a thumb. */
+@media (pointer: coarse) {
+  .btn, .btn-sm, .btn-xs { min-height: 44px; }
+  .btn-icon, .btn-icon.btn-sm, .btn-icon.btn-xs { min-width: 44px; }
+  .thumb-check { width: 40px; height: 40px; }
+  .checkbox { min-height: 44px; }
+  .segmented span { padding: 11px 14px; }
+  .tag button { width: 32px; height: 32px; }
+}
+
+/* ==========================================================================
+   17. Review stage: editor before captions, locked posts, grouped scheduled posts
+   ========================================================================== */
+/* The editor fits the panel it is in: below about 620px wide the preview sits above the fields. */
+#ai-section { container-type: inline-size; }
+@container (max-width: 620px) {
+  .editor { grid-template-columns: minmax(0, 1fr); }
+  .editor-preview { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: start; }
+  .editor-preview .frame { grid-row: span 3; }
+}
+/* Before a caption exists: the image and two ways to get one, not an empty form. */
+.editor-blank { display: none; }
+.editor-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.editor.is-blank .editor-main { display: none; }
+.editor.is-blank .editor-blank {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; align-self: start;
+  padding: 18px 20px; border-radius: 12px; background: var(--surface-2); font-size: 13px; color: var(--muted);
+}
+.editor-blank-title { font-size: 14px; font-weight: 650; color: var(--text); }
+.result-edit { margin-top: 8px; }
+/* The List view takes more of the workspace; the editor beside it narrows and stacks. */
+@media (min-width: 1181px) {
+  .workspace:has(.gallery.is-list) { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); }
+}
+/* Scheduled posts: one row per post, its channel copies listed inside. */
+.sched-tags { margin-top: 2px; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-channels { display: grid; gap: 2px; margin-top: 6px; font-size: 12px; color: var(--text-2); }
+.sched-channel { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 26px; }
+.sched-channel-name { min-width: 0; }
+.sched-item.is-new { background: var(--accent-soft); }
+@media (max-width: 720px) {
+  /* On a phone the caption comes first; the file's size and dimensions are not worth a screen of scrolling. */
+  .editor-preview .meta-list { display: none; }
+}
+
+/* The List view's order is the row order, so the photo keeps its tap area free of the index badge. */
+.gallery.is-list .thumb-index { display: none; }
+@media (forced-colors: active) {
+  /* Finished bars too: the outcome colour would otherwise be forced away. */
+  .op-status[data-state] .progress-bar { background: Highlight; }
 }
