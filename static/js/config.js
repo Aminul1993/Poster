@@ -14,6 +14,7 @@ const FALLBACK_RULES = {
     luxury: 'elegant, refined and exclusive',
     bold: 'energetic, confident and attention-grabbing'
   },
+  languages: { en: 'English', bn: 'Bengali', 'bn-en': 'Bengali + English', hi: 'Hindi', 'hi-en': 'Hindi + English', ta: 'Tamil', 'ta-en': 'Tamil + English' },
   hashtags: { min: 10, max: 15, fallback: ['#instagood', '#photooftheday', '#contentcreator', '#dailyinspiration', '#socialmedia'], stopWords: [] },
   maxTextChars: 10000,
   maxExtraChars: 500,
@@ -167,3 +168,5 @@ export const APP_VERSION = SERVER.version || '2.1.0';
 
 /** Tone presets offered in Settings, with the wording sent to the model. */
 export const TONES = RULES.tones;
+/** Caption languages the model is asked to write in, by key, with their names. */
+export const LANGUAGES = RULES.languages;

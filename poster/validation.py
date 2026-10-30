@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from flask import request
 
-from poster.config import API, LIMITS, TONES, is_local_host
+from poster.config import API, LANGUAGES, LIMITS, TONES, is_local_host
 from poster.errors import ServiceError
 from poster.imaging import sniff_image
 from poster.services.ollama import GenerationOptions
@@ -49,6 +49,9 @@ def parse_generation_options(body: dict[str, Any], *, default_model: str,
     tone = body.get("tone") or "friendly"
     if tone not in TONES:
         raise ServiceError(f'Unknown tone "{tone}".', kind="validation")
+    language = body.get("language") or "en"
+    if language not in LANGUAGES:
+        raise ServiceError(f'Unknown caption language "{language}".', kind="validation")
     extra = body.get("extraInstructions") or ""
     if not isinstance(extra, str) or len(extra) > LIMITS["max_extra_chars"]:
         raise ServiceError(f"Extra instructions must be text of at most {LIMITS['max_extra_chars']} characters.", kind="validation")
@@ -56,7 +59,7 @@ def parse_generation_options(body: dict[str, Any], *, default_model: str,
     desc_max = int_field(body, "descMax", LIMITS["default_caption_max"], LIMITS["min_caption_max"], LIMITS["max_caption_chars"])
     if desc_min >= desc_max:
         raise ServiceError("descMax must be greater than descMin.", kind="validation")
-    return GenerationOptions(model=model, tone=tone, extra=extra.strip(), desc_min=desc_min, desc_max=desc_max)
+    return GenerationOptions(model=model, tone=tone, extra=extra.strip(), desc_min=desc_min, desc_max=desc_max, language=language)
 
 
 def parse_prompt(value: Any) -> str:

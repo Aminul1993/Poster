@@ -1,12 +1,22 @@
 /** ImageStore: gallery state, ordering, selection and draft persistence. */
-import { LIMITS, STORAGE_KEYS, TIMING } from './config.js';
+import { LANGUAGES, LIMITS, STORAGE_KEYS, TIMING } from './config.js';
 import { canvasToBlob, computeImageStats, decodeImage, drawScaled } from './image.js';
 import { TimeZoneUtil } from './time.js';
-import { clamp, debounce, isPlainObject, uid } from './util.js';
+import { clamp, debounce, isPlainObject, splitPostText, uid } from './util.js';
 
 /** @returns {object} an empty content object */
 export function emptyContent() {
   return { description: '', alternative_description: '', hashtags: [], category: '', engagement_score: 50 };
+}
+
+/**
+ * The draft content with its caption (or alternative caption) and hashtags taken from a post's text as Buffer has it.
+ * @param {object|null} content @param {string} text @param {boolean} useAlternative @returns {object}
+ */
+export function contentFromText(content, text, useAlternative) {
+  const { caption, tags } = splitPostText(text);
+  const key = useAlternative ? 'alternative_description' : 'description';
+  return { ...(content || emptyContent()), [key]: caption, hashtags: tags ? tags.split(' ') : [] };
 }
 
 /** @param {object} item @returns {boolean} whether the item has a caption */
@@ -139,6 +149,8 @@ export class ImageStore extends EventTarget {
       // The content a regeneration replaced, so it can be restored once (kept for this session only).
       previousContent: null,
       useAlternative: Boolean(draft?.useAlternative),
+      // This post's own caption language; empty follows the batch setting.
+      language: typeof draft?.language === 'string' && Object.prototype.hasOwnProperty.call(LANGUAGES, draft.language) ? draft.language : '',
       scheduleLocal: typeof draft?.scheduleLocal === 'string' ? draft.scheduleLocal : '',
       mediaUrl: typeof draft?.mediaUrl === 'string' ? draft.mediaUrl : '',
       uploadedUrl: typeof draft?.uploadedUrl === 'string' ? draft.uploadedUrl : '',
@@ -158,14 +170,26 @@ export class ImageStore extends EventTarget {
     this.#emit('add', items.map((i) => i.id));
   }
 
-  /** @param {string} id */
-  remove(id) {
+  /**
+   * @param {string} id
+   * @param {{keepPreview?: boolean}} [options] keepPreview leaves the thumbnail alive so the image can be put back
+   * @returns {{item: object, index: number}|null} what was removed and where it was
+   */
+  remove(id, { keepPreview = false } = {}) {
     const index = this.indexOf(id);
-    if (index === -1) return;
+    if (index === -1) return null;
     const [item] = this.items.splice(index, 1);
-    URL.revokeObjectURL(item.previewUrl);
+    if (!keepPreview) URL.revokeObjectURL(item.previewUrl);
     if (this.activeId === id) this.activeId = (this.items[index] || this.items[index - 1] || null)?.id ?? null;
     this.#emit('remove', [id]);
+    return { item, index };
+  }
+
+  /** Puts a removed image back where it was (Undo), and opens it. @param {object} item @param {number} index */
+  restore(item, index) {
+    this.items.splice(clamp(index, 0, this.items.length), 0, item);
+    this.activeId = item.id;
+    this.#emit('add', [item.id]);
   }
 
   /** Removes every image (drafts are kept). */
@@ -243,7 +267,7 @@ export class ImageStore extends EventTarget {
 
   /** Saves the persistent parts of an item, keyed by its fingerprint. */
   saveDraft(item) {
-    const worthSaving = item.content || item.scheduleLocal || item.mediaUrl || item.result || item.uploadedUrl;
+    const worthSaving = item.content || item.scheduleLocal || item.mediaUrl || item.result || item.uploadedUrl || item.language;
     if (!worthSaving) {
       delete this.drafts[item.fingerprint];
     } else {
@@ -251,6 +275,7 @@ export class ImageStore extends EventTarget {
         name: item.name,
         content: item.content,
         useAlternative: item.useAlternative,
+        language: item.language,
         scheduleLocal: item.scheduleLocal,
         mediaUrl: item.mediaUrl,
         uploadedUrl: item.uploadedUrl,
@@ -278,13 +303,20 @@ export class ImageStore extends EventTarget {
       const remaining = result.postIds.filter((_, i) => keep[i]);
       return remaining.length
         ? { ...result, postIds: remaining, channels: (result.channels || []).filter((_, i) => keep[i]) }
-        : { mode: result.mode, removed: true, removedAt: new Date().toISOString() };
+        : { mode: result.mode, removed: true, removedAt: new Date().toISOString(), dueAt: result.dueAt, timezone: result.timezone };
+    };
+    // An edit made in Buffer becomes the draft itself, so deleting the post later never brings back older text.
+    const draftFields = (holder) => {
+      const fields = {};
+      if (patch?.dueAt && holder.result?.timezone) fields.scheduleLocal = TimeZoneUtil.toLocalInput(new Date(patch.dueAt), holder.result.timezone);
+      if (typeof patch?.text === 'string') fields.content = contentFromText(holder.content, patch.text, holder.useAlternative);
+      return fields;
     };
     for (const item of this.items) {
-      if (matches(item.result)) this.update(item.id, { result: apply(item.result) }, { reason: 'status' });
+      if (matches(item.result)) this.update(item.id, { ...draftFields(item), result: apply(item.result) }, { reason: 'status' });
     }
     for (const draft of Object.values(this.drafts)) {
-      if (matches(draft?.result)) draft.result = apply(draft.result);
+      if (matches(draft?.result)) Object.assign(draft, draftFields(draft), { result: apply(draft.result) });
     }
     this.persistDrafts();
   }

@@ -5,12 +5,13 @@
  * controller's delegating methods (openSettings, confirm, renderEditor, ...).
  */
 import { saveSettings, showToast } from '../app.js';
-import { LIMITS, SERVER, STORAGE_KEYS, TIMING } from '../config.js';
+import { LANGUAGES, LIMITS, SERVER, STORAGE_KEYS, TIMING } from '../config.js';
 import { POST_FILTERS } from '../services/buffer.js';
 import { hasContent, isReady, needsTime } from '../store.js';
 import { $, formatDuration, icon, pluralize } from '../util.js';
+import { BulkEditView } from './bulk.js';
 import { Dialogs } from './dialogs.js';
-import { byId, hasFiles } from './dom.js';
+import { MOD_KEY, byId, hasFiles } from './dom.js';
 import { EditorView } from './editor.js';
 import { GalleryView } from './gallery.js';
 import { ImageEditView } from './imageedit.js';
@@ -30,6 +31,7 @@ export class UIController {
     this.upload = new UploadView(this);
     this.imageEdit = new ImageEditView(this);
     this.gallery = new GalleryView(this);
+    this.bulk = new BulkEditView(this);
     this.operations = new OperationsView(this);
     this.editor = new EditorView(this);
     this.posts = new PostsView(this);
@@ -57,16 +59,19 @@ export class UIController {
     this.applyTheme(this.currentTheme(), { persist: false });
     this.restoreUiPrefs();
     this.settingsView.populateTimezones();
+    this.settingsView.populateLanguages();
     this.bindHeader();
     this.upload.bind();
     this.imageEdit.bind();
     this.gallery.bind();
+    this.bulk.bind();
     this.operations.bind();
     this.editor.bind();
     this.posts.bind();
     this.log.bind();
     this.settingsView.bind();
     this.bindGlobal();
+    this.bindShortcuts();
     this.bindServices();
     this.renderAll();
     this.showStartupBanners();
@@ -75,12 +80,12 @@ export class UIController {
 
   /* ----------------------------------------------- delegates used by views */
 
-  /** @param {string} [sectionId] */
-  openSettings(sectionId) { this.settingsView.open(sectionId); }
+  /** @param {string} [sectionId] @param {{title: string, message: string}} [reason] shown in the drawer */
+  openSettings(sectionId, reason) { this.settingsView.open(sectionId, reason); }
   confirm(options) { return this.dialogs.confirm(options); }
   choose(options) { return this.dialogs.choose(options); }
   renderEditor() { this.editor.render(); }
-  openPlanner() { this.operations.openPlanner(); }
+  openPlanner(scope) { this.operations.openPlanner(scope); }
   /** @param {File[]} files */
   handleFiles(files) { return this.upload.handleFiles(files); }
   startGeneration(ids, scope) { return this.orchestrator.startGeneration(ids, scope); }
@@ -164,7 +169,7 @@ export class UIController {
     // In Demo the badge already says it; the service labels would only repeat "Demo" twice more.
     byId('pill-ollama').hidden = demo;
     byId('pill-buffer').hidden = demo;
-    byId('ai-sub').textContent = `${s.model}${demo ? ' (simulated)' : ''} · ${s.tone.charAt(0).toUpperCase()}${s.tone.slice(1)} tone`;
+    byId('ai-sub').textContent = `${s.model}${demo ? ' (simulated)' : ''} · ${s.tone.charAt(0).toUpperCase()}${s.tone.slice(1)} tone · ${LANGUAGES[s.language] || 'English'}`;
   }
 
   /** @returns {{state: string, detail: string, title: string}} */
@@ -209,6 +214,9 @@ export class UIController {
     byId('kpi-needs-time-label').textContent = waiting === 1 ? 'needs a publish time' : 'need a publish time';
     byId('kpi-needs-time-stat').classList.toggle('is-warning', waiting > 0);
     byId('kpi-ready').textContent = String(ready);
+    const removed = items.filter((i) => i.result?.removed).length;
+    byId('kpi-removed').textContent = String(removed);
+    byId('kpi-removed-stat').hidden = !removed;
     const copies = this.upcomingKpi && this.upcomingKpi.copies !== this.upcomingKpi.count ? ` (${pluralize(this.upcomingKpi.copies, 'channel post')})` : '';
     byId('kpi-scheduled-label').textContent = this.settings.mode === 'demo' ? `upcoming in Demo mode, not in Buffer${copies}` : `upcoming in Buffer${copies}`;
     byId('kpi-scheduled-label').title = 'Buffer keeps one post per channel; Poster counts one per image.';
@@ -236,6 +244,10 @@ export class UIController {
 
   /** Global listeners: connectivity, page-level drop, unload guard. */
   bindGlobal() {
+    // Toasts move to the other side while the owner works in Scheduled posts, so they never cover those rows.
+    document.addEventListener('focusin', (event) => {
+      byId('toast-region').classList.toggle('is-right', Boolean(event.target.closest?.('#schedules-section')));
+    });
     window.addEventListener('offline', () => {
       this.renderHeader();
       this.notifier.banner('offline', {
@@ -271,6 +283,35 @@ export class UIController {
     });
   }
 
+  /**
+   * Ctrl+Shift+Enter (⌘ on a Mac) runs the batch's next step; "?" lists every shortcut. Neither acts while a
+   * dialog or the drawer is open. "?" never acts in a field; the next step works from the planner's time and
+   * interval fields (where a run's end puts the cursor), but not where Enter writes text.
+   */
+  bindShortcuts() {
+    for (const key of document.querySelectorAll('.mod-key')) key.textContent = MOD_KEY.label;
+    byId('open-shortcuts').addEventListener('click', () => this.openShortcuts());
+    const typing = (target) => target instanceof HTMLElement && (target.matches('textarea, select, [contenteditable="true"]')
+      || (target.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file'].includes(target.type)));
+    const writing = (target) => target instanceof HTMLElement && target.matches('textarea, [contenteditable="true"], input:not([type]), input[type="text"], input[type="url"], input[type="search"]');
+    document.addEventListener('keydown', (event) => {
+      if (event.defaultPrevented || event.isComposing || event.altKey || document.querySelector('dialog[open]')) return;
+      if (event.key === 'Enter' && event.shiftKey && (MOD_KEY.aria === 'Meta' ? event.metaKey : event.ctrlKey)) {
+        if (writing(event.target)) return;
+        event.preventDefault();
+        this.operations.runNextStep();
+      } else if (event.key === '?' && !event.ctrlKey && !event.metaKey && !typing(event.target)) {
+        event.preventDefault();
+        this.openShortcuts();
+      }
+    });
+  }
+
+  openShortcuts() {
+    byId('shortcuts-dialog').showModal();
+    byId('shortcuts-close').focus();
+  }
+
   /** Reacts to store, scheduler, notifier and storage events. */
   bindServices() {
     this.store.addEventListener('change', (event) => {
@@ -295,6 +336,7 @@ export class UIController {
     this.scheduler.addEventListener('start', (event) => {
       this.lastOp = event.detail;
       this.operations.renderStatus(event.detail);
+      this.focusRunStart();
       this.operations.render();
       this.editor.render();
       clearInterval(this.opTicker);
@@ -354,6 +396,25 @@ export class UIController {
       if (!this.operations.statusInView()) showToast(`${verb} ${pluralize(op.succeeded, noun)}${where}${op.skipped ? ` (${op.skipped} skipped)` : ''}${op.retries ? ` after ${pluralize(op.retries, 'retry', 'retries')}` : ''}.`, 'success', { title });
       this.notifier.log('success', isGen ? 'ai' : 'schedule', `${op.label} complete.`, stats);
     }
+    this.focusNextStep(op);
+  }
+
+  /** A run's start puts keyboard focus on its progress title, unless the owner is working elsewhere. */
+  focusRunStart() {
+    const active = document.activeElement;
+    if (!active || active === document.body || byId('ai-section').contains(active)) byId('op-title').focus({ preventScroll: true });
+  }
+
+  /** A run's end puts focus on the next step: the planner, All ready, or the closing line's View button. */
+  focusNextStep(op) {
+    const active = document.activeElement;
+    if (active && active !== document.body && active.id !== 'op-title') return;
+    const stage = this.operations.stage();
+    let target = byId('op-title');
+    if (op.kind === 'schedule' && !byId('op-view').hidden) target = byId('op-view');
+    else if (stage === 'plan') target = byId('planner').open ? byId('plan-start') : byId('sched-needs-time');
+    else if (stage === 'schedule') target = byId('sched-all');
+    if (!target.disabled && !target.hidden) target.focus({ preventScroll: true });
   }
 
   /** Banner for errors that need user action (auth, configuration, network). */
@@ -438,32 +499,39 @@ export class UIController {
     if (mode === 'live') {
       const check = this.validation.validateSettings({ ...this.settings, mode: 'live' }, { scope: 'ollama', requireCredentials: true });
       if (!check.valid) {
-        showToast(Object.values(check.errors)[0], 'warning', { title: 'Live mode needs server configuration' });
-        this.openSettings('settings-ollama');
+        this.openSettings('settings-ollama', { title: 'Live mode needs server configuration', message: Object.values(check.errors)[0] });
         return;
       }
-      const live = { ...this.settings, mode: 'live' };
-      const channels = this.app.liveBuffer.selectedChannelIds(live).map((id) => this.app.liveBuffer.channelName(id, live));
-      const rehearsed = this.store.all().filter((i) => i.result?.mode === 'demo').length;
-      const ok = await this.confirm({
-        title: 'Switch to Live mode?',
-        message: [
-          `Captions will come from ${this.settings.model} on Ollama, and scheduling creates real posts in Buffer on ${channels.length ? channels.join(', ') : 'the channels you choose in Settings → Buffer'}.`,
-          rehearsed ? `${pluralize(rehearsed, 'post')} scheduled in Demo mode ${rehearsed === 1 ? 'is' : 'are'} not in Buffer, so ${rehearsed === 1 ? 'it' : 'they'} can be scheduled for real.` : ''
-        ].filter(Boolean).join('\n\n'),
-        confirmLabel: 'Switch to Live',
-        symbol: 'zap'
-      });
+      const ok = await this.confirmLive(this.settings);
       if (!ok || this.settings.mode === 'live') return;
     }
     const result = saveSettings({ ...this.settings, mode });
     if (!result.ok) {
-      showToast(Object.values(result.errors)[0], 'error', { title: 'Could not switch mode' });
-      this.openSettings();
+      this.openSettings(undefined, { title: 'Could not switch mode', message: Object.values(result.errors)[0] });
       return;
     }
     for (const id of ['service-ollama', 'service-buffer', 'service-media-host']) this.notifier.clearBanner(id);
     showToast(mode === 'demo' ? 'Demo mode: AI and scheduling are simulated.' : 'Live mode: requests go to Ollama and Buffer.', 'info', { title: `Switched to ${mode === 'demo' ? 'Demo' : 'Live'} mode` });
+  }
+
+  /**
+   * Going Live creates real posts, so it is confirmed the same way from the header badge and from Settings.
+   * @param {object} settings the settings that will apply @returns {Promise<boolean>}
+   */
+  confirmLive(settings) {
+    const live = { ...settings, mode: 'live' };
+    const channels = this.app.liveBuffer.selectedChannelIds(live).map((id) => this.app.liveBuffer.channelName(id, live));
+    const rehearsed = this.store.all().filter((i) => i.result?.mode === 'demo').length;
+    return this.confirm({
+      title: 'Switch to Live mode?',
+      message: [
+        `Captions will come from ${settings.model} on Ollama, and scheduling creates real posts in Buffer on ${channels.length ? channels.join(', ') : 'the channels you choose in Settings → Buffer'}.`,
+        rehearsed ? `${pluralize(rehearsed, 'post')} scheduled in Demo mode ${rehearsed === 1 ? 'is' : 'are'} not in Buffer, so ${rehearsed === 1 ? 'it' : 'they'} can be scheduled for real.` : ''
+      ].filter(Boolean).join('\n\n'),
+      confirmLabel: 'Switch to Live',
+      symbol: 'zap',
+      focusCancel: true
+    });
   }
 
   /** Called by saveSettings() after settings change. */

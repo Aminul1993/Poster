@@ -6,7 +6,7 @@ import { LIMITS } from '../config.js';
 import { countedResult, hasContent, isReady, needsTime } from '../store.js';
 import { TimeZoneUtil } from '../time.js';
 import { el, formatDuration, icon, pluralize, truncate } from '../util.js';
-import { byId } from './dom.js';
+import { MOD_KEY, byId } from './dom.js';
 import { View } from './view.js';
 
 /** Planner interval units, in minutes. */
@@ -37,14 +37,29 @@ export class OperationsView extends View {
     const waiting = items.filter((i) => needsTime(i, this.settings)).length;
     const stage = this.stage();
     byId('gen-all').classList.toggle('btn-primary', stage === 'generate');
-    byId('plan-all').classList.toggle('btn-primary', stage === 'plan');
+    // Opened from a Selected run, the planner's next action is "Apply to selected".
+    const scoped = this.plannerScope === 'selected' && selected.length > 0;
+    byId('plan-all').classList.toggle('btn-primary', stage === 'plan' && !scoped);
+    byId('plan-selected').classList.toggle('btn-primary', stage === 'plan' && scoped);
     byId('sched-all').classList.toggle('btn-primary', stage === 'schedule');
+    // The indigo button is the next step, and answers to Ctrl+Shift+Enter (⌘ on a Mac); it says so.
+    for (const id of ['gen-all', 'plan-all', 'plan-selected', 'sched-all']) {
+      const button = byId(id);
+      const next = button.classList.contains('btn-primary');
+      if (next) button.setAttribute('aria-keyshortcuts', `${MOD_KEY.aria}+Shift+Enter`);
+      else button.removeAttribute('aria-keyshortcuts');
+      button.title = next ? `Next step (${MOD_KEY.label}+Shift+Enter)` : '';
+    }
     byId('gen-selected').disabled = running || !selected.length;
     byId('gen-all').disabled = running || !items.length;
     byId('gen-selected-count').textContent = String(selected.length);
     byId('gen-all-count').textContent = String(items.length);
     byId('gen-selected').setAttribute('aria-label', `Generate content for ${pluralize(selected.length, 'selected image')}`);
-    byId('gen-all').setAttribute('aria-label', `Generate content for all ${pluralize(items.length, 'image')}`);
+    // Once every image has a caption, this button can only replace them: it says so, and steps back to a ghost.
+    const captioned = items.length > 0 && items.every((i) => hasContent(i) || countedResult(i, this.settings.mode));
+    byId('gen-all').classList.toggle('btn-ghost', captioned);
+    byId('gen-all-label').textContent = captioned ? 'Regenerate all' : 'All images';
+    byId('gen-all').setAttribute('aria-label', `${captioned ? 'Regenerate' : 'Generate'} content for all ${pluralize(items.length, 'image')}`);
     byId('sched-selected').disabled = running || !selected.length;
     byId('sched-all').disabled = running || !readyAll;
     // "Selected" acts on every selected post; when some are not ready the count says so instead of hiding them.
@@ -59,6 +74,28 @@ export class OperationsView extends View {
     byId('plan-all').disabled = !items.length;
     byId('clear-images').disabled = running || !items.length;
     this.renderPlannerPreview();
+  }
+
+  /**
+   * Ctrl+Shift+Enter: presses the panel's indigo button, the batch's next step. A folded planner opens instead
+   * of applying, so publish times are never set without their preview on screen.
+   */
+  runNextStep() {
+    const stage = this.stage();
+    if (this.scheduler.isRunning) {
+      showToast('A run is in progress; the next step is ready when it finishes.', 'info');
+      return;
+    }
+    if (stage === 'empty' || stage === 'done') {
+      showToast(stage === 'empty' ? 'Add images first: there is no next step yet.' : 'No next step: no post is waiting for a caption, a time or scheduling.', 'info');
+      return;
+    }
+    if (stage === 'plan' && !byId('planner').open) {
+      this.openPlanner();
+      return;
+    }
+    const button = ['gen-all', 'plan-all', 'plan-selected', 'sched-all'].map(byId).find((b) => b.classList.contains('btn-primary'));
+    if (button && !button.disabled) button.click();
   }
 
   /** @param {import('../scheduler.js').Operation} op a finished scheduling run @returns {string} the closing line */
@@ -100,9 +137,11 @@ export class OperationsView extends View {
   }
 
   /** Opens the planner and puts the cursor in its first field. */
-  openPlanner() {
+  openPlanner(scope = 'all') {
+    this.plannerScope = scope;
     const planner = byId('planner');
     planner.open = true;
+    this.render();
     planner.scrollIntoView({ block: 'nearest' });
     byId('plan-start').focus();
   }
@@ -125,25 +164,30 @@ export class OperationsView extends View {
     const preview = byId('plan-preview');
     preview.classList.remove('is-warning');
     const s = this.settings;
-    const count = this.scheduler.plannable(this.store.all(), byId('plan-overwrite').checked).length;
+    const scoped = this.plannerScope === 'selected' && this.store.selected().length > 0;
+    const label = scoped ? 'Apply to selected' : 'Apply to all';
+    const targets = this.scheduler.plannable(scoped ? this.store.selected() : this.store.all(), byId('plan-overwrite').checked);
+    const count = targets.length;
     const start = TimeZoneUtil.zonedToUtc(byId('plan-start').value, s.timezone);
     const minutes = this.intervalMinutes();
     if (!count) {
-      preview.textContent = this.store.count ? 'Every post already has a time. Tick "Replace times already set" to plan them again.' : '';
+      preview.textContent = this.store.count ? `Every ${scoped ? 'selected ' : ''}post already has a time. Tick "Replace times already set" to plan them again.` : '';
       return;
     }
     if (!start || !(minutes >= 1 && minutes <= LIMITS.maxPlanMinutes)) {
       preview.textContent = `${pluralize(count, 'post')} without a time.`;
       return;
     }
+    const slots = this.scheduler.planSlots(count, start.date, minutes, this.scheduler.takenTimes(targets));
+    const last = slots[slots.length - 1];
+    const skipped = Math.round((last.getTime() - start.date.getTime()) / (minutes * 60000)) + 1 - slots.length;
     const format = (date) => TimeZoneUtil.format(date, s.timezone);
-    const last = new Date(start.date.getTime() + (count - 1) * minutes * 60000);
     preview.textContent = count === 1
-      ? `Apply to all: 1 post at ${format(start.date)}.`
-      : `Apply to all: ${count} posts, from ${format(start.date)} to ${format(last)}.`;
-    // A long run at a short interval can fall in the night; say so before it is applied.
-    const night = Array.from({ length: count }, (_, i) => TimeZoneUtil.parts(new Date(start.date.getTime() + i * minutes * 60000), s.timezone).hour)
-      .filter((hour) => hour >= 23 || hour < 6).length;
+      ? `${label}: 1 post at ${format(slots[0])}.`
+      : `${label}: ${count} posts, from ${format(slots[0])} to ${format(last)}.`;
+    // Times other posts already have are skipped, so no two posts share a minute.
+    if (skipped > 0) preview.textContent += ` Skips ${pluralize(skipped, 'time')} other posts already have.`;
+    const night = slots.filter((date) => TimeZoneUtil.isNight(date, s.timezone)).length;
     preview.classList.toggle('is-warning', night > 0);
     if (night) preview.textContent += ` ${night === 1 ? '1 of them lands' : `${night} of them land`} between 11 pm and 6 am.`;
   }
@@ -245,7 +289,7 @@ export class OperationsView extends View {
       byId('sched-title').setAttribute('tabindex', '-1');
       byId('sched-title').focus({ preventScroll: true });
     });
-    byId('planner').addEventListener('toggle', () => { this.ui.prefs.plannerOpen = byId('planner').open; this.ui.saveUiPrefs(); this.render(); });
+    byId('planner').addEventListener('toggle', () => { this.ui.prefs.plannerOpen = byId('planner').open; if (!byId('planner').open) this.plannerScope = 'all'; this.ui.saveUiPrefs(); this.render(); });
     const savePlanInterval = () => {
       const minutes = this.intervalMinutes();
       if (minutes >= 1 && minutes <= LIMITS.maxPlanMinutes) { this.ui.prefs.planInterval = minutes; this.ui.saveUiPrefs(); }
@@ -289,8 +333,11 @@ export class OperationsView extends View {
     showToast(`Publish times set for ${pluralize(count, 'post')}.`, 'success');
     // Planning is done: the planner folds away so the editor moves up for review.
     byId('planner').open = false;
+    this.plannerScope = 'all';
     this.ui.prefs.planTimeOfDay = start.slice(11, 16);
     this.ui.saveUiPrefs();
+    // Keyboard focus moves on to the next step instead of falling back to the page.
+    if (!byId('sched-all').disabled) byId('sched-all').focus();
     this.ui.renderEditor();
   }
 

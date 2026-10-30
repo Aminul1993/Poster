@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 import requests
 
-from poster.config import LIMITS, TONES
+from poster.config import LANGUAGES, LIMITS, TONES
 from poster.content import FALLBACK_TAGS
 from tests.conftest import BLOB_ENV, post
 from tests.fakes import image_bytes
@@ -21,6 +21,7 @@ class TestSharedRules:
     def test_rules_reach_the_browser(self, client: Any) -> None:
         rules = page_config(client.get("/").get_data(as_text=True))["rules"]
         assert rules["tones"] == TONES
+        assert rules["languages"] == {key: value["label"] for key, value in LANGUAGES.items()}
         assert rules["hashtags"]["min"] == LIMITS["min_hashtags"] and rules["hashtags"]["max"] == LIMITS["max_hashtags"]
         assert rules["hashtags"]["fallback"] == list(FALLBACK_TAGS) and "would" in rules["hashtags"]["stopWords"]
         assert rules["maxTextChars"] == LIMITS["max_text_chars"]

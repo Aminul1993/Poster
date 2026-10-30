@@ -1,6 +1,6 @@
 /** The Settings drawer: preferences, server status, Buffer channels, import, export and reset. */
 import { connectToBuffer, exportConfig, importConfig, saveSettings, showToast } from '../app.js';
-import { LIMITS, SERVER, STORAGE_KEYS } from '../config.js';
+import { LANGUAGES, LIMITS, SERVER, STORAGE_KEYS } from '../config.js';
 import { serviceMeta } from '../services/buffer.js';
 import { SettingsModel } from '../settings.js';
 import { TimeZoneUtil } from '../time.js';
@@ -13,6 +13,7 @@ import { View } from './view.js';
 const SETTINGS_FIELDS = Object.freeze([
   ['model', 'set-model', 'text'],
   ['tone', 'set-tone', 'text'],
+  ['language', 'set-language', 'text'],
   ['aiConcurrency', 'set-ai-concurrency', 'number', 'Parallel requests'],
   ['extraInstructions', 'set-extra', 'text'],
   ['requireMedia', 'set-require-media', 'checkbox'],
@@ -27,6 +28,7 @@ export class SettingsView extends View {
     super(ui);
     this.channelDraft = { live: [], demo: [] };
     this.snapshot = '';
+    this.noteText = '';
   }
 
   /** Fills the timezone suggestions: typing "Dhaka" or "London" finds the zone among about 400. */
@@ -37,8 +39,13 @@ export class SettingsView extends View {
     byId('set-timezone').addEventListener('change', (event) => {
       // Accept any spelling the browser knows ("asia/dhaka") and store its canonical name.
       const value = event.target.value.trim();
-      if (TimeZoneUtil.isValid(value)) event.target.value = Intl.DateTimeFormat('en-US', { timeZone: value }).resolvedOptions().timeZone;
+      if (TimeZoneUtil.isValid(value)) event.target.value = TimeZoneUtil.modern(Intl.DateTimeFormat('en-US', { timeZone: value }).resolvedOptions().timeZone);
     });
+  }
+
+  /** The caption languages, from the server's list (the same keys it accepts). */
+  populateLanguages() {
+    byId('set-language').replaceChildren(...Object.entries(LANGUAGES).map(([value, label]) => el('option', { value, text: label })));
   }
 
   bind() {
@@ -48,7 +55,8 @@ export class SettingsView extends View {
     byId('close-settings').addEventListener('click', () => this.requestClose());
     byId('cancel-settings').addEventListener('click', () => this.requestClose());
     dialog.addEventListener('cancel', (event) => { event.preventDefault(); this.requestClose(); });
-    form.addEventListener('input', () => this.updateDirtyState());
+    dialog.addEventListener('close', () => { byId('settings-reason').hidden = true; });
+    form.addEventListener('input', () => { this.noteText = ''; this.updateDirtyState(); });
     form.addEventListener('change', (event) => {
       if (event.target.name === 'mode') this.renderChannelList();
       this.updateDirtyState();
@@ -71,11 +79,12 @@ export class SettingsView extends View {
     });
     byId('test-ollama').addEventListener('click', () => this.testOllama());
     byId('connect-buffer').addEventListener('click', () => this.connectBuffer());
+    // While the drawer is open, toasts would sit under its backdrop: what these actions did is said in its footer.
     byId('export-config').addEventListener('click', () => {
       const { settings } = this.read();
       settings.channelIds = this.channelDraft;
       exportConfig(settings);
-      showToast('Settings exported. Credentials stay on the server and are not included.', 'success');
+      this.note('Settings exported. Credentials stay on the server and are not included.');
     });
     byId('import-config').addEventListener('click', () => byId('import-input').click());
     byId('import-input').addEventListener('change', async (event) => {
@@ -85,16 +94,15 @@ export class SettingsView extends View {
       const result = await importConfig(file);
       if (result.ok) {
         this.fill(result.settings);
-        showToast(`Settings imported from "${truncate(file.name, 40)}"${result.ignored.length ? ` (${result.ignored.length} unknown keys ignored)` : ''}.`, 'success');
+        this.note(`Settings imported from "${truncate(file.name, 40)}"${result.ignored.length ? ` (${result.ignored.length} unknown keys ignored)` : ''}.`);
       } else {
         this.showErrors(Object.fromEntries(result.errors.map((message, i) => [`import${i}`, message])), 'The file was not imported');
-        showToast(result.errors[0], 'error', { title: 'Import failed' });
+        byId('settings-errors').scrollIntoView({ block: 'nearest' });
       }
     });
     byId('restore-defaults').addEventListener('click', () => {
       this.fill(SettingsModel.defaults(), { keepSnapshot: true });
-      this.updateDirtyState();
-      showToast('Server defaults loaded into the form. Click "Save settings" to apply them.', 'info');
+      this.note('Server defaults loaded into the form. Save settings to apply them.');
     });
     byId('reset-all').addEventListener('click', () => this.resetAll());
     byId('clear-drafts').addEventListener('click', async () => {
@@ -108,8 +116,14 @@ export class SettingsView extends View {
       this.store.clearDrafts();
       this.notifier.log('info', 'settings', `Cleared ${pluralize(count, 'saved draft')}.`);
       this.renderStorageUsage();
-      showToast('Saved drafts cleared.', 'success');
+      this.note('Saved drafts cleared.');
     });
+  }
+
+  /** @param {string} text what an action in the drawer just did, shown in its footer until the form changes */
+  note(text) {
+    this.noteText = text;
+    this.updateDirtyState();
   }
 
   /** @returns {'demo'|'live'} the mode selected in the settings form */
@@ -117,22 +131,39 @@ export class SettingsView extends View {
     return document.querySelector('input[name="mode"]:checked')?.value === 'live' ? 'live' : 'demo';
   }
 
-  /** @param {string} [sectionId] section to scroll to */
-  open(sectionId) {
+  /**
+   * @param {string} [sectionId] section to scroll to
+   * @param {{title: string, message: string}} [reason] why Poster sent the owner here (it refused to go Live or
+   *   to run): said in the drawer itself, since a toast would sit under the drawer's backdrop
+   */
+  open(sectionId, reason) {
     const dialog = byId('settings-dialog');
     if (!dialog.open) {
+      this.noteText = '';
       this.fill(this.settings);
       byId('ollama-test-result').hidden = true;
       byId('buffer-test-result').hidden = true;
       dialog.showModal();
     }
-    if (sectionId) {
-      const section = byId(sectionId);
-      section?.scrollIntoView({ block: 'start' });
-      section?.querySelector('input:not([type="hidden"]), select, textarea')?.focus({ preventScroll: true });
+    const section = sectionId ? byId(sectionId) : null;
+    this.showReason(section, reason);
+    if (section) {
+      section.scrollIntoView({ block: 'start' });
+      (reason ? byId('settings-reason') : section.querySelector('input:not([type="hidden"]), select, textarea'))?.focus({ preventScroll: true });
     } else {
-      byId('close-settings').focus();
+      (reason ? byId('settings-reason') : byId('close-settings')).focus();
     }
+  }
+
+  /** The reason sits under the section's heading and description, so it is on screen when the drawer scrolls there. */
+  showReason(section, reason) {
+    const box = byId('settings-reason');
+    box.hidden = !reason;
+    if (!reason) return;
+    if (section) (section.querySelector('.section-desc') || section.querySelector('h3')).after(box);
+    else byId('settings-errors').after(box);
+    byId('settings-reason-title').textContent = reason.title;
+    byId('settings-reason-text').textContent = reason.message;
   }
 
   /**
@@ -219,7 +250,7 @@ export class SettingsView extends View {
   updateDirtyState() {
     const dialog = byId('settings-dialog');
     if (!dialog.open) return;
-    byId('settings-dirty').textContent = this.isDirty() ? 'Unsaved changes' : '';
+    byId('settings-dirty').textContent = [this.noteText, this.isDirty() ? 'Unsaved changes' : ''].filter(Boolean).join(' · ');
   }
 
   isDirty() {
@@ -256,7 +287,7 @@ export class SettingsView extends View {
     byId('settings-error-list').replaceChildren(...messages.map((m) => el('li', { text: m })));
   }
 
-  saveFromForm() {
+  async saveFromForm() {
     const { settings, errors: formErrors } = this.read();
     const check = this.validation.validateSettings(settings);
     const errors = { ...check.errors, ...formErrors };
@@ -266,8 +297,15 @@ export class SettingsView extends View {
       const firstKey = Object.keys(errors)[0];
       const field = SETTINGS_FIELDS.find(([key]) => key === firstKey);
       if (field) byId(field[1]).focus({ preventScroll: false });
-      showToast(`Fix ${pluralize(Object.keys(errors).length, 'setting')} before saving.`, 'error');
       return;
+    }
+    // Saving the Live option switches modes, so it asks first, exactly like the header badge.
+    if (settings.mode === 'live' && this.settings.mode !== 'live') {
+      if (this.scheduler.isRunning) {
+        this.showErrors({ mode: 'Wait for the current operation to finish before switching modes.' }, 'Not saved yet');
+        return;
+      }
+      if (!(await this.ui.confirmLive(settings))) return;
     }
     const result = saveSettings(settings);
     if (!result.ok) {
@@ -437,6 +475,6 @@ export class SettingsView extends View {
     this.fill(this.app.settings);
     this.ui.onSettingsChanged(previous, this.app.settings);
     this.notifier.log('warn', 'settings', 'Reset all settings to the server defaults.');
-    showToast('All settings were reset to the server defaults.', 'success');
+    this.note('All settings were reset to the server defaults.');
   }
 }

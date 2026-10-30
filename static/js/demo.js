@@ -80,6 +80,16 @@ export const DEMO_COLOR_LINES = Object.freeze({
   neutral: ['Simple tones, nothing extra.', '#neutraltones']
 });
 
+/** One sample per caption language other than English, so a Bengali (or Hindi, or Tamil) draft can be tried in Demo. */
+export const DEMO_LANGUAGE_SAMPLES = Object.freeze({
+  bn: ['কিছু মুহূর্ত অনেক দিন মনে থেকে যায়।', 'আজকের দিনটা ঠিক এমনই সুন্দর ছিল।', '#বাংলা'],
+  'bn-en': ['কিছু মুহূর্ত অনেক দিন মনে থেকে যায়, and this is one of them.', 'আজকের mood ঠিক এমনই। Who is with me?', '#বাংলা'],
+  hi: ['कुछ पल हमेशा याद रह जाते हैं।', 'आज का दिन बिल्कुल ऐसा ही खूबसूरत था।', '#हिंदी'],
+  'hi-en': ['कुछ पल हमेशा याद रह जाते हैं, and this is one of them.', 'आज का mood बिल्कुल ऐसा ही। Who is with me?', '#हिंदी'],
+  ta: ['சில தருணங்கள் எப்போதும் நினைவில் இருக்கும்.', 'இன்றைய நாள் இப்படித்தான் அழகாக இருந்தது.', '#தமிழ்'],
+  'ta-en': ['சில தருணங்கள் எப்போதும் நினைவில் இருக்கும், and this is one of them.', 'இன்றைய mood இப்படித்தான். Who is with me?', '#தமிழ்']
+});
+
 export const DEMO_TONE_ENDINGS = Object.freeze({
   friendly: ' What do you think?', professional: '', playful: ' ✨', inspirational: ' Keep chasing what lights you up.',
   luxury: ' Crafted for those who notice the details.', bold: ' Do not scroll past this one.'
@@ -108,10 +118,11 @@ export const DemoContentGenerator = {
     const lib = DEMO_LIBRARY[category];
     const [colorLine, colorTag] = DEMO_COLOR_LINES[stats.colorName] || DEMO_COLOR_LINES.neutral;
     const ending = DEMO_TONE_ENDINGS[settings.tone] ?? '';
-    const description = `${lib.captions[seed % lib.captions.length]} ${colorLine}${ending}`.trim();
-    const alternative = lib.alts[(seed >>> 3) % lib.alts.length];
+    const sample = DEMO_LANGUAGE_SAMPLES[settings.language];
+    const description = sample ? sample[0] : `${lib.captions[seed % lib.captions.length]} ${colorLine}${ending}`.trim();
+    const alternative = sample ? sample[1] : lib.alts[(seed >>> 3) % lib.alts.length];
     const rotated = [...lib.tags.slice(seed % lib.tags.length), ...lib.tags.slice(0, seed % lib.tags.length)];
-    const hashtags = [...words.slice(0, 3).map((w) => `#${w}`), colorTag, ...rotated].slice(0, 10 + (seed % 6));
+    const hashtags = [...(sample ? [sample[2]] : []), ...words.slice(0, 3).map((w) => `#${w}`), colorTag, ...rotated].slice(0, 10 + (seed % 6));
     const bonus = { Pets: 8, Food: 5, Travel: 4, Fashion: 3 }[category] || 0;
     const balance = stats.brightness > 0.3 && stats.brightness < 0.8 ? 6 : 0;
     const score = clamp(Math.round(54 + stats.saturation * 24 + balance + bonus + ((seed >>> 5) % 17) - 8), 28, 97);
@@ -134,7 +145,7 @@ export class DemoOllamaService extends OllamaService {
   async generateContent(item, { signal, settings } = {}) {
     const s = settings ?? this.getSettings();
     await sleep(650 + (hashString(item.fingerprint || item.name) % 1100), signal);
-    const raw = DemoContentGenerator.generate(item, s);
+    const raw = DemoContentGenerator.generate(item, { ...s, language: item.language || s.language });
     return { ...this.validation.normalizeGeneratedContent(raw, s), model: `${s.model} (demo)`, repaired: false };
   }
 }

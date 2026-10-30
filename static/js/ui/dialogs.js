@@ -6,10 +6,10 @@ export class Dialogs {
   /**
    * Shows a modal with custom choices.
    * @param {{title: string, message: string, choices: Array<{value: string, label: string, primary?: boolean, danger?: boolean, disabled?: boolean}>,
-   *          variant?: 'default'|'danger', cancelLabel?: string, symbol?: string}} options
+   *          variant?: 'default'|'danger', cancelLabel?: string, symbol?: string, focusCancel?: boolean}} options
    * @returns {Promise<string|null>} chosen value, or null when cancelled
    */
-  choose({ title, message, choices, variant = 'default', cancelLabel = 'Cancel', symbol = 'alert' }) {
+  choose({ title, message, choices, variant = 'default', cancelLabel = 'Cancel', symbol = 'alert', focusCancel = false }) {
     const dialog = byId('confirm-dialog');
     if (dialog.open) return Promise.resolve(null);
     return new Promise((resolve) => {
@@ -31,17 +31,17 @@ export class Dialogs {
       dialog.addEventListener('close', onClose);
       dialog.showModal();
       // Enter must never destroy anything: focus the safe primary choice, otherwise Cancel.
-      (buttons.find((b) => !b.disabled && b.classList.contains('btn-primary')) || cancel).focus();
+      ((!focusCancel && buttons.find((b) => !b.disabled && b.classList.contains('btn-primary'))) || cancel).focus();
     });
   }
 
   /**
-   * @param {{title: string, message: string, confirmLabel?: string, danger?: boolean, symbol?: string}} options
+   * @param {{title: string, message: string, confirmLabel?: string, danger?: boolean, symbol?: string, focusCancel?: boolean}} options
    * @returns {Promise<boolean>}
    */
-  async confirm({ title, message, confirmLabel = 'Confirm', danger = false, symbol }) {
+  async confirm({ title, message, confirmLabel = 'Confirm', danger = false, symbol, focusCancel }) {
     const value = await this.choose({
-      title, message, symbol, variant: danger ? 'danger' : 'default',
+      title, message, symbol, focusCancel, variant: danger ? 'danger' : 'default',
       choices: [{ value: 'confirm', label: confirmLabel, primary: !danger, danger }]
     });
     return value === 'confirm';

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-29T12:07:02Z",
+  "generatedAt": "2026-10-29T13:23:53Z",
   "title": "Design System: Poster",
   "extensions": {
     "colorMeta": {
@@ -594,7 +594,7 @@
     "rules": [
       {
         "name": "The One Signal Rule",
-        "body": "Dispatch Indigo means \"act here\" or \"this is selected\". There is one next action per stage, and only it is filled indigo. In the AI panel that is **All images** while posts lack captions, **Apply to all** while posts need a time, and **All ready** while posts are ready; when the batch is done, nothing in the panel is indigo. The editor's **Schedule post** is never indigo. Dialogs and the Settings drawer each have their own single primary (**Save settings**). Never use indigo as decoration or as a background for a whole region.",
+        "body": "Dispatch Indigo means \"act here\" or \"this is selected\". There is one next action per stage, and only it is filled indigo. In the AI panel that is **All images** while posts lack captions, **Apply to all** while posts need a time, and **All ready** while posts are ready; when the batch is done, nothing in the panel is indigo. Once every image has a caption, **All images** can only replace them, so it becomes a ghost **Regenerate all**. The editor's **Schedule post** is never indigo. The indigo button is also the one Ctrl+Shift+Enter (⌘ on a Mac) presses: it carries `aria-keyshortcuts` and a \"Next step\" tooltip, and a folded planner opens rather than applying. Dialogs and the Settings drawer each have their own single primary (**Save settings**). Never use indigo as decoration or as a background for a whole region.",
         "section": "colors"
       },
       {
@@ -643,12 +643,15 @@
       "**Do** give each action group exactly one primary (Dispatch Indigo) button. Everything else is default, ghost or danger.",
       "**Do** pair every status colour with a label, dot or icon (The Status Speaks Twice Rule).",
       "**Do** use tabular numbers for every count, counter, score and time.",
+      "**Do** offer the caption language as an instruction to the model, never as a promise: Poster does not claim a draft is in the language asked for.",
       "**Do** build new panels as a card with a header row, a hairline and a 20px body, on 14px corners with the Whisper shadow.",
       "**Do** show a post's own words at 13px or larger with a line-height of at least 1.5, and set `lang` from its script.",
       "**Do** keep the 2px focus outline (or the 3px field ring) on everything interactive, and keep reduced-motion support.",
       "**Do** keep Muted Slate for any secondary text that has to be read; it passes 4.5:1 everywhere.",
       "**Do** say \"Demo mode (not in Buffer)\" wherever Demo results are reported, and nowhere else more than once: in Demo the service labels are hidden and the AI panel says \"(simulated)\".",
-      "**Do** count posts the way the owner does, one per image, and give Buffer's per-channel count in brackets."
+      "**Do** count posts the way the owner does, one per image, and give Buffer's per-channel count in brackets.",
+      "**Do** give each post one editor: a post from the open gallery is edited in the post editor (Edit in Buffer, also from its row in Scheduled posts); only a post from elsewhere uses the Scheduled-post dialog. Write every Buffer edit back into the draft, so the batch and Buffer never disagree.",
+      "**Do** show time zones under their current IANA names (Asia/Kolkata, not Asia/Calcutta)."
     ],
     "donts": [
       "**Don't** drift into growth-hacker SaaS: no gradients, glows, purple-to-pink washes or decorative sparkles. The sparkles icon labels AI generation actions and is never used as ornament.",
@@ -660,7 +663,8 @@
       "**Don't** load fonts, icons or styles from another origin. The Content Security Policy forbids it, and the icon sprite lives in `templates/index.html`.",
       "**Don't** raise resting shadows above Whisper, or colour a shadow.",
       "**Don't** give list items or alerts a coloured side stripe.",
-      "**Don't** let a post that is already in Buffer be edited anywhere but its own Scheduled-posts dialog."
+      "**Don't** disable a post that is in Buffer to lock it: make its fields read-only, so its words stay readable and in the Tab order.",
+      "**Don't** show a toast while a modal is open, or pair a toast with opening one: it sits under the backdrop. Say it in the drawer or dialog."
     ]
   }
 }

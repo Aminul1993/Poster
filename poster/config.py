@@ -281,3 +281,14 @@ TONES = {
     "luxury": "elegant, refined and exclusive",
     "bold": "energetic, confident and attention-grabbing",
 }
+
+# Caption languages: the name shown in the dashboard, and how the prompt asks for it.
+LANGUAGES = {
+    "en": {"label": "English", "prompt": "English"},
+    "bn": {"label": "Bengali", "prompt": "Bengali, in Bangla script"},
+    "bn-en": {"label": "Bengali + English", "prompt": "Bengali in Bangla script, mixed naturally with English words and phrases"},
+    "hi": {"label": "Hindi", "prompt": "Hindi, in Devanagari script"},
+    "hi-en": {"label": "Hindi + English", "prompt": "Hindi in Devanagari script, mixed naturally with English words and phrases"},
+    "ta": {"label": "Tamil", "prompt": "Tamil, in Tamil script"},
+    "ta-en": {"label": "Tamil + English", "prompt": "Tamil in Tamil script, mixed naturally with English words and phrases"},
+}

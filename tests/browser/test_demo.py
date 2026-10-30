@@ -30,6 +30,8 @@ def test_upload_generate_plan_schedule_edit_delete(demo: Page) -> None:
 
     page.click("#gen-all")
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    # The keyboard follows the work: the run's end lands on the next step, the planner's start time.
+    expect(page.locator("#plan-start")).to_be_focused()
     expect(page.locator("#kpi-generated")).to_have_text("3")
     expect(page.locator("#ed-description")).not_to_have_value("")
     # Captions alone are not ready: nothing can be scheduled until each post has a time.
@@ -50,12 +52,18 @@ def test_upload_generate_plan_schedule_edit_delete(demo: Page) -> None:
     page.fill("#ed-tag-input", "sunny")
     page.press("#ed-tag-input", "Enter")
     expect(page.locator("#ed-tags .tag-text", has_text="#sunny")).to_have_count(1)
+    # A tag that cannot be added stays in the field to be fixed, not thrown away.
+    page.fill("#ed-tag-input", "!!!")
+    page.press("#ed-tag-input", "Enter")
+    expect(page.locator("#ed-tag-input")).to_have_value("!!!")
+    page.fill("#ed-tag-input", "")
 
     start = local_input(2)
     page.fill("#plan-start", start)
     expect(page.locator("#plan-preview")).to_contain_text("Apply to all: 3 posts")
     page.click("#plan-all")
     toast(page, "Publish times set for 3 posts.")
+    expect(page.locator("#sched-all")).to_be_focused()
     expect(page.locator("#ed-schedule")).to_have_value(start)
     expect(page.locator("#sched-all-count")).to_have_text("3")
     expect(page.locator("#sched-needs-time")).to_be_hidden()
@@ -72,16 +80,25 @@ def test_upload_generate_plan_schedule_edit_delete(demo: Page) -> None:
     expect(page.locator("#kpi-scheduled-label")).to_contain_text("6 channel posts")
     expect(page.locator("#op-current")).to_contain_text("3 posts queued in Demo mode (not in Buffer)")
     expect(page.locator("#op-view")).to_be_visible()
-    # A post already in Buffer is not edited in the editor: its fields are locked.
-    expect(page.locator("#ed-description")).to_be_disabled()
+    expect(page.locator("#op-view")).to_be_focused()
+    # Each row names the image it came from.
+    expect(page.locator("#sched-list .sched-source", has_text="beach.jpg")).to_have_count(1)
+    # A post already in Buffer is read-only in the editor until "Edit in Buffer" (read-only, not disabled).
+    expect(page.locator("#ed-description")).not_to_be_editable()
+    expect(page.locator("#editor")).to_have_class(re.compile("is-locked"))
     expect(page.locator("#planner")).not_to_have_attribute("open", "")
+    # Every row's buttons name their post, so a list of buttons can tell the rows apart.
+    expect(page.locator("#sched-list [data-action=edit]").first).to_have_attribute("aria-label", re.compile(r"^Edit post #\d · \w+\.jpg on "))
 
     page.evaluate("window.secondRow = document.querySelector('#sched-list > li:nth-child(2)')")
+    # A post from this batch opens in the post editor, with the same fields it was written in.
     page.locator("#sched-list [data-action=edit]").first.click()
-    expect(page.locator("#post-dialog")).to_be_visible()
-    page.fill("#post-text", "Edited text for the first post")
-    page.click("#post-save")
-    toast(page, "The post was updated in Demo mode (not in Buffer).")
+    expect(page.locator("#post-dialog")).to_be_hidden()
+    expect(page.locator("#ed-description")).to_be_focused()
+    expect(page.locator("#ed-description")).to_be_editable()
+    page.fill("#ed-description", "Edited text for the first post")
+    page.click("#ed-buffer-save")
+    toast(page, "Saved in Demo mode (not in Buffer) on 2 channels.")
     # The batch mirrors Buffer: the image's card now shows the edited text.
     expect(page.locator("#gallery .thumb-caption", has_text="Edited text for the first post")).to_have_count(1)
     expect(page.locator("#sched-list .sched-text", has_text="Edited text for the first post")).to_have_count(1)
@@ -91,8 +108,11 @@ def test_upload_generate_plan_schedule_edit_delete(demo: Page) -> None:
     confirm(page, "Delete post (2 channels)")
     toast(page, "The post was deleted in Demo mode (not in Buffer).")
     expect(page.locator("#sched-list > li")).to_have_count(2)
-    # A post deleted on purpose waits out of "All ready" until it gets a new time.
+    # The keyboard stays in the list, on the row now in the deleted one's place.
+    expect(page.locator("#sched-list > li").first.locator("[data-action=edit]")).to_be_focused()
+    # A post deleted on purpose waits out of "All ready" until it gets a new time, and the batch line counts it.
     expect(page.locator("#gallery .thumb-status", has_text="Removed from Buffer")).to_have_count(1)
+    expect(page.locator("#kpi-removed")).to_have_text("1")
     expect(page.locator("#sched-all")).to_be_disabled()
 
     page.click('label:has(input[name="sched-filter"][value="published"])')
@@ -104,7 +124,7 @@ def test_upload_generate_plan_schedule_edit_delete(demo: Page) -> None:
 def test_unicode_hashtags_survive(demo: Page) -> None:
     page = demo
     add_images(page, ("dhaka.jpg", jpeg((200, 40, 90))))
-    page.click("#ed-generate")
+    page.click("#ed-blank-generate")
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
     make_room_for_tags(page, 3)
     rally = "#র\u200d্যালি"  # the zero-width joiner picks the ra-phala form and must survive
@@ -133,8 +153,12 @@ def test_posts_without_a_time_are_caught_before_scheduling(demo: Page) -> None:
 def test_regenerated_content_can_be_restored(demo: Page) -> None:
     page = demo
     add_images(page, ("cafe.jpg", jpeg((120, 80, 40))))
-    page.click("#ed-generate")
+    page.click("#ed-blank-generate")
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    # Content exactly as the model wrote it is regenerated without asking; Restore still brings it back.
+    page.click("#ed-generate")
+    expect(page.locator("#ed-restore")).to_be_visible()
+    expect(page.locator("#confirm-dialog")).to_be_hidden()
     page.fill("#ed-description", "My own words, written by hand")
     page.click("#ed-generate")
     expect(page.locator("#confirm-dialog #confirm-actions button", has_text="Cancel")).to_be_focused()
@@ -150,8 +174,73 @@ def test_switching_to_live_asks_first(demo: Page) -> None:
     page = demo
     page.click("#mode-badge")
     expect(page.locator("#confirm-title")).to_have_text("Switch to Live mode?")
+    # Going Live is the risky choice, so Cancel has the focus.
+    expect(page.locator("#confirm-actions button", has_text="Cancel")).to_be_focused()
     confirm(page, "Cancel")
     expect(page.locator("#mode-badge-label")).to_have_text("Demo mode")
+
+    # Saving Live in Settings asks the same question.
+    page.click("#open-settings")
+    page.click('label.mode-option:has(input[value="live"])')
+    page.click("#save-settings")
+    expect(page.locator("#confirm-title")).to_have_text("Switch to Live mode?")
+    confirm(page, "Cancel")
+    expect(page.locator("#settings-dialog")).to_be_visible()
+    expect(page.locator("#mode-badge-label")).to_have_text("Demo mode")
+
+
+def test_scheduled_post_is_edited_in_place(demo: Page) -> None:
+    page = demo
+    add_images(page, ("cafe.jpg", jpeg((120, 80, 40))))
+    page.click("#ed-blank-generate")
+    expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    page.fill("#ed-schedule", local_input(2, 9))
+    page.click("#ed-schedule-post")
+    expect(page.locator("#op-title")).to_have_text("Scheduling complete")
+    expect(page.locator("#ed-description")).not_to_be_editable()
+    expect(page.locator("#ed-result-edit")).to_have_text("Edit post")
+
+    page.click("#ed-result-edit")
+    expect(page.locator("#ed-description")).to_be_editable()
+    expect(page.locator("#ed-description")).to_be_focused()
+    # Only the words and the time live in Buffer; the category stays as scheduled.
+    expect(page.locator("#ed-category")).not_to_be_editable()
+    page.fill("#ed-description", "Morning coffee, edited in place")
+    # Until it is saved, everything else still shows the post as Buffer has it.
+    expect(page.locator("#gallery .thumb-caption", has_text="edited in place")).to_have_count(0)
+    page.click("#ed-buffer-save")
+    toast(page, "Saved in Demo mode (not in Buffer) on 2 channels.")
+    expect(page.locator("#ed-description")).not_to_be_editable()
+    expect(page.locator("#ed-result-edit")).to_be_focused()
+    expect(page.locator("#sched-list .sched-text", has_text="Morning coffee, edited in place")).to_have_count(1)
+    expect(page.locator("#gallery .thumb-caption", has_text="edited in place")).to_have_count(1)
+
+    page.click("#ed-result-edit")
+    page.fill("#ed-description", "A change I do not want")
+    page.click("#ed-buffer-cancel")
+    expect(page.locator("#ed-description")).to_have_value("Morning coffee, edited in place")
+
+    # Deleted in Scheduled posts, the post says how to put it back, and the draft kept the edit.
+    page.locator("#sched-list [data-action=delete-post]").first.click()
+    confirm(page, "Delete post")
+    expect(page.locator("#ed-result")).to_contain_text("Schedule post puts it back at")
+    expect(page.locator("#ed-description")).to_have_value("Morning coffee, edited in place")
+
+
+def test_planner_fits_around_times_already_taken(demo: Page) -> None:
+    page = demo
+    add_images(page, ("one.jpg", jpeg((90, 20, 20))), ("two.jpg", jpeg((20, 90, 20))), ("three.jpg", jpeg((20, 20, 90))))
+    page.click("#gen-all")
+    expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    start = local_input(2, 9)
+    page.locator("#gallery .thumb-card").first.locator("[data-action=activate]").click()
+    page.fill("#ed-schedule", start)
+    page.fill("#plan-start", start)
+    expect(page.locator("#plan-preview")).to_contain_text("Apply to all: 2 posts")
+    expect(page.locator("#plan-preview")).to_contain_text("Skips 1 time other posts already have.")
+    page.click("#plan-all")
+    page.locator("#gallery .thumb-card").nth(1).locator("[data-action=activate]").click()
+    expect(page.locator("#ed-schedule")).not_to_have_value(start)
 
 
 def test_list_view_edits_captions_and_times_in_place(demo: Page) -> None:
@@ -192,6 +281,11 @@ def test_gallery_management(demo: Page) -> None:
 
     page.locator("#gallery .thumb-card").first.locator("[data-action=remove]").click()
     toast(page, 'Removed "b.jpg".')
+    expect(names).to_have_text(["c.jpg", "a.jpg"])
+    # Undo puts the image back where it was.
+    page.locator("#toast-region .toast", has_text='Removed "b.jpg".').locator(".toast-action").click()
+    expect(names).to_have_text(["b.jpg", "c.jpg", "a.jpg"])
+    page.locator("#gallery .thumb-card").first.locator("[data-action=remove]").click()
     expect(names).to_have_text(["c.jpg", "a.jpg"])
 
     page.click("#clear-images")
@@ -264,7 +358,8 @@ def test_settings_save_export_import(demo: Page, tmp_path: Path) -> None:
     path = tmp_path / "settings.json"
     path.write_text(json.dumps(exported), encoding="utf-8")
     page.set_input_files("#import-input", str(path))
-    toast(page, 'Settings imported from "settings.json"')
+    # While the drawer is open, what it did is said in its footer (a toast would sit under its backdrop).
+    expect(page.locator("#settings-dirty")).to_contain_text('Settings imported from "settings.json"')
     expect(page.locator("#set-tone")).to_have_value("luxury")
     page.click("#cancel-settings")
     expect(page.locator("#settings-dialog")).to_be_hidden()
@@ -286,7 +381,7 @@ def test_reset_all_settings(demo: Page, problems: list[str]) -> None:
     page.click("#open-settings")
     page.click("#reset-all")
     confirm(page, "Reset all settings")
-    toast(page, "All settings were reset to the server defaults.")
+    expect(page.locator("#settings-dirty")).to_contain_text("All settings were reset to the server defaults.")
     errors = list(problems)
     problems.clear()
     assert not errors
@@ -309,3 +404,77 @@ def test_theme_and_activity_log(demo: Page) -> None:
     page.click("#clear-log")
     confirm(page, "Clear log")
     expect(page.locator("#log-count")).to_have_text("0")
+
+
+def test_caption_language_for_the_batch_and_one_post(demo: Page) -> None:
+    page = demo
+    page.click("#open-settings")
+    page.select_option("#set-language", "hi")
+    page.click("#save-settings")
+    expect(page.locator("#ai-sub")).to_contain_text("Hindi")
+    add_images(page, ("market.jpg", jpeg((150, 60, 20))), ("ghat.jpg", jpeg((20, 60, 150))))
+    expect(page.locator("#ed-language option").first).to_have_text("Batch setting (Hindi)")
+    # One post asks for its own language; the other follows the batch.
+    page.select_option("#ed-language", "bn-en")
+    page.click("#gen-all")
+    expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    expect(page.locator("#ed-description")).to_have_value(re.compile("[ঀ-৿]"))
+    expect(page.locator("#ed-description")).to_have_attribute("lang", "bn")
+    page.click("#ed-next")
+    expect(page.locator("#ed-language")).to_have_value("")
+    expect(page.locator("#ed-description")).to_have_value(re.compile("[ऀ-ॿ]"))
+
+
+def test_edit_selected_hashtags_and_category_with_undo(demo: Page) -> None:
+    page = demo
+    add_images(page, ("one.jpg", jpeg((90, 20, 20))), ("two.jpg", jpeg((20, 90, 20))), ("three.jpg", jpeg((20, 20, 90))))
+    page.click("#gen-all")
+    expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    expect(page.locator("#bulk-edit")).to_be_hidden()
+    page.check("#select-all")
+    page.click("#bulk-edit")
+    expect(page.locator("#bulk-title")).to_have_text("Edit 3 selected posts")
+    expect(page.locator("#bulk-add")).to_be_focused()
+    page.click("#bulk-apply")
+    expect(page.locator("#bulk-error")).to_have_text("Add a hashtag, tick one to remove, or enter a category.")
+    first_tag = page.locator("#bulk-remove input").first.get_attribute("value")
+    page.locator("#bulk-remove .bulk-tag").first.click()
+    page.fill("#bulk-add", "monsoon #ঢাকা")
+    page.fill("#bulk-category", "Street")
+    page.click("#bulk-apply")
+    expect(page.locator("#bulk-dialog")).to_be_hidden()
+    toast(page, "Updated 3 posts: added #monsoon #ঢাকা")
+    expect(page.locator("#ed-tags .tag-text", has_text="#monsoon")).to_have_count(1)
+    expect(page.locator("#ed-tags .tag-text").filter(has_text=re.compile(f"^{re.escape(first_tag)}$"))).to_have_count(0)
+    expect(page.locator("#ed-category")).to_have_value("Street")
+    page.locator("#toast-region .toast", has_text="Updated 3 posts").locator(".toast-action").click()
+    expect(page.locator("#ed-tags .tag-text", has_text="#monsoon")).to_have_count(0)
+    expect(page.locator("#ed-category")).not_to_have_value("Street")
+
+
+def test_next_step_shortcut_and_shortcut_list(demo: Page) -> None:
+    page = demo
+    add_images(page, ("one.jpg", jpeg((90, 20, 20))), ("two.jpg", jpeg((20, 90, 20))))
+    expect(page.locator("#gen-all")).to_have_attribute("aria-keyshortcuts", "Control+Shift+Enter")
+    page.locator("body").focus()
+    page.keyboard.press("Control+Shift+Enter")
+    expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    # Next, from the planner's start time where the run's end put the cursor: Apply to all...
+    expect(page.locator("#plan-start")).to_be_focused()
+    expect(page.locator("#plan-all")).to_have_attribute("aria-keyshortcuts", "Control+Shift+Enter")
+    page.keyboard.press("Control+Shift+Enter")
+    toast(page, "Publish times set for 2 posts.")
+    # ...then All ready schedules them.
+    page.keyboard.press("Control+Shift+Enter")
+    expect(page.locator("#op-title")).to_have_text("Scheduling complete")
+    # "?" is just a character in a field; elsewhere it lists the shortcuts.
+    page.click('label:has(input[name="gallery-view"][value="list"])')
+    page.locator("#gallery .list-caption").first.focus()
+    page.keyboard.press("?")
+    expect(page.locator("#shortcuts-dialog")).to_be_hidden()
+    page.evaluate("document.activeElement.blur()")
+    page.keyboard.press("?")
+    expect(page.locator("#shortcuts-dialog")).to_be_visible()
+    expect(page.locator("#shortcuts-close")).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(page.locator("#shortcuts-dialog")).to_be_hidden()

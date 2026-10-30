@@ -154,7 +154,7 @@ export class SchedulerService extends EventTarget {
       const result = await ollama.generateContent(item, { signal, onRetry, settings });
       const replaced = hasContent(item) ? item.content : item.previousContent;
       this.store.update(item.id, {
-        busy: null, content: result.content, previousContent: replaced, result: null, generatedAt: new Date().toISOString(), showErrors: false
+        busy: null, content: result.content, generatedContent: result.content, previousContent: replaced, result: null, generatedAt: new Date().toISOString(), showErrors: false
       }, { reason: 'generated' });
       const c = result.content;
       this.notifier.log('success', 'ai', `Generated content for "${item.name}": ${c.category}, ${pluralize(c.hashtags.length, 'hashtag')}, estimated engagement ${c.engagement_score}/100.`, [result.repaired ? 'Recovered from a malformed first reply.' : '', ...result.issues].filter(Boolean).join(' '));
@@ -222,7 +222,7 @@ export class SchedulerService extends EventTarget {
       this.store.update(item.id, {
         busy: null, error: null, errorHint: '', errorPhase: null, showErrors: false,
         result: {
-          dueAt: check.date.toISOString(), timezone: settings.timezone, mode: buffer.isDemo ? 'demo' : 'live', postIds,
+          text, dueAt: check.date.toISOString(), timezone: settings.timezone, mode: buffer.isDemo ? 'demo' : 'live', postIds,
           channels: result.posts.map((p) => buffer.channelName(p.channelId, settings)), partial: failures.length > 0, failures
         }
       }, { reason: 'scheduled' });
@@ -329,6 +329,35 @@ export class SchedulerService extends EventTarget {
   }
 
   /**
+   * Publish times (in whole minutes) already taken by posts the planner leaves alone, so new times fit around them.
+   * @param {object[]} targets the posts being planned @returns {Set<number>}
+   */
+  takenTimes(targets) {
+    const settings = this.getSettings();
+    const taken = new Set();
+    for (const item of this.store.all()) {
+      if (targets.includes(item)) continue;
+      const result = countedResult(item, settings.mode);
+      const due = result?.dueAt ? new Date(result.dueAt) : item.scheduleLocal ? TimeZoneUtil.zonedToUtc(item.scheduleLocal, settings.timezone)?.date : null;
+      if (due) taken.add(Math.floor(due.getTime() / 60000));
+    }
+    return taken;
+  }
+
+  /**
+   * The times the planner gives `count` posts: start, start + interval, … skipping minutes another post has.
+   * @param {number} count @param {Date} start @param {number} intervalMinutes @param {Set<number>} taken @returns {Date[]}
+   */
+  planSlots(count, start, intervalMinutes, taken) {
+    const slots = [];
+    for (let k = 0; slots.length < count && k <= count + taken.size; k += 1) {
+      const when = new Date(start.getTime() + k * intervalMinutes * 60000);
+      if (!taken.has(Math.floor(when.getTime() / 60000))) slots.push(when);
+    }
+    return slots;
+  }
+
+  /**
    * Assigns publish times in gallery order: start, start + interval, …
    * Already-scheduled posts are never changed. A scheduling error left on a post is cleared, since its time changed.
    * @param {object[]} items @param {string} startLocal @param {number} intervalMinutes @param {boolean} overwrite
@@ -339,8 +368,10 @@ export class SchedulerService extends EventTarget {
     const start = TimeZoneUtil.zonedToUtc(startLocal, settings.timezone);
     if (!start) throw new Error('Choose a valid start date and time.');
     const targets = this.plannable(items, overwrite);
+    const slots = this.planSlots(targets.length, start.date, intervalMinutes, this.takenTimes(targets));
     targets.forEach((item, slot) => {
-      const when = new Date(start.date.getTime() + slot * intervalMinutes * 60000);
+      const when = slots[slot];
+      if (!when) return;
       const clears = {
         ...(item.errorPhase === 'schedule' ? { error: null, errorHint: '', errorPhase: null } : {}),
         // A post deleted from Buffer comes back into the batch once it has a new time.

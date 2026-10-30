@@ -1,6 +1,11 @@
 /** DOM helpers shared by the views. */
 import { el } from '../util.js';
 
+/** The next-step shortcut's modifier: ⌘ on Apple keyboards, Ctrl elsewhere (for aria-keyshortcuts and labels). */
+export const MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '')
+  ? Object.freeze({ aria: 'Meta', label: '⌘' })
+  : Object.freeze({ aria: 'Control', label: 'Ctrl' });
+
 /** @param {string} id @returns {any} */
 export function byId(id) {
   return document.getElementById(id);

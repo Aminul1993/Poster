@@ -63,6 +63,8 @@
     <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 16V4M3 8l4-4 4 4M17 8v12M21 16l-4 4-4-4"/></symbol>
     <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M10 13h.01M14 13h.01M18 13h.01M8 16h8"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
     <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></symbol>
     <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></symbol>
     <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></symbol>
@@ -103,6 +105,9 @@
     <button type="button" class="btn btn-ghost btn-icon" id="theme-toggle" aria-label="Switch to dark theme" title="Toggle theme">
       <svg class="icon"><use href="#i-moon"/></svg>
     </button>
+    <button type="button" class="btn btn-ghost btn-icon" id="open-shortcuts" aria-haspopup="dialog" aria-label="Keyboard shortcuts" aria-keyshortcuts="Shift+?" title="Keyboard shortcuts (?)">
+      <svg class="icon"><use href="#i-keyboard"/></svg>
+    </button>
     <button type="button" class="btn" id="open-settings" aria-haspopup="dialog">
       <svg class="icon"><use href="#i-sliders"/></svg><span class="hide-sm">Settings</span>
     </button>
@@ -118,6 +123,7 @@
     <p class="batch-stat"><strong id="kpi-images">0 / 10</strong> images</p>
     <p class="batch-stat"><strong id="kpi-generated">0</strong> with captions</p>
     <p class="batch-stat" id="kpi-needs-time-stat"><strong id="kpi-needs-time">0</strong> <span id="kpi-needs-time-label">need a publish time</span></p>
+    <p class="batch-stat" id="kpi-removed-stat" hidden><strong id="kpi-removed">0</strong> removed from Buffer</p>
     <p class="batch-stat"><strong id="kpi-ready">0</strong> ready to schedule</p>
     <p class="batch-stat"><strong id="kpi-scheduled">—</strong> <span id="kpi-scheduled-label">upcoming in Buffer (all channels)</span></p>
   </section>
@@ -230,6 +236,7 @@
         <div class="gallery-toolbar" id="gallery-toolbar" hidden>
           <label class="checkbox"><input type="checkbox" id="select-all"><span>Select all</span></label>
           <span class="muted" id="selection-info" aria-live="polite">None selected</span>
+          <button type="button" class="btn btn-sm" id="bulk-edit" aria-haspopup="dialog" hidden><svg class="icon"><use href="#i-hash"/></svg>Edit selected</button>
           <span class="spacer"></span>
           <span class="hint gallery-hint" id="gallery-hint">Drag cards to reorder, or Alt+← / Alt+→ on a card</span>
           <div class="segmented" role="radiogroup" aria-label="Gallery view">
@@ -262,7 +269,7 @@
         <div class="ops-row" role="group" aria-labelledby="ops-gen-label">
           <h3 class="ops-label" id="ops-gen-label"><svg class="icon"><use href="#i-sparkles"/></svg>Generate</h3>
           <button type="button" class="btn btn-sm" id="gen-selected" disabled>Selected <span class="btn-count" id="gen-selected-count">0</span></button>
-          <button type="button" class="btn btn-sm" id="gen-all" disabled><svg class="icon"><use href="#i-sparkles"/></svg>All images <span class="btn-count" id="gen-all-count">0</span></button>
+          <button type="button" class="btn btn-sm" id="gen-all" disabled><svg class="icon"><use href="#i-sparkles"/></svg><span id="gen-all-label">All images</span> <span class="btn-count" id="gen-all-count">0</span></button>
         </div>
       </div>
 
@@ -308,7 +315,7 @@
         <p class="sr-only" id="op-announce" aria-live="polite"></p>
         <div class="op-status" id="op-status" data-state="running" hidden>
           <div class="op-head">
-            <div class="op-title"><span id="op-icon"><span class="spinner"></span></span><span id="op-title">Generating content</span></div>
+            <div class="op-title"><span id="op-icon"><span class="spinner"></span></span><span id="op-title" tabindex="-1">Generating content</span></div>
             <div class="row-actions">
               <button type="button" class="btn btn-sm" id="cancel-op"><svg class="icon"><use href="#i-stop"/></svg>Cancel</button>
               <a class="btn btn-sm" id="op-view" href="#schedules-section" hidden><svg class="icon"><use href="#i-calendar-check"/></svg>View in Scheduled posts</a>
@@ -346,14 +353,23 @@
               <p class="hint" id="ed-attention-detail"></p>
             </div>
             <dl class="meta-list">
-              <div><dt>File</dt><dd id="ed-name" title=""></dd></div>
-              <div><dt>Size</dt><dd id="ed-size"></dd></div>
-              <div><dt>Dimensions</dt><dd id="ed-dims"></dd></div>
               <div><dt>Status</dt><dd id="ed-status"></dd></div>
             </dl>
+            <details class="meta-details">
+              <summary>File details</summary>
+              <dl class="meta-list">
+                <div><dt>File</dt><dd id="ed-name" title=""></dd></div>
+                <div><dt>Size</dt><dd id="ed-size"></dd></div>
+                <div><dt>Dimensions</dt><dd id="ed-dims"></dd></div>
+              </dl>
+            </details>
+            <div class="field editor-language">
+              <label class="label" for="ed-language">Caption language</label>
+              <select class="select select-sm" id="ed-language" aria-describedby="ed-language-hint"></select>
+              <p class="hint" id="ed-language-hint">Used when this post is generated.</p>
+            </div>
             <div class="editor-actions">
               <button type="button" class="btn btn-sm" id="ed-generate"><svg class="icon"><use href="#i-sparkles"/></svg><span id="ed-generate-label">Generate content</span></button>
-              <button type="button" class="btn btn-sm" id="ed-schedule-post"><svg class="icon"><use href="#i-send"/></svg><span id="ed-schedule-label">Schedule post</span></button>
               <button type="button" class="btn btn-ghost btn-sm" id="ed-restore" hidden><svg class="icon"><use href="#i-refresh"/></svg>Restore previous content</button>
             </div>
           </div>
@@ -361,7 +377,10 @@
           <div class="editor-blank" id="ed-blank">
             <p class="editor-blank-title">No caption yet</p>
             <p>Generate this post with AI, or write it yourself. The full editor opens once there is a caption.</p>
-            <button type="button" class="btn btn-sm" id="ed-write"><svg class="icon"><use href="#i-edit"/></svg>Write it myself</button>
+            <div class="row-actions">
+              <button type="button" class="btn btn-sm" id="ed-blank-generate"><svg class="icon"><use href="#i-sparkles"/></svg>Generate content</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="ed-write"><svg class="icon"><use href="#i-edit"/></svg>Write it myself</button>
+            </div>
           </div>
 
           <div class="editor-main">
@@ -369,7 +388,11 @@
             <div class="inline-alert is-success" id="ed-result" hidden>
               <svg class="icon"><use href="#i-calendar-check"/></svg>
               <div><strong id="ed-result-title"></strong><div class="sub" id="ed-result-text"></div>
-                <button type="button" class="btn btn-sm result-edit" id="ed-result-edit" hidden><svg class="icon"><use href="#i-edit"/></svg>Edit in Scheduled posts</button></div>
+                <button type="button" class="btn btn-sm result-edit" id="ed-result-edit" hidden><svg class="icon"><use href="#i-edit"/></svg><span id="ed-result-edit-label">Edit in Buffer</span></button>
+                <span class="row-actions result-actions">
+                  <button type="button" class="btn btn-sm" id="ed-buffer-save" hidden><svg class="icon"><use href="#i-check"/></svg><span id="ed-buffer-save-label">Save to Buffer</span></button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="ed-buffer-cancel" hidden>Cancel</button>
+                </span></div>
             </div>
 
           <fieldset class="editor-fields" id="ed-fieldset">
@@ -380,85 +403,100 @@
               <div><strong id="ed-alert-title"></strong><div class="sub" id="ed-alert-text"></div></div>
             </div>
 
-            <div class="field">
-              <div class="label"><label for="ed-description">Caption</label><span class="counter" id="ed-description-count">0</span></div>
-              <textarea class="textarea" id="ed-description" rows="4" placeholder="Generate with AI or write your own caption…" aria-describedby="ed-description-error"></textarea>
-              <p class="error-text" id="ed-description-error" hidden></p>
-            </div>
-
-            <div class="field">
-              <div class="label">
-                <label for="ed-alt">Alternative caption</label>
-                <span class="label-actions">
-                  <button type="button" class="btn btn-ghost btn-xs" id="ed-swap" title="Swap caption and alternative"><svg class="icon"><use href="#i-swap"/></svg>Swap</button>
-                  <span class="counter" id="ed-alt-count">0</span>
-                </span>
-              </div>
-              <textarea class="textarea" id="ed-alt" rows="3" placeholder="A second take on the caption" aria-describedby="ed-alt-error"></textarea>
-              <p class="error-text" id="ed-alt-error" hidden></p>
-            </div>
-
-            <fieldset class="field">
-              <legend class="label">Publish with</legend>
-              <div class="segmented">
-                <label><input type="radio" name="ed-use" value="primary" checked><span>Caption</span></label>
-                <label><input type="radio" name="ed-use" value="alternative"><span>Alternative caption</span></label>
-              </div>
-            </fieldset>
-
-            <div class="field">
-              <div class="label"><label for="ed-tag-input">Hashtags</label><span class="counter" id="ed-tags-count">0 / 15</span></div>
-              <div class="tag-editor" id="ed-tags">
-                <input class="tag-input" id="ed-tag-input" type="text" autocomplete="off" spellcheck="false" placeholder="Add a hashtag" aria-describedby="ed-tags-hint ed-tags-error">
-              </div>
-              <p class="hint" id="ed-tags-hint">Enter, comma or space adds a tag · ← from the empty field moves to the tags, Delete removes one</p>
-              <p class="error-text" id="ed-tags-error" hidden></p>
-            </div>
-
-            <div class="field-row">
+            <!-- The post in three groups: its words, when and where it goes (and the button that sends it), then the model's notes. -->
+            <section class="editor-group" aria-labelledby="ed-group-words">
+              <h4 class="editor-group-title" id="ed-group-words">Caption and hashtags</h4>
               <div class="field">
-                <label class="label" for="ed-category">Category</label>
-                <input class="input" id="ed-category" type="text" list="category-options" maxlength="40" placeholder="e.g. Travel" aria-describedby="ed-category-error">
-                <datalist id="category-options">
-                  <option value="Travel"></option><option value="Food"></option><option value="Fashion"></option>
-                  <option value="Lifestyle"></option><option value="Nature"></option><option value="Pets"></option>
-                  <option value="Fitness"></option><option value="Technology"></option><option value="Product"></option>
-                  <option value="Art"></option><option value="Architecture"></option><option value="Business"></option>
-                  <option value="Events"></option><option value="Education"></option>
-                </datalist>
-                <p class="error-text" id="ed-category-error" hidden></p>
+                <div class="label"><label for="ed-description">Caption <span class="lock-note"><svg class="icon"><use href="#i-lock"/></svg><span class="lock-text">In Buffer</span></span></label><span class="counter" id="ed-description-count">0</span></div>
+                <textarea class="textarea" id="ed-description" rows="4" placeholder="Generate with AI or write your own caption…" aria-describedby="ed-description-error ed-count-hint"></textarea>
+                <p class="error-text" id="ed-description-error" hidden></p>
+                <p class="hint" id="ed-count-hint" hidden>Joined letters count by their parts: ক্ষ counts as 3 toward the limit.</p>
               </div>
-              <div class="field">
-                <span class="label">Engagement estimate</span>
-                <p class="estimate" id="ed-score-value">—</p>
-                <p class="hint">The model's guess, not a measurement. It is not posted.</p>
-              </div>
-            </div>
 
-            <div class="field-row">
               <div class="field">
-                <div class="label"><label for="ed-schedule">Publish at</label><span class="hint" id="ed-tz-label"></span></div>
-                <input type="datetime-local" class="input" id="ed-schedule" aria-describedby="ed-schedule-hint ed-schedule-error">
-                <p class="hint" id="ed-schedule-hint"></p>
-                <p class="error-text" id="ed-schedule-error" hidden></p>
+                <div class="label">
+                  <label for="ed-alt">Alternative caption <span class="lock-note"><svg class="icon"><use href="#i-lock"/></svg><span class="lock-text">In Buffer</span></span></label>
+                  <span class="label-actions">
+                    <button type="button" class="btn btn-ghost btn-xs" id="ed-swap" title="Swap caption and alternative"><svg class="icon"><use href="#i-swap"/></svg>Swap</button>
+                    <span class="counter" id="ed-alt-count">0</span>
+                  </span>
+                </div>
+                <textarea class="textarea" id="ed-alt" rows="3" placeholder="A second take on the caption" aria-describedby="ed-alt-error"></textarea>
+                <p class="error-text" id="ed-alt-error" hidden></p>
               </div>
+
+              <fieldset class="field">
+                <legend class="label">Publish with</legend>
+                <div class="segmented">
+                  <label><input type="radio" name="ed-use" value="primary" checked><span>Caption</span></label>
+                  <label><input type="radio" name="ed-use" value="alternative"><span>Alternative caption</span></label>
+                </div>
+              </fieldset>
+
               <div class="field">
-                <label class="label" for="ed-media-url"><span>Public image URL <span class="optional">optional</span></span></label>
-                <input type="url" class="input" id="ed-media-url" placeholder="https://cdn.example.com/photo.jpg" inputmode="url" autocomplete="off" aria-describedby="ed-media-hint ed-media-error">
-                <p class="hint" id="ed-media-hint">Buffer attaches images from public URLs. Leave empty to use the media host from Settings.</p>
-                <p class="error-text" id="ed-media-error" hidden></p>
+                <div class="label"><label for="ed-tag-input">Hashtags <span class="lock-note"><svg class="icon"><use href="#i-lock"/></svg><span class="lock-text">In Buffer</span></span></label><span class="counter" id="ed-tags-count">0 / 15</span></div>
+                <div class="tag-editor" id="ed-tags">
+                  <input class="tag-input" id="ed-tag-input" type="text" autocomplete="off" spellcheck="false" placeholder="Add a hashtag" aria-describedby="ed-tags-hint ed-tags-error">
+                </div>
+                <p class="hint" id="ed-tags-hint">Enter, comma or space adds a tag · ← from the empty field moves to the tags, Delete removes one</p>
+                <p class="error-text" id="ed-tags-error" hidden></p>
               </div>
-            </div>
 
-            <div class="field">
-              <div class="label"><span>Buffer channels</span><button type="button" class="btn btn-ghost btn-xs" id="ed-channels-edit">Change</button></div>
-              <div class="channel-chips" id="ed-channels"></div>
-            </div>
+              <div class="field">
+                <div class="label"><span>Post preview</span><span class="counter" id="ed-preview-count"></span></div>
+                <div class="post-preview" id="ed-preview"></div>
+              </div>
+            </section>
 
-            <div class="field">
-              <div class="label"><span>Post preview</span><span class="counter" id="ed-preview-count"></span></div>
-              <div class="post-preview" id="ed-preview"></div>
-            </div>
+            <section class="editor-group" aria-labelledby="ed-group-when">
+              <h4 class="editor-group-title" id="ed-group-when">When and where</h4>
+              <div class="field-row">
+                <div class="field">
+                  <div class="label"><label for="ed-schedule">Publish at <span class="lock-note"><svg class="icon"><use href="#i-lock"/></svg><span class="lock-text">In Buffer</span></span></label><span class="hint" id="ed-tz-label"></span></div>
+                  <input type="datetime-local" class="input" id="ed-schedule" aria-describedby="ed-schedule-hint ed-schedule-error">
+                  <p class="hint" id="ed-schedule-hint"></p>
+                  <p class="error-text" id="ed-schedule-error" hidden></p>
+                </div>
+                <div class="field">
+                  <label class="label" for="ed-media-url"><span>Public image URL <span class="optional">optional</span> <span class="lock-note is-kept"><svg class="icon"><use href="#i-lock"/></svg>As scheduled</span></span></label>
+                  <input type="url" class="input" id="ed-media-url" placeholder="https://cdn.example.com/photo.jpg" inputmode="url" autocomplete="off" aria-describedby="ed-media-hint ed-media-error">
+                  <p class="hint" id="ed-media-hint">Buffer attaches images from public URLs. Leave empty to use the media host from Settings.</p>
+                  <p class="error-text" id="ed-media-error" hidden></p>
+                </div>
+              </div>
+
+              <div class="field">
+                <div class="label"><span>Buffer channels <span class="lock-note is-kept"><svg class="icon"><use href="#i-lock"/></svg>As scheduled</span></span><button type="button" class="btn btn-ghost btn-xs" id="ed-channels-edit">Change</button></div>
+                <div class="channel-chips" id="ed-channels"></div>
+              </div>
+
+              <div class="editor-send">
+                <button type="button" class="btn btn-sm" id="ed-schedule-post"><svg class="icon"><use href="#i-send"/></svg><span id="ed-schedule-label">Schedule post</span></button>
+              </div>
+            </section>
+
+            <details class="editor-group editor-notes" id="ed-notes">
+              <summary><h4 class="editor-group-title">Category and estimate</h4><span class="hint" id="ed-notes-summary"></span><svg class="icon chev"><use href="#i-chevron-right"/></svg></summary>
+              <div class="field-row">
+                <div class="field">
+                  <label class="label" for="ed-category"><span>Category <span class="lock-note is-kept"><svg class="icon"><use href="#i-lock"/></svg>As scheduled</span></span></label>
+                  <input class="input" id="ed-category" type="text" list="category-options" maxlength="40" placeholder="e.g. Travel" aria-describedby="ed-category-error">
+                  <datalist id="category-options">
+                    <option value="Travel"></option><option value="Food"></option><option value="Fashion"></option>
+                    <option value="Lifestyle"></option><option value="Nature"></option><option value="Pets"></option>
+                    <option value="Fitness"></option><option value="Technology"></option><option value="Product"></option>
+                    <option value="Art"></option><option value="Architecture"></option><option value="Business"></option>
+                    <option value="Events"></option><option value="Education"></option>
+                  </datalist>
+                  <p class="error-text" id="ed-category-error" hidden></p>
+                </div>
+                <div class="field">
+                  <span class="label">Engagement estimate</span>
+                  <p class="estimate" id="ed-score-value">—</p>
+                  <p class="hint">The model's guess, not a measurement. It is not posted.</p>
+                </div>
+              </div>
+            </details>
 
           </fieldset>
           </div>
@@ -471,7 +509,7 @@
     <!-- 6. Scheduled posts -->
     <section class="card" id="schedules-section" aria-labelledby="sched-title">
       <div class="card-header">
-        <h2 class="card-title" id="sched-title"><svg class="icon"><use href="#i-calendar-check"/></svg>Scheduled posts <span class="count-badge" id="sched-count">0</span></h2>
+        <h2 class="card-title" id="sched-title" tabindex="-1"><svg class="icon"><use href="#i-calendar-check"/></svg>Scheduled posts <span class="count-badge" id="sched-count">0</span></h2>
         <div class="row-actions">
           <div class="segmented" role="radiogroup" aria-label="Show posts">
             <label><input type="radio" name="sched-filter" value="all" checked><span>All</span></label>
@@ -535,6 +573,11 @@
         <svg class="icon"><use href="#i-alert-circle"/></svg>
         <div><strong>Please fix the highlighted settings</strong><ul class="sub" id="settings-error-list"></ul></div>
       </div>
+      <!-- Why Poster opened Settings (it would not go Live or run without this); moved under the section it is about. -->
+      <div class="inline-alert is-warning settings-reason" id="settings-reason" role="alert" tabindex="-1" hidden>
+        <svg class="icon"><use href="#i-alert"/></svg>
+        <div><strong id="settings-reason-title"></strong><div class="sub" id="settings-reason-text"></div></div>
+      </div>
 
       <section class="settings-section" aria-labelledby="set-mode-title">
         <h3 id="set-mode-title"><svg class="icon"><use href="#i-zap"/></svg>Mode</h3>
@@ -567,6 +610,11 @@
           </div>
         </div>
         <div class="field-row">
+          <div class="field">
+            <label class="label" for="set-language">Caption language</label>
+            <select class="select" id="set-language" aria-describedby="set-language-hint"></select>
+            <p class="hint" id="set-language-hint">For the whole batch. A post can choose its own in the editor.</p>
+          </div>
           <div class="field">
             <label class="label" for="set-ai-concurrency">Parallel requests</label>
             <input class="input" id="set-ai-concurrency" type="number" min="1" max="4" step="1" inputmode="numeric" aria-describedby="set-ai-concurrency-error">
@@ -692,7 +740,8 @@
         </div>
         <div class="field">
           <div class="label"><label for="post-due">Publish at</label><span class="hint" id="post-due-zone"></span></div>
-          <input type="datetime-local" class="input" id="post-due" aria-describedby="post-due-error">
+          <input type="datetime-local" class="input" id="post-due" aria-describedby="post-due-hint post-due-error">
+          <p class="hint" id="post-due-hint"></p>
           <div class="error-text" id="post-due-error" hidden></div>
         </div>
         <div class="error-text" id="post-dialog-error" role="alert" hidden></div>
@@ -701,6 +750,62 @@
     <div class="modal-actions">
       <button type="button" class="btn" id="post-cancel">Cancel</button>
       <button type="submit" class="btn btn-primary" id="post-save"><svg class="icon"><use href="#i-check"/></svg>Save changes</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Edit selected posts: hashtags and category across the selection -->
+<dialog class="modal modal-wide" id="bulk-dialog" aria-labelledby="bulk-title" aria-describedby="bulk-sub">
+  <form id="bulk-form" novalidate>
+    <div class="modal-body">
+      <div class="modal-icon"><svg class="icon"><use href="#i-hash"/></svg></div>
+      <div class="modal-main">
+        <h2 id="bulk-title">Edit selected posts</h2>
+        <p id="bulk-sub"></p>
+        <div class="field">
+          <label class="label" for="bulk-add">Add hashtags</label>
+          <input class="input" id="bulk-add" type="text" autocomplete="off" spellcheck="false" placeholder="#monsoon #dhaka" aria-describedby="bulk-add-hint bulk-add-error">
+          <p class="hint" id="bulk-add-hint">Separate them with spaces or commas. A post that already has 15 keeps the ones it has.</p>
+          <p class="error-text" id="bulk-add-error" hidden></p>
+        </div>
+        <fieldset class="field" id="bulk-remove-field">
+          <legend class="label">Remove hashtags</legend>
+          <div class="bulk-tags" id="bulk-remove"></div>
+        </fieldset>
+        <div class="field">
+          <label class="label" for="bulk-category"><span>Category <span class="optional">optional</span></span></label>
+          <input class="input" id="bulk-category" type="text" list="category-options" maxlength="40" placeholder="Unchanged if left empty" aria-describedby="bulk-category-error">
+          <p class="error-text" id="bulk-category-error" hidden></p>
+        </div>
+        <p class="error-text" id="bulk-error" role="alert" hidden></p>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="bulk-cancel">Cancel</button>
+      <button type="submit" class="btn btn-primary" id="bulk-apply"><svg class="icon"><use href="#i-check"/></svg><span id="bulk-apply-label">Apply</span></button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Keyboard shortcuts (?) -->
+<dialog class="modal modal-wide" id="shortcuts-dialog" aria-labelledby="shortcuts-title">
+  <form method="dialog">
+    <div class="modal-body">
+      <div class="modal-icon"><svg class="icon"><use href="#i-keyboard"/></svg></div>
+      <div class="modal-main">
+        <h2 id="shortcuts-title">Keyboard shortcuts</h2>
+        <dl class="shortcut-list">
+          <div><dt><kbd class="mod-key">Ctrl</kbd> <kbd>Shift</kbd> <kbd>Enter</kbd></dt><dd>Next step: runs the highlighted button in AI content &amp; scheduling (All images, Apply to all, All ready)</dd></div>
+          <div><dt><kbd>Alt</kbd> <kbd>↑</kbd> / <kbd>↓</kbd></dt><dd>Previous or next post in the editor; in the List view, the same field in the row above or below</dd></div>
+          <div><dt><kbd>Alt</kbd> <kbd>←</kbd> / <kbd>→</kbd></dt><dd>Move the focused image earlier or later</dd></div>
+          <div><dt><kbd class="mod-key">Ctrl</kbd> <kbd>Enter</kbd></dt><dd>Generate the image (Generate with AI, Edit with AI)</dd></div>
+          <div><dt><kbd>Enter</kbd> <kbd>,</kbd> <kbd>Space</kbd></dt><dd>In Hashtags: add what you typed; <kbd>←</kbd> reaches the tags, <kbd>Delete</kbd> removes one</dd></div>
+          <div><dt><kbd>?</kbd></dt><dd>This list. <kbd>Esc</kbd> closes it, and any dialog or the Settings drawer</dd></div>
+        </dl>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button type="submit" class="btn" id="shortcuts-close">Close</button>
     </div>
   </form>
 </dialog>

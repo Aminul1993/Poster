@@ -1,5 +1,5 @@
 /** The settings model: defaults, normalisation, field metadata. */
-import { RULES, SERVER, TONES } from './config.js';
+import { LANGUAGES, RULES, SERVER, TONES } from './config.js';
 import { TimeZoneUtil } from './time.js';
 import { isPlainObject } from './util.js';
 
@@ -28,6 +28,7 @@ export const SettingsModel = {
       model: String(SERVER.ollama.model || 'gemma4:31b').trim(),
       aiConcurrency: 2,
       tone: 'friendly',
+      language: 'en',
       extraInstructions: '',
       channelIds: { live: [], demo: ['demo-instagram', 'demo-linkedin'] },
       requireMedia: true,
@@ -62,10 +63,11 @@ export const SettingsModel = {
       model: str('model') || d.model,
       aiConcurrency: int('aiConcurrency'),
       tone: Object.prototype.hasOwnProperty.call(TONES, src.tone) ? src.tone : d.tone,
+      language: Object.prototype.hasOwnProperty.call(LANGUAGES, src.language) ? src.language : d.language,
       extraInstructions: typeof src.extraInstructions === 'string' ? src.extraInstructions.trim() : d.extraInstructions,
       channelIds: { live: ids(channelSrc.live, d.channelIds.live), demo: ids(channelSrc.demo, d.channelIds.demo) },
       requireMedia: bool('requireMedia'),
-      timezone: str('timezone'),
+      timezone: TimeZoneUtil.modern(str('timezone')),
       intervalMinutes: int('intervalMinutes'),
       minLeadMinutes: int('minLeadMinutes'),
       descMin: int('descMin'),

@@ -160,6 +160,12 @@ class TestOllamaGenerate:
         assert chat.json["format"] == "json" and chat.json["stream"] is False
         user = chat.json["messages"][1]
         assert user["images"] and "warm, conversational" in user["content"]
+        assert "Language: write \"description\" and \"alternative_description\" in English." in user["content"]
+
+    def test_caption_language_reaches_the_prompt(self, client: Any, fake: Any) -> None:
+        assert post(client, "/api/ollama/generate", generate_body(language="bn-en")).status_code == 200
+        prompt = fake.calls[0].json["messages"][1]["content"]
+        assert "Bengali in Bangla script, mixed naturally with English words and phrases" in prompt
 
     def test_openai_compatible_endpoint(self, make_app: Any, fake: Any) -> None:
         client = make_app(OLLAMA_ENDPOINT="https://ollama.test/v1/chat/completions").test_client()
@@ -216,7 +222,7 @@ class TestOllamaGenerate:
         assert waits == [1, 2, 4]
 
     @pytest.mark.parametrize("overrides", [
-        {"image": ""}, {"image": "!!!"}, {"image": b64(b"GIF89a....")}, {"tone": "angry"}, {"descMin": 50, "descMax": 40},
+        {"image": ""}, {"image": "!!!"}, {"image": b64(b"GIF89a....")}, {"tone": "angry"}, {"language": "fr"}, {"descMin": 50, "descMax": 40},
         {"model": "bad model!"}, {"extraInstructions": "x" * 501}, {"descMax": "long"},
     ])
     def test_validation(self, client: Any, fake: Any, overrides: dict[str, Any]) -> None:

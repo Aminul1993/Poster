@@ -1,5 +1,6 @@
 /** The Activity log card. */
 import { showToast } from '../app.js';
+import { TimeZoneUtil } from '../time.js';
 import { el } from '../util.js';
 import { byId } from './dom.js';
 import { View } from './view.js';
@@ -44,11 +45,10 @@ export class LogView extends View {
     const today = new Date().toDateString();
     list.replaceChildren(...filtered.slice().reverse().map((entry) => {
       const date = new Date(entry.ts);
-      const time = date.toDateString() === today
-        ? date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })
-        : date.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+      // Device time, in the dashboard's one format: "4:00:05 pm" today, "Fri, 30 Oct, 4:00 pm" before.
+      const time = date.toDateString() === today ? TimeZoneUtil.formatTime(date, undefined, { seconds: true }) : TimeZoneUtil.format(date, undefined);
       return el('li', { class: 'log-item', dataset: { level: entry.level } }, [
-        el('time', { class: 'log-time', datetime: entry.ts, title: date.toLocaleString(), text: time }),
+        el('time', { class: 'log-time', datetime: entry.ts, title: TimeZoneUtil.format(date, undefined), text: time }),
         el('span', { class: 'log-cat', text: entry.category }),
         el('span', { class: 'log-msg' }, [entry.message, entry.details ? el('span', { class: 'log-detail', text: entry.details }) : null])
       ]);

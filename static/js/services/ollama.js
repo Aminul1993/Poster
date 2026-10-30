@@ -34,12 +34,14 @@ export class OllamaService {
 
   /**
    * The preferences the server needs to build the prompt.
-   * @param {object} settings @returns {object}
+   * @param {object} settings @param {object} [item] the image, whose own caption language wins over the batch's
+   * @returns {object}
    */
-  options(settings) {
+  options(settings, item) {
     return {
       model: settings.model,
       tone: settings.tone,
+      language: item?.language || settings.language,
       extraInstructions: settings.extraInstructions,
       descMin: settings.descMin,
       descMax: settings.descMax
@@ -81,7 +83,7 @@ export class OllamaService {
     }
     throwIfAborted(signal);
     const data = await this.api.callWithRetry(API_CONFIG.routes.ollamaGenerate, {
-      json: { ...this.options(s), image, fileName: item.name },
+      json: { ...this.options(s, item), image, fileName: item.name },
       timeoutMs: API_CONFIG.timeouts.generateMs,
       signal,
       service: 'Ollama',

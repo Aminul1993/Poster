@@ -3,8 +3,9 @@ import { showToast } from '../app.js';
 import { LIMITS } from '../config.js';
 import { BufferPostsFeed } from '../feed.js';
 import { serviceMeta } from '../services/buffer.js';
+import { countedResult } from '../store.js';
 import { TimeZoneUtil } from '../time.js';
-import { applyScriptLang, charCount, el, icon, pluralize, relativeTime, scriptRuns, truncate } from '../util.js';
+import { applyScriptLang, charCount, el, icon, pluralize, relativeTime, scriptRuns, splitPostText, truncate } from '../util.js';
 import { byId, colorDot, setFieldError } from './dom.js';
 import { View } from './view.js';
 
@@ -12,9 +13,6 @@ const STATUS_CHIPS = Object.freeze({
   scheduled: ['Scheduled', 'success'], needs_approval: ['Needs approval', 'warning'], sending: ['Publishing', 'info'],
   sent: ['Published', 'neutral'], error: ['Failed', 'danger'], draft: ['Draft', 'neutral']
 });
-
-/** Hashtags at the end of a post (letters, marks, digits, _ and the zero-width joiners, which are format characters). */
-const TRAILING_TAGS = /(?:\s*#[\p{L}\p{M}\p{N}_\p{Cf}]+)+\s*$/u;
 
 /**
  * Buffer keeps one post per channel; the owner thinks in images. Copies that share their text and publish
@@ -31,14 +29,6 @@ export function groupPosts(posts) {
     groups.get(key).posts.push(post);
   }
   return [...groups.values()];
-}
-
-/** @param {string} text @returns {{caption: string, tags: string}} the post text split into its caption and trailing hashtags */
-export function splitPostText(text) {
-  const value = String(text ?? '');
-  const match = TRAILING_TAGS.exec(value);
-  if (!match || match.index === 0) return { caption: value.trim(), tags: '' };
-  return { caption: value.slice(0, match.index).trim(), tags: match[0].trim().replace(/\s+/g, ' ') };
 }
 
 export class PostsView extends View {
@@ -65,18 +55,22 @@ export class PostsView extends View {
     list.hidden = !groups.length;
     byId('sched-empty').hidden = groups.length > 0;
     if (!groups.length) {
-      const emptyTitles = { all: 'No posts in Buffer', upcoming: 'Nothing scheduled in Buffer', published: 'Nothing published yet' };
+      const demo = this.app.getBuffer().isDemo;
+      const emptyTitles = demo
+        ? { all: 'No Demo posts yet', upcoming: 'Nothing scheduled in Demo mode', published: 'Nothing published yet' }
+        : { all: 'No posts in Buffer', upcoming: 'Nothing scheduled in Buffer', published: 'Nothing published yet' };
       const pending = feed.loading || (!feed.loaded && !feed.error);
       byId('sched-empty-title').textContent = pending ? (this.app.getBuffer().isDemo ? 'Loading Demo posts…' : 'Loading posts from Buffer…') : feed.error ? 'Could not load posts from Buffer' : emptyTitles[feed.filter];
       byId('sched-empty-text').textContent = pending ? '' : feed.error
         ? [feed.error.message, feed.error.hint].filter(Boolean).join(' ')
-        : 'Posts scheduled here or in Buffer appear in this list, read directly from Buffer. Until they are published, you can edit or delete them.';
+        : demo ? 'Posts you schedule in Demo mode appear here. They are simulated and kept in this tab only.'
+          : 'Posts scheduled here or in Buffer appear in this list, read directly from Buffer. Until they are published, you can edit or delete them.';
     }
     const footer = byId('sched-footer');
     footer.hidden = !feed.loaded && !groups.length;
     byId('sched-source').textContent = feed.error && groups.length
       ? `Could not load more: ${feed.error.message}`
-      : feed.loaded ? `${feed.loaded.demo ? 'Simulated Demo posts, kept in this tab only' : 'Read from Buffer'} · ${new Date(feed.loaded.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : '';
+      : feed.loaded ? `${feed.loaded.demo ? 'Simulated Demo posts, kept in this tab only' : 'Read from Buffer'} · ${TimeZoneUtil.formatTime(new Date(feed.loaded.at), undefined)}` : '';
     const more = byId('sched-more');
     more.hidden = !feed.next;
     more.disabled = Boolean(feed.loading);
@@ -121,7 +115,11 @@ export class PostsView extends View {
       };
     });
     const [label, tone] = this.statusChip(first);
+    // Which gallery image the post came from, so the owner need not match thumbnails by eye.
+    const items = this.store.all();
+    const owner = items.findIndex((i) => (i.result?.postIds || []).some((id) => group.posts.some((p) => p.postId === id)));
     return {
+      source: owner === -1 ? '' : `#${owner + 1} · ${items[owner].name}`,
       postIds: group.posts.map((p) => p.postId), caption, tags, thumbnail: group.posts.find((p) => p.thumbnail)?.thumbnail || null,
       when: when ? TimeZoneUtil.format(new Date(when), zone) : '', relative: when ? relativeTime(new Date(when)) : '',
       label: statuses.size === 1 ? label : '', tone, copies, isNew: !this.allNew && group.posts.some((p) => this.highlight.has(p.postId)),
@@ -135,30 +133,34 @@ export class PostsView extends View {
     const id = view.postIds[0];
     const several = copies.length > 1;
     const where = copies.map((c) => c.name).join(' and ');
+    // Each row's buttons say which post they act on, so a list of buttons can tell the rows apart.
+    const name = view.source ? `post ${view.source}` : `"${truncate((view.caption || 'post without text').replace(/\s+/g, ' '), 40)}"`;
     return el('li', { class: `sched-item${view.isNew ? ' is-new' : ''}` }, [
       view.thumbnail
         ? el('img', { class: 'sched-thumb', src: view.thumbnail, alt: '', loading: 'lazy', onerror: (e) => e.target.replaceWith(el('div', { class: 'sched-thumb', 'aria-hidden': 'true' })) })
         : el('div', { class: 'sched-thumb', 'aria-hidden': 'true' }),
-      el('div', { style: 'min-width:0' }, [
+      el('div', { class: 'sched-actions' }, [
+        changeable ? el('button', { type: 'button', class: `btn btn-ghost btn-icon btn-sm${busy ? ' is-loading' : ''}`, disabled: busy, 'aria-label': `Edit ${name} on ${where}`, title: several ? 'Edit post (every channel)' : 'Edit post', dataset: { action: 'edit', id } }, [icon('edit')]) : null,
+        changeable ? el('button', { type: 'button', class: 'btn btn-ghost btn-icon btn-sm', disabled: busy, 'aria-label': `Delete ${name} from ${where}`, title: several ? 'Delete post (every channel)' : 'Delete post', dataset: { action: 'delete-post', id } }, [icon('trash')]) : null
+      ]),
+      el('div', { class: 'sched-body' }, [
         scriptRuns(el('div', { class: 'sched-text' }), view.caption || '(no text)'),
         view.tags ? scriptRuns(el('div', { class: 'sched-tags', title: view.tags }), view.tags) : null,
+        // The chip leads, so it sits in the same place on every row instead of wrapping on long ones.
         el('div', { class: 'sched-meta' }, [
+          view.label ? el('span', { class: `chip chip-${view.tone}`, text: view.label }) : null,
+          view.source ? el('span', { class: 'sched-source', text: view.source }) : null,
           el('span', {}, [icon('calendar'), view.when || 'No publish time']),
-          view.relative ? el('span', {}, [icon('clock'), view.relative]) : null,
-          view.label ? el('span', { class: `chip chip-${view.tone}`, text: view.label }) : null
+          view.relative ? el('span', {}, [icon('clock'), view.relative]) : null
         ]),
         el('ul', { class: 'list-reset sched-channels', 'aria-label': 'Channels' }, copies.map((copy) => el('li', { class: 'sched-channel' }, [
           colorDot(copy.color),
           el('span', { class: 'sched-channel-name', text: `${copy.name} · ${copy.service}`, title: `Post ID: ${copy.postId}` }),
           view.label ? null : el('span', { class: `chip chip-${copy.tone}`, text: copy.label }),
-          several && copy.changeable ? el('button', { type: 'button', class: 'btn btn-ghost btn-icon btn-xs', disabled: copy.busy, 'aria-label': `Delete only the ${copy.name} copy`, title: `Delete only the ${copy.name} copy`, dataset: { action: 'delete-one', id: copy.postId } }, [icon('x')]) : null,
           copy.externalLink ? el('a', { class: 'btn btn-ghost btn-icon btn-xs', href: copy.externalLink, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `Open the published ${copy.name} post`, title: 'Open published post' }, [icon('link')]) : null,
+          several && copy.changeable ? el('button', { type: 'button', class: 'btn btn-ghost btn-icon btn-xs', disabled: copy.busy, 'aria-label': `Delete the ${copy.service} copy of ${name}`, title: `Delete the ${copy.service} copy only`, dataset: { action: 'delete-one', id: copy.postId } }, [icon('trash')]) : null,
           copy.error ? el('span', { class: 'error-text', text: copy.error }) : null
         ])))
-      ]),
-      el('div', { class: 'sched-actions' }, [
-        changeable ? el('button', { type: 'button', class: `btn btn-ghost btn-icon btn-sm${busy ? ' is-loading' : ''}`, disabled: busy, 'aria-label': `Edit this post on ${where}`, title: several ? 'Edit post (every channel)' : 'Edit post', dataset: { action: 'edit', id } }, [icon('edit')]) : null,
-        changeable ? el('button', { type: 'button', class: 'btn btn-ghost btn-icon btn-sm', disabled: busy, 'aria-label': `Delete this post from ${where}`, title: several ? 'Delete post (every channel)' : 'Delete post', dataset: { action: 'delete-post', id } }, [icon('trash')]) : null
       ])
     ]);
   }
@@ -174,6 +176,8 @@ export class PostsView extends View {
    */
   showNew(postIds) {
     this.highlight = new Set(postIds);
+    // The whole batch at once: the list drops its scroll box until the owner refreshes or changes the filter.
+    byId('sched-list').classList.add('is-expanded');
     if (this.feed.filter !== 'upcoming') this.feed.setFilter('upcoming');
     else this.render();
   }
@@ -183,12 +187,12 @@ export class PostsView extends View {
       const button = event.target.closest('button[data-action]');
       const post = button && this.feed.get(button.dataset.id);
       if (!post) return;
-      if (button.dataset.action === 'edit') this.openDialog(this.groupOf(post.postId));
+      if (button.dataset.action === 'edit') this.edit(this.groupOf(post.postId));
       else if (button.dataset.action === 'delete-post') this.deletePosts(this.groupOf(post.postId), true);
       else if (button.dataset.action === 'delete-one') this.deletePosts([post], false);
     });
     for (const input of document.querySelectorAll('input[name="sched-filter"]')) {
-      input.addEventListener('change', () => { this.highlight.clear(); this.feed.setFilter(input.value); });
+      input.addEventListener('change', () => { this.highlight.clear(); byId('sched-list').classList.remove('is-expanded'); this.feed.setFilter(input.value); });
     }
     byId('sched-refresh').addEventListener('click', () => this.feed.load());
     byId('sched-more').addEventListener('click', () => this.feed.load({ more: true }));
@@ -199,6 +203,31 @@ export class PostsView extends View {
     dialog.addEventListener('cancel', (event) => { if (this.postEdit?.saving) event.preventDefault(); });
     dialog.addEventListener('close', () => { this.postEdit = null; });
     byId('post-text').addEventListener('input', () => this.updateTextCount());
+    byId('post-due').addEventListener('input', () => this.updateDueHint());
+  }
+
+  /**
+   * One editor per post: a post from this batch opens in the post editor, with the same caption and hashtag
+   * fields it was written in; a post Poster did not schedule from this gallery opens in the dialog.
+   * @param {import('../services/buffer.js').BufferPost[]} copies
+   */
+  edit(copies) {
+    const owner = this.ownerOf(copies);
+    if (owner) this.ui.editor.editScheduled(owner.id);
+    else this.openDialog(copies);
+  }
+
+  /** @returns {object|null} the gallery image these copies were scheduled from, while it still counts as scheduled */
+  ownerOf(copies) {
+    const ids = new Set(copies.map((p) => p.postId));
+    return this.store.all().find((i) => countedResult(i, this.settings.mode) && (i.result.postIds || []).some((id) => ids.has(id))) || null;
+  }
+
+  /** The dialog's publish time, written out the way the editor shows it. */
+  updateDueHint() {
+    const zone = this.postEdit?.zone || this.settings.timezone;
+    const check = this.validation.validateSchedule(byId('post-due').value, { ...this.settings, timezone: zone });
+    byId('post-due-hint').textContent = check.valid ? `${TimeZoneUtil.format(check.date, zone)} · ${relativeTime(check.date)}` : '';
   }
 
   /** @returns {string} where the change happens, said plainly in Demo mode */
@@ -229,6 +258,7 @@ export class PostsView extends View {
     byId('post-due').min = TimeZoneUtil.toLocalInput(new Date(), zone);
     byId('post-due-zone').textContent = zone;
     this.updateTextCount();
+    this.updateDueHint();
     for (const field of ['post-text', 'post-due']) setFieldError(field, null);
     byId('post-dialog-error').hidden = true;
     this.setSaving(false);
@@ -326,9 +356,11 @@ export class PostsView extends View {
     const targets = copies.filter((p) => BufferPostsFeed.canChange(p) && !this.feed.busy.has(p.postId));
     if (!targets.length) return;
     const where = targets.map((p) => `${p.channelName || serviceMeta(p.service).label} (${serviceMeta(p.service).label})`).join(' and ');
+    const others = whole ? [] : this.groupOf(targets[0].postId).filter((p) => !targets.includes(p));
+    const rowIndex = [...byId('sched-list').children].findIndex((li) => li.contains(document.activeElement));
     const { caption } = splitPostText(targets[0].text);
     const ok = await this.ui.confirm({
-      title: whole ? `Delete this post from ${this.place}?` : `Delete the ${serviceMeta(targets[0].service).label} copy?`,
+      title: !whole ? `Delete the ${serviceMeta(targets[0].service).label} copy?` : this.place === 'Buffer' ? 'Delete this post from Buffer?' : 'Delete this Demo post?',
       message: `"${truncate(caption.replace(/\s+/g, ' '), 80)}" on ${where} will be deleted and will not be published. This cannot be undone.`,
       confirmLabel: !whole ? `Delete ${serviceMeta(targets[0].service).label} copy` : targets.length > 1 ? `Delete post (${pluralize(targets.length, 'channel')})` : 'Delete post',
       danger: true
@@ -343,6 +375,15 @@ export class PostsView extends View {
       }
     }
     if (failed.length) showToast(failed[0], 'error', { title: failed.length < targets.length ? 'Some copies were not deleted' : 'Could not delete the post' });
-    else showToast(this.place === 'Buffer' ? 'The post was deleted from Buffer.' : 'The post was deleted in Demo mode (not in Buffer).', 'success');
+    else if (!whole) {
+      const kept = others.map((p) => serviceMeta(p.service).label).join(' and ');
+      showToast(`${serviceMeta(targets[0].service).label} copy deleted${kept ? `; ${kept} ${others.length === 1 ? 'copy' : 'copies'} still scheduled` : ''}${this.place === 'Buffer' ? '' : ' (Demo mode, not in Buffer)'}.`, 'success');
+    } else showToast(this.place === 'Buffer' ? 'The post was deleted from Buffer.' : 'The post was deleted in Demo mode (not in Buffer).', 'success');
+    // Keep the keyboard in the list: the row now in the deleted one's place, or the heading when none is left.
+    if (rowIndex !== -1) {
+      const rows = byId('sched-list').children;
+      const row = rows[Math.min(rowIndex, rows.length - 1)];
+      (row?.querySelector('[data-action=edit], [data-action=delete-post]') || byId('sched-title')).focus();
+    }
   }
 }

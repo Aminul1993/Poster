@@ -20,7 +20,7 @@ from werkzeug.exceptions import HTTPException, NotFound
 
 from poster import validation
 from poster.auth import require_login
-from poster.config import API, APP_VERSION, BASE_DIR, LIMITS, TONES, Config, check_url, is_local_host
+from poster.config import API, APP_VERSION, BASE_DIR, LANGUAGES, LIMITS, TONES, Config, check_url, is_local_host
 from poster.content import FALLBACK_TAGS, STOP_WORDS
 from poster.errors import ServiceError
 from poster.http import HttpClient
@@ -114,6 +114,7 @@ def server_config() -> dict[str, Any]:
         # One source of truth for rules the browser applies too (validation, Demo mode, the posts list).
         "rules": {
             "tones": TONES,
+            "languages": {key: value["label"] for key, value in LANGUAGES.items()},
             "hashtags": {"min": LIMITS["min_hashtags"], "max": LIMITS["max_hashtags"], "fallback": list(FALLBACK_TAGS),
                          "stopWords": sorted(STOP_WORDS)},
             "maxTextChars": LIMITS["max_text_chars"],

@@ -165,6 +165,17 @@ export function scriptLang(text) {
   return '';
 }
 
+/** Hashtags at the end of a post (letters, marks, digits, _ and the zero-width joiners, which are format characters). */
+const TRAILING_TAGS = /(?:\s*#[\p{L}\p{M}\p{N}_\p{Cf}]+)+\s*$/u;
+
+/** @param {string} text @returns {{caption: string, tags: string}} the post text split into its caption and trailing hashtags */
+export function splitPostText(text) {
+  const value = String(text ?? '');
+  const match = TRAILING_TAGS.exec(value);
+  if (!match || match.index === 0) return { caption: value.trim(), tags: '' };
+  return { caption: value.slice(0, match.index).trim(), tags: match[0].trim().replace(/\s+/g, ' ') };
+}
+
 /**
  * Fills `node` with `text`, giving each run of words in a South Asian script its own lang, so a screen reader
  * switches voice between Bengali and English inside one caption.

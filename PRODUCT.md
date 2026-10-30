@@ -34,7 +34,7 @@ Poster is a self-hosted batch publisher. A set of photos, or images generated on
 - **Demo mode:** without credentials, Poster starts in Demo mode. AI, image generation and scheduling are simulated. The header always shows whether Demo or Live is active.
 - **Workflow and UI names:**
   - **Add images**: Upload, Generate with AI or Edit with AI.
-  - **Image gallery**: select, reorder, remove.
+  - **Image gallery**: select, reorder, remove (with Undo), and Edit selected (add or remove hashtags and set the category on every selected post).
   - **AI content & scheduling**: generate or schedule this image, the selected images, or all of them; the Schedule planner; the post editor.
   - **Scheduled posts**: read from Buffer, filtered by All, Upcoming or Published.
   - **Activity log**.
@@ -50,6 +50,7 @@ Poster is a self-hosted batch publisher. A set of photos, or images generated on
 **Post content**
 - Each post has a caption and an alternative caption. The owner picks which one to publish.
 - Posts also carry a category (free text with suggestions), a tone of voice (Friendly, Professional, Playful, Inspirational, Luxury or Bold) and optional extra instructions to the model.
+- The caption language is a batch setting (English, Bengali, Bengali + English, Hindi, Hindi + English, Tamil or Tamil + English) that a post can override in the editor. It asks the model to write in that language; Poster does not check what language comes back.
 - The engagement score (1–100) is the model's estimate. It is not measured performance and must never be shown as analytics.
 
 **Buffer and hosting limits**

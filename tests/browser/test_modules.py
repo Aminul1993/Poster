@@ -70,9 +70,12 @@ def test_timezones_and_cached_formatters(js: Any) -> None:
       return {
         gapExists: gap.exists, dhaka: ok.date.toISOString(), back: TimeZoneUtil.toLocalInput(ok.date, 'Asia/Dhaka'),
         valid: [TimeZoneUtil.isValid('Asia/Dhaka'), TimeZoneUtil.isValid('Mars/Base')],
-        cached: dateTimeFormat('en-US', { timeZone: 'UTC' }) === dateTimeFormat('en-US', { timeZone: 'UTC' })
+        cached: dateTimeFormat('en-US', { timeZone: 'UTC' }) === dateTimeFormat('en-US', { timeZone: 'UTC' }),
+        modern: [TimeZoneUtil.modern('Asia/Calcutta'), TimeZoneUtil.modern('Asia/Dhaka')]
       };
     """)
+    assert result["modern"] == ["Asia/Kolkata", "Asia/Dhaka"]
+    del result["modern"]
     assert result == {"gapExists": False, "dhaka": "2026-07-01T03:15:00.000Z", "back": "2026-07-01T09:15",
                       "valid": [True, False], "cached": True}
 

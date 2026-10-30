@@ -35,8 +35,7 @@ export class Orchestrator extends View {
     if (settings.mode === 'live') {
       const check = this.validation.validateSettings(settings, { scope: 'ollama', requireCredentials: true });
       if (!check.valid) {
-        showToast(Object.values(check.errors)[0], 'error', { title: 'Ollama is not configured' });
-        this.ui.openSettings('settings-ollama');
+        this.ui.openSettings('settings-ollama', { title: 'Ollama is not configured', message: Object.values(check.errors)[0] });
         return null;
       }
       if (!this.ensureOnline()) return null;
@@ -47,7 +46,9 @@ export class Orchestrator extends View {
       if (items.length === 1) {
         const item = items[0];
         const scheduled = countedResult(item, settings.mode);
-        const ok = await this.ui.confirm({
+        // Content exactly as the model wrote it is regenerated without asking; Restore still brings it back.
+        const untouched = item.content === item.generatedContent && !scheduled;
+        const ok = untouched || await this.ui.confirm({
           title: 'Replace the existing content?',
           message: `"${item.name}" already has a caption${scheduled ? ' and has been scheduled' : ''}. Generating again replaces the captions, hashtags and category, including your edits. You can restore the previous content once from the editor.${scheduled ? ' The post already in Buffer is not changed.' : ''}`,
           confirmLabel: 'Regenerate',
@@ -100,22 +101,19 @@ export class Orchestrator extends View {
     if (settings.mode === 'live') {
       const check = this.validation.validateSettings(settings, { scope: 'buffer', requireCredentials: true });
       if (!check.valid) {
-        showToast(Object.values(check.errors)[0], 'error', { title: 'Buffer is not configured' });
-        this.ui.openSettings('settings-buffer');
+        this.ui.openSettings('settings-buffer', { title: 'Buffer is not configured', message: Object.values(check.errors)[0] });
         return null;
       }
       if (!this.ensureOnline()) return null;
     }
     const channelIds = buffer.selectedChannelIds(settings);
     if (!channelIds.length) {
-      showToast('Choose at least one channel to post to.', 'error', { title: 'No Buffer channels selected' });
-      this.ui.openSettings('settings-buffer');
+      this.ui.openSettings('settings-buffer', { title: 'No Buffer channels selected', message: 'Choose at least one channel to post to, then save the settings.' });
       return null;
     }
     const channelProblem = buffer.checkChannels(channelIds, settings);
     if (channelProblem) {
-      showToast(channelProblem, 'error', { title: 'Channel problem' });
-      this.ui.openSettings('settings-buffer');
+      this.ui.openSettings('settings-buffer', { title: 'A channel needs attention', message: channelProblem });
       return null;
     }
 
@@ -128,7 +126,10 @@ export class Orchestrator extends View {
         this.store.update(item.id, { showErrors: true }, { reason: 'validation', persist: false });
         showToast(check.message, 'error', { title: 'Fix the post before scheduling' });
         const fieldMap = { description: 'ed-description', alternative_description: 'ed-alt', hashtags: 'ed-tag-input', category: 'ed-category', schedule: 'ed-schedule', mediaUrl: 'ed-media-url' };
-        byId(fieldMap[Object.keys(check.errors)[0]])?.focus();
+        const field = byId(fieldMap[Object.keys(check.errors)[0]]);
+        // The category sits in a folded group; it opens so the field with the problem can be seen.
+        field?.closest('details')?.setAttribute('open', '');
+        field?.focus();
         return null;
       }
       if (countedResult(item, settings.mode)) {
@@ -144,7 +145,7 @@ export class Orchestrator extends View {
         return null;
       }
       if (already) skipNote = ` ${pluralize(already, 'post')} already scheduled will be skipped.`;
-      targets = await this.checkBeforeScheduling(targets);
+      targets = await this.checkBeforeScheduling(targets, scope);
       if (!targets) return null;
     }
 
@@ -173,7 +174,7 @@ export class Orchestrator extends View {
    * sent instead of failing post by post. Offers to schedule the valid ones or to open the planner.
    * @param {object[]} targets @returns {Promise<object[]|null>} the posts to schedule, or null to stop
    */
-  async checkBeforeScheduling(targets) {
+  async checkBeforeScheduling(targets, scope) {
     const checks = targets.map((item) => ({ item, check: this.validation.validatePost(item, this.settings) }));
     const invalid = checks.filter((c) => !c.check.valid);
     if (!invalid.length) return targets;
@@ -191,7 +192,7 @@ export class Orchestrator extends View {
         valid.length ? { value: 'valid', label: `Schedule the ${pluralize(valid.length, 'ready post')}`, primary: true } : null
       ].filter(Boolean)
     });
-    if (choice === 'plan') this.ui.openPlanner();
+    if (choice === 'plan') this.ui.openPlanner(scope === 'selected' ? 'selected' : 'all');
     return choice === 'valid' ? valid : null;
   }
 

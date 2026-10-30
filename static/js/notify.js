@@ -30,19 +30,22 @@ export class NotificationService extends EventTarget {
    * Shows a toast notification.
    * @param {string} message
    * @param {'info'|'success'|'warning'|'error'} [type]
-   * @param {{title?: string, timeout?: number}} [options] timeout 0 keeps it open
+   * @param {{title?: string, timeout?: number, action?: {label: string, onClick: Function}, onClose?: Function}} [options]
+   *   timeout 0 keeps it open; action adds one button (Undo) that closes the toast; onClose runs once when it goes
    * @returns {HTMLElement}
    */
-  toast(message, type = 'info', { title, timeout } = {}) {
+  toast(message, type = 'info', { title, timeout, action, onClose } = {}) {
     const icons = { success: 'check-circle', error: 'alert-circle', warning: 'alert', info: 'info' };
     const kind = icons[type] ? type : 'info';
     const duration = timeout ?? TIMING.toastMs[kind];
     const closeButton = el('button', { type: 'button', class: 'btn btn-ghost btn-icon btn-xs toast-close', 'aria-label': 'Dismiss notification' }, [icon('x')]);
+    const actionButton = action ? el('button', { type: 'button', class: 'btn btn-sm toast-action', text: action.label }) : null;
     const toast = el('div', { class: `toast toast-${kind}`, role: kind === 'error' ? 'alert' : 'status' }, [
       icon(icons[kind]),
       el('div', {}, [
         title ? el('div', { class: 'toast-title', text: title }) : null,
-        el('div', { class: title ? 'toast-msg' : 'toast-title', text: message })
+        el('div', { class: title ? 'toast-msg' : 'toast-title', text: message }),
+        actionButton
       ]),
       closeButton,
       duration > 0 ? el('div', { class: 'toast-timer', style: `animation-duration:${duration}ms` }) : null
@@ -51,10 +54,18 @@ export class NotificationService extends EventTarget {
     let remaining = duration;
     let startedAt = 0;
     let timer = null;
+    let closed = false;
+    // Runs once however the toast goes: timed out, dismissed, its action used, or pushed out by newer toasts.
+    toast._close = () => {
+      if (closed) return;
+      closed = true;
+      onClose?.();
+    };
     const dismiss = () => {
       clearTimeout(timer);
       if (!toast.isConnected || toast.classList.contains('is-leaving')) return;
       toast.classList.add('is-leaving');
+      toast._close();
       setTimeout(() => toast.remove(), 200);
     };
     const start = () => {
@@ -69,6 +80,7 @@ export class NotificationService extends EventTarget {
       remaining = Math.max(800, remaining - (Date.now() - startedAt));
     };
     closeButton.addEventListener('click', dismiss);
+    actionButton?.addEventListener('click', () => { action.onClick(); dismiss(); });
     toast.addEventListener('mouseenter', pause);
     toast.addEventListener('mouseleave', () => { if (!timer) start(); });
     toast.addEventListener('focusin', pause);
@@ -78,7 +90,11 @@ export class NotificationService extends EventTarget {
     // Keep the stack short so toasts never bury the page (tighter on phones).
     // Two at most, so toasts never stack over the cards being reviewed.
     const maxToasts = 2;
-    while (this.toastRegion.children.length > maxToasts) this.toastRegion.firstElementChild.remove();
+    while (this.toastRegion.children.length > maxToasts) {
+      const oldest = this.toastRegion.firstElementChild;
+      oldest._close?.();
+      oldest.remove();
+    }
     start();
     return toast;
   }

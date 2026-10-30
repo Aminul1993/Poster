@@ -1,9 +1,9 @@
 /** The Image gallery card: keyed cards, selection, reordering and removal. */
 import { showToast } from '../app.js';
+import { LIMITS } from '../config.js';
 import { countedResult, emptyContent, hasContent, itemStatus } from '../store.js';
-import { splitPostText } from './posts.js';
 import { TimeZoneUtil } from '../time.js';
-import { applyScriptLang, el, icon, pluralize, truncate } from '../util.js';
+import { applyScriptLang, el, icon, pluralize, splitPostText, truncate } from '../util.js';
 import { byId, hasFiles, statusChip } from './dom.js';
 import { View } from './view.js';
 
@@ -51,6 +51,8 @@ export class GalleryView extends View {
     selectAll.checked = items.length > 0 && selected === items.length;
     selectAll.indeterminate = selected > 0 && selected < items.length;
     byId('selection-info').textContent = selected ? `${selected} of ${items.length} selected` : 'None selected';
+    byId('bulk-edit').hidden = !selected;
+    byId('bulk-edit').disabled = running;
   }
 
   /** Updates one card in place (used while typing in the editor, when nothing else can change). */
@@ -177,7 +179,7 @@ export class GalleryView extends View {
     refs.listCaption.placeholder = 'Write a caption, or generate it with AI';
     refs.listCaption.readOnly = locked;
     refs.listTime.readOnly = locked;
-    refs.listCaption.title = locked && !item.busy ? 'In Buffer: edit it under Scheduled posts' : '';
+    refs.listCaption.title = locked && !item.busy ? 'Scheduled: open the post in the editor to change it' : '';
     // The whole post in the row: its hashtags as read-only pills (edit them in the editor).
     refs.listTags.replaceChildren(...view.tags.map((tag) => {
       const pill = el('span', { class: 'tag tag-static', text: tag });
@@ -240,9 +242,12 @@ export class GalleryView extends View {
     const sideBySide = window.matchMedia?.(SIDE_BY_SIDE).matches;
     byId('editor').scrollIntoView({ block: sideBySide ? 'nearest' : 'start', behavior: reduce ? 'auto' : 'smooth' });
     if (!focus) return;
-    // A locked post's caption cannot take focus; its "Edit in Scheduled posts" button is where to go next.
+    // Focus goes where the next step is: Generate before any caption, "Edit in Buffer" on a locked post, else the caption.
     const caption = byId('ed-description');
-    (caption.matches(':disabled') && !byId('ed-result-edit').hidden ? byId('ed-result-edit') : caption).focus({ preventScroll: true });
+    let target = caption;
+    if (byId('editor').classList.contains('is-blank')) target = byId('ed-blank-generate');
+    else if (byId('editor').classList.contains('is-locked') && !byId('ed-result-edit').hidden) target = byId('ed-result-edit');
+    target.focus({ preventScroll: true });
   }
 
   bind() {
@@ -362,9 +367,40 @@ export class GalleryView extends View {
       showToast('Wait for the current operation to finish before removing images.', 'warning');
       return;
     }
-    this.store.remove(id);
+    const removedFrom = this.cards.get(id);
+    const keyboard = removedFrom?.contains(document.activeElement);
+    const { index } = this.store.remove(id, { keepPreview: true });
     this.notifier.log('info', 'user', `Removed "${item.name}" from the gallery.`);
-    showToast(`Removed "${truncate(item.name, 40)}".${hasContent(item) ? ' Its content is saved and returns if you upload it again.' : ''}`, 'info');
+    // The keyboard stays in the gallery: on the card now in that place, or on the upload area when none is left.
+    if (keyboard) {
+      const next = this.store.all()[Math.min(index, this.store.count - 1)];
+      (next ? this.cards.get(next.id)?._refs.media : byId('dropzone'))?.focus();
+    }
+    // Undo puts the image back where it was, with its caption, times and status, until the toast goes.
+    let restored = false;
+    showToast(`Removed "${truncate(item.name, 40)}".${hasContent(item) ? ' Its content is saved and returns if you upload it again.' : ''}`, 'info', {
+      timeout: 8000,
+      action: { label: 'Undo', onClick: () => { restored = this.undoRemove(item, index); } },
+      onClose: () => { if (!restored) URL.revokeObjectURL(item.previewUrl); }
+    });
+  }
+
+  /** @param {object} item @param {number} index @returns {boolean} whether the image is back in the gallery */
+  undoRemove(item, index) {
+    if (this.scheduler.isRunning) {
+      showToast(`Wait for the current operation to finish, then add "${truncate(item.name, 40)}" again.`, 'warning');
+      return false;
+    }
+    if (this.store.count >= LIMITS.maxImages || this.store.all().some((i) => i.fingerprint === item.fingerprint)) {
+      showToast(this.store.count >= LIMITS.maxImages
+        ? `The gallery is full, so "${truncate(item.name, 40)}" was not put back.`
+        : `"${truncate(item.name, 40)}" is already in the gallery.`, 'info');
+      return false;
+    }
+    this.store.restore(item, index);
+    this.notifier.log('info', 'user', `Put "${item.name}" back in the gallery.`);
+    this.cards.get(item.id)?._refs.media.focus({ preventScroll: true });
+    return true;
   }
 
   async removeAllImages() {

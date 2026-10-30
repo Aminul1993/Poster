@@ -2,6 +2,12 @@
 
 const formats = new Map();
 
+/** Current IANA names for renamed zones: browsers still report "Asia/Calcutta" for India, for example. */
+const RENAMED = Object.freeze({
+  'Asia/Calcutta': 'Asia/Kolkata', 'Asia/Dacca': 'Asia/Dhaka', 'Asia/Katmandu': 'Asia/Kathmandu', 'Asia/Saigon': 'Asia/Ho_Chi_Minh',
+  'Asia/Rangoon': 'Asia/Yangon', 'Asia/Thimbu': 'Asia/Thimphu', 'Europe/Kiev': 'Europe/Kyiv', 'America/Godthab': 'America/Nuuk'
+});
+
 /**
  * A shared Intl.DateTimeFormat: building one costs far more than formatting with it, and the editor and the
  * posts list format dates on every keystroke and render. Throws like the constructor for an unknown zone.
@@ -21,7 +27,7 @@ export function dateTimeFormat(locale, options) {
 export const TimeZoneUtil = {
   /** @returns {string} the browser's IANA zone */
   browserZone() {
-    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+    try { return this.modern(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'); } catch { return 'UTC'; }
   },
 
   /** @param {string} zone @returns {boolean} */
@@ -41,6 +47,7 @@ export const TimeZoneUtil = {
         'America/Sao_Paulo', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
         'America/Anchorage', 'Pacific/Honolulu', 'America/Toronto', 'America/Mexico_City'];
     }
+    zones = [...new Set(zones.map((zone) => this.modern(zone)))];
     if (!zones.includes('UTC')) zones = ['UTC', ...zones];
     return zones;
   },
@@ -83,6 +90,10 @@ export const TimeZoneUtil = {
     return { date, exists: this.toLocalInput(date, zone) === normalizedInput };
   },
 
+  /** @param {string} zone @returns {string} the zone's current name ("Asia/Kolkata" for "Asia/Calcutta") */
+  modern(zone) {
+    return RENAMED[zone] || zone;
+  },
   /** Whether `date` falls between 11 pm and 6 am in `zone`, when few people see a post. */
   isNight(date, zone) {
     const { hour } = this.parts(date, zone);
@@ -96,18 +107,42 @@ export const TimeZoneUtil = {
   },
 
   /**
-   * Human readable date/time in `zone`, the one format the dashboard shows ("Fri, 30 Oct, 4:00 pm"). The year
-   * appears only when it is not this year; the zone is named once beside the fields, not in every date.
+   * Human readable date/time in `zone`, the one format the dashboard shows ("Fri, 30 Oct, 4:00 pm") whatever
+   * the browser's locale, so it matches the "11 pm" and "6 am" written elsewhere. The year appears only when
+   * it is not this year; the zone is named once beside the fields, not in every date.
    */
-  format(date, zone, options = {}) {
+  format(date, zone) {
     try {
-      const otherYear = this.parts(date, zone).year !== this.parts(new Date(), zone).year;
-      return dateTimeFormat(undefined, {
-        timeZone: zone, weekday: 'short', month: 'short', day: 'numeric', ...(otherYear ? { year: 'numeric' } : {}),
-        hour: 'numeric', minute: '2-digit', ...options
-      }).format(date);
+      const p = this.namedParts(date, zone);
+      const otherYear = Number(p.year) !== this.parts(new Date(), zone).year;
+      return `${p.weekday}, ${p.day} ${p.month}${otherYear ? ` ${p.year}` : ''}, ${this.clock(p)}`;
     } catch {
       return date.toISOString();
     }
+  },
+
+  /** @returns {string} the time of day alone in `zone` ("4:00 pm"); with seconds for the activity log */
+  formatTime(date, zone, { seconds = false } = {}) {
+    try {
+      return this.clock(this.namedParts(date, zone), seconds);
+    } catch {
+      return date.toISOString().slice(11, seconds ? 19 : 16);
+    }
+  },
+
+  /** Weekday, month and 12-hour clock parts of `date` in `zone`, in English. */
+  namedParts(date, zone) {
+    const dtf = dateTimeFormat('en-US', {
+      timeZone: zone, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+      hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true
+    });
+    const out = {};
+    for (const part of dtf.formatToParts(date)) if (part.type !== 'literal') out[part.type] = part.value;
+    return out;
+  },
+
+  /** @returns {string} "4:00 pm", or "4:00:05 pm" */
+  clock(p, seconds = false) {
+    return `${p.hour}:${p.minute}${seconds ? `:${p.second}` : ''} ${String(p.dayPeriod).toLowerCase()}`;
   }
 };

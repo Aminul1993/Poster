@@ -28,7 +28,7 @@ def test_connect_generate_schedule_edit_delete(live: Page, fake: FakeUpstream) -
     connect_buffer(page)
 
     add_images(page, ("harbour.jpg", jpeg((40, 90, 160))))
-    page.click("#ed-generate")
+    page.click("#ed-blank-generate")
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
     expect(page.locator("#ed-description")).to_have_value(DEFAULT_REPLY["description"])
     expect(page.locator("#ed-tags .tag")).to_have_count(11)
@@ -42,6 +42,8 @@ def test_connect_generate_schedule_edit_delete(live: Page, fake: FakeUpstream) -
     expect(page.locator("#sched-list .sched-channel")).to_have_count(2)
     expect(page.locator("#ed-result-title")).to_contain_text("In Buffer")
     expect(page.locator("#ed-result-edit")).to_be_enabled()
+    expect(page.locator("#ed-result-edit")).to_have_text("Edit in Buffer")
+    expect(page.locator("#ed-description")).not_to_be_editable()
 
     posts = list(fake.buffer.posts.values())
     assert len(posts) == 2 and {p["channelId"] for p in posts} == {"ch1", "ch2"}
@@ -50,19 +52,57 @@ def test_connect_generate_schedule_edit_delete(live: Page, fake: FakeUpstream) -
     assert posts[0]["text"].startswith(DEFAULT_REPLY["description"]) and "#beach" in posts[0]["text"]
     assert fake.ops("blob.") == ["blob.put", "blob.put"]
 
+    # Edit in place: the editor saves the caption straight to every channel copy in Buffer.
+    page.click("#ed-result-edit")
+    expect(page.locator("#ed-description")).to_be_focused()
+    page.fill("#ed-description", "Harbour lights, edited in place")
+    page.click("#ed-buffer-save")
+    toast(page, "Saved to Buffer on 2 channels.")
+    expect(page.locator("#ed-description")).not_to_be_editable()
+    expect(page.locator("#ed-description")).to_have_value("Harbour lights, edited in place")
+    assert all(p["text"].startswith("Harbour lights, edited in place") for p in fake.buffer.posts.values())
+
+    # Edit in Scheduled posts opens a post from this batch in the editor, not in a second, different editor.
     page.locator("#sched-list [data-action=edit]").first.click()
-    page.fill("#post-due", local_input(3, 15))
+    expect(page.locator("#ed-description")).to_be_focused()
+    page.fill("#ed-schedule", local_input(3, 15))
+    page.click("#ed-buffer-save")
+    expect(page.locator("#ed-result-edit")).to_be_focused()  # the save is done (the earlier toast may still show)
+    assert all(p["dueAt"].endswith("T15:00:00Z") for p in fake.buffer.posts.values())
+
+    # Once its image has left the gallery, the post is edited in the dialog.
+    page.locator("#gallery .thumb-card").first.locator("[data-action=remove]").click()
+    page.locator("#sched-list [data-action=edit]").first.click()
+    expect(page.locator("#post-dialog")).to_be_visible()
+    page.fill("#post-due", local_input(3, 16))
+    expect(page.locator("#post-due-hint")).to_contain_text(" · ")
     page.click("#post-save")
     toast(page, "The post was updated in Buffer.")
-    assert any(p["dueAt"].endswith("T15:00:00Z") for p in fake.buffer.posts.values())
+    assert any(p["dueAt"].endswith("T16:00:00Z") for p in fake.buffer.posts.values())
 
-    # Delete only one channel's copy: the post stays, on the other channel.
+    # Delete only one channel's copy, from its line in the list: the post stays, on the other channel.
     page.locator("#sched-list [data-action=delete-one]").first.click()
     confirm(page, "copy")
-    toast(page, "The post was deleted from Buffer.")
+    toast(page, "copy deleted;")
     expect(page.locator("#sched-list > li")).to_have_count(1)
     expect(page.locator("#sched-list .sched-channel")).to_have_count(1)
+    expect(page.locator("#sched-list [data-action=delete-one]")).to_have_count(0)
     assert len(fake.buffer.posts) == 1
+
+
+def test_a_refusal_says_why_in_settings(live: Page) -> None:
+    page = live
+    add_images(page, ("pier.jpg", jpeg((90, 40, 160))))
+    page.click("#ed-blank-generate")
+    expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    page.fill("#ed-schedule", local_input(2))
+    page.click("#ed-schedule-post")
+    # No channel is chosen yet: the reason is in the drawer it opens, under Buffer, not in a toast behind it.
+    expect(page.locator("#settings-dialog")).to_be_visible()
+    reason = page.locator("#settings-buffer #settings-reason")
+    expect(reason).to_be_visible()
+    expect(reason).to_contain_text("No Buffer channels selected")
+    expect(reason).to_be_focused()
 
 
 def test_auth_failure_stops_generation_with_a_banner(live: Page, fake: FakeUpstream) -> None:
@@ -112,7 +152,7 @@ def test_a_lost_answer_does_not_schedule_twice(live: Page, fake: FakeUpstream) -
     page = live
     connect_buffer(page)
     add_images(page, ("pier.jpg", jpeg((90, 40, 160))))
-    page.click("#ed-generate")
+    page.click("#ed-blank-generate")
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
 
     # Buffer creates the post on the first channel, but its answer never arrives.
@@ -140,8 +180,18 @@ def test_password_protected_dashboard(serve: Callable[..., str], browser: Browse
     page.goto(url)
     expect(page.locator("#mode-badge-label")).to_have_text("Live mode")
     add_images(page, ("locked.jpg", jpeg((5, 50, 5))))
-    page.click("#ed-generate")
+    page.click("#ed-blank-generate")
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
     context.close()
     assert not errors
     assert "ollama.chat" in fake.ops()
+
+
+def test_caption_language_reaches_the_model(live: Page, fake: FakeUpstream) -> None:
+    page = live
+    add_images(page, ("market.jpg", jpeg((150, 60, 20))))
+    page.select_option("#ed-language", "bn-en")
+    page.click("#ed-blank-generate")
+    expect(page.locator("#op-title")).to_have_text("Content generation complete")
+    [chat] = [c for c in fake.calls if c.op == "ollama.chat"]
+    assert "Bengali in Bangla script, mixed naturally with English" in chat.json["messages"][1]["content"]

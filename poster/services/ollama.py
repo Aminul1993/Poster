@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from poster.config import API, TONES, Config, check_url, is_placeholder
+from poster.config import API, LANGUAGES, TONES, Config, check_url, is_placeholder
 from poster.content import extract_json_object, normalize_content
 from poster.errors import ServiceError, extract_error_detail, truncate
 from poster.http import HttpClient
@@ -36,6 +36,7 @@ class GenerationOptions:
     extra: str
     desc_min: int
     desc_max: int
+    language: str = "en"
 
 
 class OllamaService(ConfiguredService):
@@ -117,6 +118,8 @@ class OllamaService(ConfiguredService):
             '- "category": a short content category such as Travel, Food, Fashion, Lifestyle, Nature, Pets, Fitness, Technology, Product or Art.',
             '- "engagement_score": an integer from 1 to 100 estimating how well the post will perform.',
             f"- Tone of voice: {TONES.get(opts.tone, TONES['friendly'])}.",
+            f'- Language: write "description" and "alternative_description" in {LANGUAGES.get(opts.language, LANGUAGES["en"])["prompt"]}. '
+            "Hashtags may use that script or English.",
             "- Describe only what is visible. Do not invent brand names, places or people.",
         ]
         if opts.extra:

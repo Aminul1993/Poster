@@ -1,18 +1,19 @@
 /** The post editor: captions, hashtags, category, score, publish time and media URL of the active image. */
 import { generateContentForImage, scheduleSinglePost, showToast } from '../app.js';
-import { LIMITS, SERVER } from '../config.js';
+import { LANGUAGES, LIMITS, SERVER } from '../config.js';
 import { showThumbnail } from '../image.js';
 import { serviceMeta } from '../services/buffer.js';
-import { countedResult, emptyContent, hasContent, itemStatus, needsTime } from '../store.js';
+import { contentFromText, countedResult, emptyContent, hasContent, itemStatus, needsTime } from '../store.js';
 import { TimeZoneUtil } from '../time.js';
-import { applyScriptLang, charCount, el, formatBytes, icon, relativeTime, scriptRuns, truncate } from '../util.js';
+import { applyScriptLang, charCount, el, formatBytes, icon, pluralize, relativeTime, scriptLang, scriptRuns, splitPostText, truncate } from '../util.js';
 import { byId, colorDot, setFieldError, statusChip } from './dom.js';
-import { splitPostText } from './posts.js';
 import { View } from './view.js';
+
+const TAGS_HINT = 'Enter, comma or space adds a tag · ← from the empty field moves to the tags, Delete removes one';
 
 /** @param {object} item @param {object} settings @returns {boolean} whether a post needs the owner before it can go out */
 function needsAttention(item, settings) {
-  return !item.busy && (Boolean(item.error) || !hasContent(item) || needsTime(item, settings));
+  return !item.busy && (Boolean(item.error) || !hasContent(item) || needsTime(item, settings) || Boolean(item.result?.removed));
 }
 
 export class EditorView extends View {
@@ -21,11 +22,24 @@ export class EditorView extends View {
     /** @type {Set<string>} posts the owner chose to write by hand before any caption existed */
     this.writing = new Set();
     this.announcedId = null;
+    /** @type {{id: string, snapshot: object}|null} the scheduled post being edited in place, and how it was before */
+    this.bufferEdit = null;
+    this.savingBuffer = false;
   }
 
   /** Full editor render for the active image. */
   render() {
     const item = this.store.active;
+    if (this.bufferEdit && this.bufferEdit.id !== item?.id && !this.savingBuffer) {
+      // Leaving a post mid-edit puts it back as Buffer has it, so the draft never drifts from Buffer.
+      const edit = this.bufferEdit;
+      this.bufferEdit = null;
+      const other = this.store.get(edit.id);
+      if (other) {
+        this.store.update(edit.id, { ...edit.snapshot, showErrors: false }, { reason: 'status' });
+        showToast(`Your unsaved edit to "${truncate(other.name, 40)}" was discarded; Buffer still has the earlier version.`, 'info');
+      }
+    }
     const items = this.store.all();
     const editor = byId('editor');
     const empty = byId('editor-empty');
@@ -61,17 +75,36 @@ export class EditorView extends View {
 
     const busy = item.busy === 'generating' || item.busy === 'scheduling';
     const running = this.scheduler.isRunning;
-    // A post already in Buffer is not edited here: Buffer would keep the old text while this showed the new.
-    const locked = Boolean(countedResult(item, s.mode));
-    byId('ed-fieldset').disabled = busy || locked;
+    // A post already in Buffer is read-only until "Edit in Buffer", which saves straight to every channel copy.
+    const scheduled = Boolean(countedResult(item, s.mode));
+    // Deleted in Scheduled posts while being edited here: it is an ordinary draft again.
+    if (!scheduled && this.bufferEdit?.id === item.id && !this.savingBuffer) this.bufferEdit = null;
+    const editingBuffer = scheduled && this.bufferEdit?.id === item.id;
+    const locked = scheduled && !editingBuffer;
+    byId('ed-fieldset').disabled = busy || this.savingBuffer;
+    // A post in Buffer is read-only rather than disabled: its words stay readable, and reachable with Tab.
+    for (const id of ['ed-description', 'ed-alt', 'ed-tag-input', 'ed-schedule']) byId(id).readOnly = locked;
+    // Only the words and the time live in Buffer; category, image URL and channels stay as scheduled.
+    for (const id of ['ed-category', 'ed-media-url']) byId(id).readOnly = scheduled;
+    byId('ed-channels-edit').disabled = scheduled;
+    byId('ed-swap').disabled = locked;
+    for (const radio of document.querySelectorAll('input[name="ed-use"]')) radio.disabled = locked;
+    editor.classList.toggle('is-locked', locked);
+    editor.classList.toggle('is-buffer-edit', editingBuffer);
+    for (const note of editor.querySelectorAll('.lock-text')) note.textContent = item.result?.mode === 'demo' ? 'Scheduled' : 'In Buffer';
     // Before there is a caption, the editor offers the two ways to get one instead of an empty form.
     editor.classList.toggle('is-blank', !hasContent(item) && !item.busy && !this.writing.has(item.id));
     byId('editor-busy').hidden = !busy;
     byId('editor-busy-label').textContent = item.busy === 'scheduling' ? 'Scheduling post…' : 'Generating content…';
-    byId('ed-generate').disabled = running || locked;
+    byId('ed-generate').disabled = running || scheduled;
+    // This post's caption language: empty follows the batch's, which the first option names.
+    const language = byId('ed-language');
+    language.options[0].textContent = `Batch setting (${LANGUAGES[s.language] || 'English'})`;
+    language.value = item.language || '';
+    language.disabled = busy || scheduled;
     byId('ed-generate-label').textContent = hasContent(item) ? 'Regenerate content' : 'Generate content';
     byId('ed-restore').hidden = !item.previousContent;
-    byId('ed-restore').disabled = running || busy || locked;
+    byId('ed-restore').disabled = running || busy || scheduled;
     this.renderScheduleButton(item);
 
     const content = item.content || emptyContent();
@@ -111,7 +144,10 @@ export class EditorView extends View {
       let lines;
       if (r.removed) {
         title = 'Removed from Buffer';
-        lines = ['Its posts were deleted. Give it a new time to schedule it again.'];
+        const due = item.scheduleLocal ? TimeZoneUtil.zonedToUtc(item.scheduleLocal, s.timezone) : null;
+        lines = [due && due.date.getTime() > Date.now()
+          ? `Its posts were deleted. Schedule post puts it back at ${TimeZoneUtil.format(due.date, s.timezone)}, or pick a new time.`
+          : 'Its posts were deleted. Pick a new time, then Schedule post.'];
       } else if (!counts) {
         title = 'Scheduled in Demo mode only';
         lines = ['This was a rehearsal: the post is not in Buffer. Schedule it to publish it for real.'];
@@ -119,11 +155,18 @@ export class EditorView extends View {
         title = `${r.mode === 'demo' ? 'In Demo mode (not in Buffer)' : 'In Buffer'} · ${TimeZoneUtil.format(new Date(r.dueAt), r.timezone || s.timezone)}`;
         lines = [`On ${(r.channels || []).join(', ') || 'no channel'}.`];
         if (r.failures?.length) lines.push(`Failed on: ${r.failures.map((f) => `${f.name} (${f.message})`).join('; ')}.`);
-        lines.push(r.edited ? 'Edited in Scheduled posts; shown as it is now. Locked here.' : 'Locked here: edit it in Scheduled posts.');
+        const place = r.mode === 'demo' ? 'in Demo mode' : 'in Buffer';
+        lines.push(editingBuffer
+          ? `Editing: change the caption, hashtags or time, then save ${r.mode === 'demo' ? 'in Demo mode' : 'to Buffer'}.`
+          : r.edited ? `Edited ${place}; shown as it is now.` : `Shown as it is ${place}.`);
       }
       byId('ed-result-title').textContent = title;
       byId('ed-result-text').textContent = lines.join(' ');
-      byId('ed-result-edit').hidden = !counts || !(r.postIds || []).length;
+      byId('ed-result-edit').hidden = !counts || editingBuffer || !(r.postIds || []).length;
+      byId('ed-result-edit-label').textContent = r.mode === 'demo' ? 'Edit post' : 'Edit in Buffer';
+      byId('ed-buffer-save').hidden = !editingBuffer;
+      byId('ed-buffer-cancel').hidden = !editingBuffer;
+      byId('ed-buffer-save-label').textContent = r.mode === 'demo' ? 'Save in Demo mode' : 'Save to Buffer';
       resultBox.classList.toggle('is-success', counts && !r.partial);
       resultBox.classList.toggle('is-info', !counts || Boolean(r.partial));
     }
@@ -137,7 +180,7 @@ export class EditorView extends View {
    */
   renderScheduleButton(item) {
     const scheduled = Boolean(countedResult(item, this.settings.mode));
-    byId('ed-schedule-post').disabled = this.scheduler.isRunning;
+    byId('ed-schedule-post').disabled = this.scheduler.isRunning || this.bufferEdit?.id === item.id;
     byId('ed-schedule-label').textContent = scheduled ? 'Schedule again' : 'Schedule post';
   }
 
@@ -148,11 +191,13 @@ export class EditorView extends View {
     byId('ed-attention-count').textContent = String(others.length);
     const failed = others.filter((i) => i.error).length;
     const noCaption = others.filter((i) => !i.error && !hasContent(i)).length;
-    const noTime = others.length - failed - noCaption;
+    const removed = others.filter((i) => !i.error && hasContent(i) && i.result?.removed).length;
+    const noTime = others.length - failed - noCaption - removed;
     byId('ed-attention-detail').textContent = [
       noTime ? `${noTime} need${noTime === 1 ? 's' : ''} a time` : '',
       noCaption ? `${noCaption} without a caption` : '',
-      failed ? `${failed} failed` : ''
+      failed ? `${failed} failed` : '',
+      removed ? `${removed} removed from Buffer` : ''
     ].filter(Boolean).join(' · ');
   }
 
@@ -172,6 +217,7 @@ export class EditorView extends View {
     byId('ed-status').replaceChildren(statusChip(itemStatus(item, s)));
     this.renderScheduleButton(item);
     applyScriptLang(byId('ed-description'), content.description);
+    byId('ed-count-hint').hidden = !scriptLang(content.description);
     applyScriptLang(byId('ed-alt'), content.alternative_description);
 
     const descLength = charCount(content.description);
@@ -191,7 +237,12 @@ export class EditorView extends View {
     setFieldError('ed-category', charCount(content.category) > LIMITS.maxCategoryChars ? `Keep the category under ${LIMITS.maxCategoryChars} characters.` : null);
 
     const score = Number(content.engagement_score);
-    byId('ed-score-value').textContent = hasContent(item) && score >= 1 ? `${Math.round(score)} / 100` : '—';
+    const estimate = hasContent(item) && score >= 1 ? `${Math.round(score)} / 100` : '';
+    byId('ed-score-value').textContent = estimate || '—';
+    // The folded group still says what it holds, so the category is never out of sight.
+    const category = String(content.category || '').trim();
+    byId('ed-notes-summary').textContent = hasContent(item) ? `${category || 'No category'} · ${estimate ? `${estimate} estimate` : 'no estimate'}` : '';
+    if (charCount(content.category) > LIMITS.maxCategoryChars) byId('ed-notes').open = true;
 
     const hint = byId('ed-schedule-hint');
     if (item.scheduleLocal) {
@@ -274,6 +325,12 @@ export class EditorView extends View {
   }
 
   bind() {
+    byId('ed-language').replaceChildren(el('option', { value: '', text: 'Batch setting' }),
+      ...Object.entries(LANGUAGES).map(([value, label]) => el('option', { value, text: label })));
+    byId('ed-language').addEventListener('change', (e) => {
+      const item = this.store.active;
+      if (item && !item.busy) this.store.update(item.id, { language: e.target.value }, { reason: 'edit' });
+    });
     byId('ed-description').addEventListener('input', (e) => this.updateContentField('description', e.target.value));
     byId('ed-alt').addEventListener('input', (e) => this.updateContentField('alternative_description', e.target.value));
     byId('ed-category').addEventListener('input', (e) => this.updateContentField('category', e.target.value));
@@ -301,7 +358,10 @@ export class EditorView extends View {
     byId('ed-generate').addEventListener('click', () => generateContentForImage());
     byId('ed-schedule-post').addEventListener('click', () => scheduleSinglePost());
     byId('ed-restore').addEventListener('click', () => this.restorePrevious());
-    byId('ed-result-edit').addEventListener('click', () => this.editScheduled());
+    byId('ed-result-edit').addEventListener('click', () => this.startBufferEdit());
+    byId('ed-buffer-save').addEventListener('click', () => this.saveBufferEdit());
+    byId('ed-buffer-cancel').addEventListener('click', () => this.cancelBufferEdit());
+    byId('ed-blank-generate').addEventListener('click', () => generateContentForImage());
     byId('ed-write').addEventListener('click', () => {
       if (!this.store.active) return;
       this.writing.add(this.store.active.id);
@@ -311,7 +371,7 @@ export class EditorView extends View {
     byId('ed-channels-edit').addEventListener('click', () => this.ui.openSettings('settings-buffer'));
     byId('ed-swap').addEventListener('click', () => {
       const item = this.store.active;
-      if (!item || item.busy) return;
+      if (!item || item.busy || this.isLocked(item)) return;
       const c = item.content || emptyContent();
       this.store.update(item.id, { content: { ...c, description: c.alternative_description, alternative_description: c.description } }, { reason: 'edit' });
       this.render();
@@ -324,9 +384,10 @@ export class EditorView extends View {
       if (event.isComposing) return;
       if (['Enter', ',', ' ', ';'].includes(event.key) || (event.key === 'Tab' && tagInput.value.trim())) {
         if (tagInput.value.trim()) {
-          event.preventDefault();
-          this.addTags(tagInput.value);
-          tagInput.value = '';
+          const rest = this.addTags(tagInput.value);
+          // Tab moves on when tags were left in the field; otherwise the cursor stays to add more.
+          if (event.key !== 'Tab' || !rest) event.preventDefault();
+          tagInput.value = rest;
         } else if (event.key !== 'Tab') {
           event.preventDefault();
         }
@@ -339,10 +400,10 @@ export class EditorView extends View {
       const text = event.clipboardData?.getData('text') || '';
       if (!/[\s,;]/.test(text.trim())) return;
       event.preventDefault();
-      this.addTags(text);
+      tagInput.value = this.addTags(text);
     });
     tagInput.addEventListener('blur', () => {
-      if (tagInput.value.trim()) { this.addTags(tagInput.value); tagInput.value = ''; }
+      if (tagInput.value.trim()) tagInput.value = this.addTags(tagInput.value);
     });
     // The hashtags are one tab stop: ← from the empty field reaches them, arrows move, Delete removes, → or Esc returns.
     tagBox.addEventListener('keydown', (event) => {
@@ -394,16 +455,104 @@ export class EditorView extends View {
     this.ui.gallery.revealEditor({ focus: true });
   }
 
-  /** Opens the scheduled post's own edit dialog, which changes it in Buffer. */
-  editScheduled() {
-    const ids = this.store.active?.result?.postIds || [];
-    const copies = this.feed.posts.filter((p) => ids.includes(p.postId));
-    if (copies.length) {
-      this.ui.posts.openDialog(copies);
+  /** @param {object} item @returns {boolean} whether the post is in Buffer and shown read-only (not being edited) */
+  isLocked(item) {
+    return Boolean(countedResult(item, this.settings.mode)) && this.bufferEdit?.id !== item.id;
+  }
+
+  /**
+   * Edit in Scheduled posts, for a post from this batch: it opens here, where its caption, hashtags and time
+   * are edited with the same fields as before it was scheduled. @param {string} id
+   */
+  editScheduled(id) {
+    if (this.scheduler.isRunning) {
+      showToast('Wait for the current operation to finish, then edit the post.', 'warning');
       return;
     }
-    byId('schedules-section').scrollIntoView({ block: 'start' });
-    showToast('This post is not in the list that is loaded. Refresh Scheduled posts, then edit it there.', 'info');
+    this.store.setActive(id);
+    this.ui.gallery.revealEditor();
+    this.startBufferEdit();
+  }
+
+  /** Unlocks a scheduled post's caption, hashtags and time; Save sends them to every channel copy. */
+  startBufferEdit() {
+    const item = this.store.active;
+    if (!item || !countedResult(item, this.settings.mode) || this.scheduler.isRunning) return;
+    const r = countedResult(item, this.settings.mode);
+    this.bufferEdit = { id: item.id, snapshot: { content: item.content, useAlternative: item.useAlternative, scheduleLocal: item.scheduleLocal } };
+    // The fields start from the post as Buffer has it now, which is what the locked editor showed.
+    const fields = {};
+    if (r.text) fields.content = contentFromText(item.content, r.text, item.useAlternative);
+    if (r.dueAt) fields.scheduleLocal = TimeZoneUtil.toLocalInput(new Date(r.dueAt), this.settings.timezone);
+    if (Object.keys(fields).length) this.store.update(item.id, fields, { reason: 'status' });
+    this.render();
+    byId('ed-description').focus();
+  }
+
+  /** Puts the post back as Buffer has it. */
+  cancelBufferEdit() {
+    const edit = this.bufferEdit;
+    if (!edit || this.savingBuffer) return;
+    this.bufferEdit = null;
+    if (this.store.get(edit.id)) this.store.update(edit.id, { ...edit.snapshot, showErrors: false }, { reason: 'status' });
+    this.render();
+    byId('ed-result-edit').focus();
+  }
+
+  /** Sends the edited caption, hashtags and time to every channel copy of the post, then locks it again. */
+  async saveBufferEdit() {
+    const item = this.store.get(this.bufferEdit?.id);
+    if (!item || this.savingBuffer) return;
+    const check = this.validation.validatePost(item, this.settings);
+    if (!check.valid) {
+      this.store.update(item.id, { showErrors: true }, { reason: 'validation', persist: false });
+      showToast(check.message, 'error', { title: 'Fix the post before saving' });
+      return;
+    }
+    const r = item.result;
+    const ids = r?.postIds || [];
+    const where = this.app.getBuffer().isDemo ? 'in Demo mode (not in Buffer)' : 'to Buffer';
+    // Only what changed is sent, as in the Scheduled-post dialog.
+    const changes = {};
+    const text = this.scheduler.composeText(item);
+    if (text !== r.text) changes.text = text;
+    if (!r.dueAt || Math.floor(check.date.getTime() / 60000) !== Math.floor(Date.parse(r.dueAt) / 60000)) changes.dueAt = check.date;
+    if (!Object.keys(changes).length) {
+      this.bufferEdit = null;
+      showToast(where === 'to Buffer' ? 'Nothing changed, so Buffer was not updated.' : 'Nothing changed.', 'info');
+      this.render();
+      byId('ed-result-edit').focus();
+      return;
+    }
+    this.savingBuffer = true;
+    this.render();
+    byId('ed-buffer-save').classList.add('is-loading');
+    byId('ed-buffer-cancel').disabled = true;
+    const failed = [];
+    for (const id of ids) {
+      try {
+        await this.feed.edit(id, changes);
+      } catch (error) {
+        failed.push([error.message, error.hint].filter(Boolean).join(' '));
+      }
+    }
+    this.savingBuffer = false;
+    byId('ed-buffer-save').classList.remove('is-loading');
+    byId('ed-buffer-cancel').disabled = false;
+    if (failed.length) {
+      // Copies that saved keep the new version; the edit stays open so the owner can try again.
+      const saved = ids.length - failed.length;
+      // Cancel now goes back to what the saved copies have, not to the text from before.
+      const now = this.store.get(item.id);
+      if (saved && now) this.bufferEdit.snapshot = { content: now.content, useAlternative: now.useAlternative, scheduleLocal: now.scheduleLocal };
+      this.render();
+      showToast(`${failed[0]}${saved ? ` Saved on ${saved} of ${ids.length} channels.` : ''}`, 'error', { title: 'Not every copy was saved' });
+      return;
+    }
+    this.bufferEdit = null;
+    showToast(`Saved ${where} on ${pluralize(ids.length, 'channel')}.`, 'success');
+    this.render();
+    byId('ed-result-edit').focus();
   }
 
   /** Puts back the content the last regeneration replaced (once). */
@@ -418,7 +567,7 @@ export class EditorView extends View {
   /** Updates one content field of the active item from the editor. */
   updateContentField(field, value) {
     const item = this.store.active;
-    if (!item || item.busy) return;
+    if (!item || item.busy || this.isLocked(item)) return;
     const content = { ...(item.content || emptyContent()), [field]: value };
     this.store.update(item.id, { content, error: null, errorHint: '', errorPhase: null }, { reason: 'edit' });
     this.refreshDerived();
@@ -427,7 +576,7 @@ export class EditorView extends View {
   /** Updates non-content fields of the active item from the editor. */
   updateItemField(patch) {
     const item = this.store.active;
-    if (!item || item.busy) return;
+    if (!item || item.busy || this.isLocked(item)) return;
     const clears = item.errorPhase === 'schedule';
     this.store.update(item.id, {
       ...patch, error: clears ? null : item.error, errorHint: clears ? '' : item.errorHint, errorPhase: clears ? null : item.errorPhase,
@@ -438,18 +587,23 @@ export class EditorView extends View {
     this.refreshDerived();
   }
 
-  /** @param {string} text one or more hashtags separated by spaces or commas */
+  /**
+   * @param {string} text one or more hashtags separated by spaces or commas
+   * @returns {string} what could not be added, left in the field for the owner to fix
+   */
   addTags(text) {
     const item = this.store.active;
-    if (!item || item.busy) return;
+    if (!item || item.busy || this.isLocked(item)) return '';
     const content = { ...(item.content || emptyContent()) };
     const tags = [...content.hashtags];
     const problems = [];
+    const kept = [];
+    let full = false;
     for (const part of String(text).split(/[\s,;]+/).filter(Boolean)) {
       const tag = this.validation.normalizeHashtag(part);
-      if (!tag) { problems.push(`"${truncate(part, 30)}" is not a valid hashtag (use letters in any script, numbers or _).`); continue; }
+      if (!tag) { problems.push(`"${truncate(part, 30)}" is not a valid hashtag (use letters in any script, numbers or _).`); kept.push(part); continue; }
       if (tags.some((t) => t.toLowerCase() === tag.toLowerCase())) { problems.push(`${tag} is already added.`); continue; }
-      if (tags.length >= LIMITS.maxHashtags) { problems.push(`The maximum is ${LIMITS.maxHashtags} hashtags.`); break; }
+      if (tags.length >= LIMITS.maxHashtags) { full = true; kept.push(part); continue; }
       tags.push(tag);
     }
     content.hashtags = tags;
@@ -457,13 +611,20 @@ export class EditorView extends View {
     this.renderTags(tags);
     this.refreshDerived();
     if (problems.length) setFieldError('ed-tags', problems.join(' '), byId('ed-tags'));
+    // At the cap the set is still valid: a hint, not an error, and the extra tags wait in the field.
+    const hint = byId('ed-tags-hint');
+    hint.classList.toggle('is-warning', full);
+    hint.textContent = full ? `The maximum is ${LIMITS.maxHashtags} hashtags. Remove one to add what is still in the field.` : TAGS_HINT;
+    return kept.join(' ');
   }
 
   /** @param {string} tag */
   removeTag(tag) {
     const item = this.store.active;
-    if (!item || item.busy || !item.content) return;
+    if (!item || item.busy || !item.content || this.isLocked(item)) return;
     const content = { ...item.content, hashtags: item.content.hashtags.filter((t) => t !== tag) };
+    byId('ed-tags-hint').classList.remove('is-warning');
+    byId('ed-tags-hint').textContent = TAGS_HINT;
     this.store.update(item.id, { content }, { reason: 'edit' });
     this.renderTags(content.hashtags);
     this.refreshDerived();
