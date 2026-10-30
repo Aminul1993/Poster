@@ -2,4 +2,4 @@
 # After changing this file: pip install pip-tools && pip-compile requirements.in
 flask>=3.1
 requests>=2.32.4
-pillow>=11.3
+pillow>=13.0.0
