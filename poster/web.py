@@ -27,9 +27,9 @@ from poster.http import HttpClient
 from poster.imaging import IMAGE_EXTENSIONS, sniff_image
 from poster.retry import RetryLog, time_budget
 from poster.services.buffer import BufferService, ThumbnailFinder
+from poster.services.groq import GroqService
 from poster.services.imagegen import ImageGenService
 from poster.services.media import MediaService
-from poster.services.ollama import OllamaService
 
 log = logging.getLogger("poster")
 
@@ -53,7 +53,7 @@ class Services:
     """The app's configuration and service clients, kept in app.extensions["poster"]."""
 
     config: Config
-    ollama: OllamaService
+    groq: GroqService
     buffer: BufferService
     media: MediaService
     image_gen: ImageGenService
@@ -84,7 +84,7 @@ def create_app(config: Config | None = None, *, http: HttpClient | None = None) 
     app.config["MAX_CONTENT_LENGTH"] = LIMITS["max_image_bytes"] + 1024 * 1024
     app.json.sort_keys = False  # type: ignore[attr-defined]
     app.extensions["poster"] = Services(
-        config=config, ollama=OllamaService(http, config), buffer=BufferService(http, config),
+        config=config, groq=GroqService(http, config), buffer=BufferService(http, config),
         media=MediaService(http, config), image_gen=ImageGenService(http, config), asset_version=asset_version(STATIC_DIR),
     )
     app.register_blueprint(bp)
@@ -95,7 +95,7 @@ def default_mode() -> str:
     mode = services().config.mode
     if mode in ("demo", "live"):
         return mode
-    return "live" if services().ollama.configured else "demo"
+    return "live" if services().groq.configured else "demo"
 
 
 def server_config() -> dict[str, Any]:
@@ -105,7 +105,7 @@ def server_config() -> dict[str, Any]:
     return {
         "version": APP_VERSION,
         "mode": default_mode(),
-        "ollama": s.ollama.public_info(),
+        "groq": s.groq.public_info(),
         "buffer": s.buffer.public_info(),
         "media": s.media.public_info(),
         "imageGen": s.image_gen.public_info(),
@@ -286,7 +286,7 @@ def assets(version: str, filename: str) -> Any:
 @bp.get("/api/health")
 def health() -> Any:
     s = services()
-    return jsonify(status="ok", version=APP_VERSION, ollama=s.ollama.configured, buffer=s.buffer.configured,
+    return jsonify(status="ok", version=APP_VERSION, groq=s.groq.configured, buffer=s.buffer.configured,
                    media=s.media.configured, imageGen=s.image_gen.configured)
 
 
@@ -296,23 +296,23 @@ def config_endpoint() -> Any:
 
 
 def generation_options(body: dict[str, Any]) -> Any:
-    ollama = services().ollama
-    return validation.parse_generation_options(body, default_model=ollama.default_model, allowed_models=ollama.allowed_models)
+    groq = services().groq
+    return validation.parse_generation_options(body, default_model=groq.default_model, allowed_models=groq.allowed_models)
 
 
-@bp.post("/api/ollama/test")
-def ollama_test() -> Any:
+@bp.post("/api/groq/test")
+def groq_test() -> Any:
     opts = generation_options(validation.json_body())
-    return run("Ollama test", lambda retries: services().ollama.test(opts.model, retries))
+    return run("Groq test", lambda retries: services().groq.test(opts.model, retries))
 
 
-@bp.post("/api/ollama/generate")
-def ollama_generate() -> Any:
+@bp.post("/api/groq/generate")
+def groq_generate() -> Any:
     body = validation.json_body()
     opts = generation_options(body)
     image_b64 = validation.parse_image_b64(body.get("image"))
     name = log_safe(body.get("fileName") or "image")
-    return run(f"Ollama generate ({name})", lambda retries: services().ollama.generate(image_b64, opts, retries))
+    return run(f"Groq generate ({name})", lambda retries: services().groq.generate(image_b64, opts, retries))
 
 
 @bp.post("/api/image/generate")
@@ -438,7 +438,7 @@ def media_image(filename: str) -> Any:
 
 def log_startup(app: Flask) -> None:
     s = cast(Services, app.extensions["poster"])
-    for name, service in (("Ollama", s.ollama), ("Buffer", s.buffer), ("Media host", s.media), ("Pollinations", s.image_gen)):
+    for name, service in (("Groq", s.groq), ("Buffer", s.buffer), ("Media host", s.media), ("Pollinations", s.image_gen)):
         if service.configured:
             log.info("%s: configured", name)
         else:

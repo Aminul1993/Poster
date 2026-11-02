@@ -15,8 +15,8 @@ export const app = {
   /** @type {import('./notify.js').NotificationService} */ notifier: null,
   /** @type {import('./validation.js').ValidationService} */ validation: null,
   /** @type {import('./api.js').ApiService} */ api: null,
-  /** @type {import('./services/ollama.js').OllamaService} */ liveOllama: null,
-  /** @type {import('./demo.js').DemoOllamaService} */ demoOllama: null,
+  /** @type {import('./services/groq.js').GroqService} */ liveGroq: null,
+  /** @type {import('./demo.js').DemoGroqService} */ demoGroq: null,
   /** @type {import('./services/imagegen.js').ImageGenService} */ liveImageGen: null,
   /** @type {import('./demo.js').DemoImageGenService} */ demoImageGen: null,
   /** @type {import('./services/buffer.js').BufferService} */ liveBuffer: null,
@@ -25,8 +25,8 @@ export const app = {
   /** @type {import('./scheduler.js').SchedulerService} */ scheduler: null,
   /** @type {import('./feed.js').BufferPostsFeed} */ feed: null,
   /** @type {import('./ui/controller.js').UIController} */ ui: null,
-  /** @returns {import('./services/ollama.js').OllamaService} the service for the current mode */
-  getOllama() { return this.settings.mode === 'demo' ? this.demoOllama : this.liveOllama; },
+  /** @returns {import('./services/groq.js').GroqService} the service for the current mode */
+  getGroq() { return this.settings.mode === 'demo' ? this.demoGroq : this.liveGroq; },
   /** @returns {import('./services/imagegen.js').ImageGenService} the service for the current mode */
   getImageGen() { return this.settings.mode === 'demo' ? this.demoImageGen : this.liveImageGen; },
   /** @returns {import('./services/buffer.js').BufferService} the service for the current mode */

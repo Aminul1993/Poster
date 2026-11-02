@@ -14,7 +14,7 @@ from flask import request
 from poster.config import API, LANGUAGES, LIMITS, TONES, is_local_host
 from poster.errors import ServiceError
 from poster.imaging import sniff_image
-from poster.services.ollama import GenerationOptions
+from poster.services.groq import GenerationOptions
 
 _MODEL_RE = re.compile(r"^[\w.\-/:]{1,100}$")
 _ID_RE = re.compile(r"^[\w.\-:]{1,100}$")  # Buffer channel, post and organization IDs

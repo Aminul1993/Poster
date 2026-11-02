@@ -123,9 +123,9 @@ class TestHttpClient:
 @pytest.mark.parametrize(("status", "kind"), [(401, "auth"), (403, "auth"), (404, "not_found"), (408, "timeout"), (402, "client"),
                                               (413, "client"), (429, "rate_limit"), (500, "server"), (503, "server"), (418, "client")])
 def test_http_errors_are_classified(fake: Any, status: int, kind: str) -> None:
-    fake.fail("ollama.chat", status, {"error": {"message": "nope"}}, headers={"Retry-After": "7"})
+    fake.fail("groq.chat", status, {"error": {"message": "nope"}}, headers={"Retry-After": "7"})
     with pytest.raises(ServiceError) as caught:
-        HttpClient().request("POST", "https://ollama.test/api/chat", service="Ollama", timeout=5)
+        HttpClient().request("POST", "https://groq.test/openai/v1/chat/completions", service="Groq", timeout=5)
     assert caught.value.kind == kind and caught.value.status == status
     assert caught.value.details == "nope"
     if status == 429:

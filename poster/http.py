@@ -85,7 +85,7 @@ class HttpClient:
             return ServiceError(f"Access denied (HTTP 403): the {service} credentials lack permission for this action.{said}",
                                 kind="auth", hint=f"Check the {service} key and its permissions.", **common)
         if status == 404:
-            extra = " Check the endpoint URL and that the model exists." if service == "Ollama" else " Check the configured URL."
+            extra = " Check the endpoint URL and that the model exists." if service == "Groq" else " Check the configured URL."
             return ServiceError(f"{service} endpoint not found (HTTP 404).{extra}{said}", kind="not_found", **common)
         if status == 408:
             return ServiceError(f"{service} timed out (HTTP 408).", kind="timeout", **common)

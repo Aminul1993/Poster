@@ -12,10 +12,10 @@ from poster.config import Config, check_url, is_local_host, read_env_file
 
 def test_defaults() -> None:
     config = Config.from_env({}, env_file=None)
-    assert config.ollama_endpoint == "https://ollama.com" and config.model == "gemma4:31b"
+    assert config.groq_endpoint == "https://api.groq.com/openai/v1" and config.model == "qwen/qwen3.8-27b"
     assert config.mode == "auto" and config.host == "127.0.0.1" and config.port == 5000
     assert config.request_budget == 0 and config.max_upload_bytes == 20 * 1024 * 1024
-    assert config.ollama_models == () and not config.password
+    assert config.groq_models == () and not config.password
 
 
 def test_vercel_defaults() -> None:
@@ -26,23 +26,23 @@ def test_vercel_defaults() -> None:
 
 def test_env_file_values_lose_to_the_environment(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
-    env_file.write_text('# comment\nexport MODEL="llava:13b"\nPOSTER_PORT=8080\nBROKEN LINE\nPOSTER_HOST=0.0.0.0\n',
+    env_file.write_text('# comment\nexport MODEL="qwen/qwen3-32b"\nPOSTER_PORT=8080\nBROKEN LINE\nPOSTER_HOST=0.0.0.0\n',
                         encoding="utf-8")
-    assert read_env_file(env_file) == {"MODEL": "llava:13b", "POSTER_PORT": "8080", "POSTER_HOST": "0.0.0.0"}
+    assert read_env_file(env_file) == {"MODEL": "qwen/qwen3-32b", "POSTER_PORT": "8080", "POSTER_HOST": "0.0.0.0"}
     config = Config.from_env({"POSTER_HOST": "127.0.0.1"}, env_file=env_file)
-    assert config.model == "llava:13b" and config.port == 8080 and config.host == "127.0.0.1"
+    assert config.model == "qwen/qwen3-32b" and config.port == 8080 and config.host == "127.0.0.1"
 
 
 def test_numbers_are_clamped_and_bad_ones_ignored(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING, logger="poster"):
-        config = Config.from_env({"OLLAMA_TIMEOUT": "9999", "BUFFER_TIMEOUT": "soon"}, env_file=None)
-    assert config.ollama_timeout == 600 and config.buffer_timeout == 30
+        config = Config.from_env({"GROQ_TIMEOUT": "9999", "BUFFER_TIMEOUT": "soon"}, env_file=None)
+    assert config.groq_timeout == 600 and config.buffer_timeout == 30
     assert "BUFFER_TIMEOUT='soon' is not a whole number" in caplog.text
 
 
 def test_model_allowlist_always_includes_the_default() -> None:
-    config = Config.from_env({"OLLAMA_MODEL": "gemma4:31b", "OLLAMA_MODELS": "llava:13b, gemma4:31b,, llava:13b"}, env_file=None)
-    assert config.ollama_models == ("gemma4:31b", "llava:13b")
+    config = Config.from_env({"GROQ_MODEL": "qwen/qwen3.8-27b", "GROQ_MODELS": "qwen/qwen3-32b, qwen/qwen3.8-27b,, qwen/qwen3-32b"}, env_file=None)
+    assert config.groq_models == ("qwen/qwen3.8-27b", "qwen/qwen3-32b")
 
 
 @pytest.mark.parametrize(("host", "local"), [("localhost", True), ("127.0.0.5", True), ("::1", True), ("[::1]", True),

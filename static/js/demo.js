@@ -6,7 +6,7 @@ import { SettingsModel } from './settings.js';
 import { clamp, truncate, uid } from './util.js';
 import { BufferService, POST_FILTERS, normalizePost, normalizePostResults, sortPosts } from './services/buffer.js';
 import { ImageGenService, generatedImageFile } from './services/imagegen.js';
-import { OllamaService } from './services/ollama.js';
+import { GroqService } from './services/groq.js';
 
 export const DEMO_LIBRARY = Object.freeze({
   Travel: {
@@ -130,8 +130,8 @@ export const DemoContentGenerator = {
   }
 };
 
-/** Demo-mode OllamaService: same interface, simulated latency, no network. */
-export class DemoOllamaService extends OllamaService {
+/** Demo-mode GroqService: same interface, simulated latency, no network. */
+export class DemoGroqService extends GroqService {
   get isDemo() { return true; }
 
   /** @returns {Promise<{models: string[], modelAvailable: boolean, host: string}>} */

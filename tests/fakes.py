@@ -1,4 +1,4 @@
-"""In-memory stand-ins for Ollama, Buffer, Vercel Blob, Cloudinary and Pollinations.
+"""In-memory stand-ins for Groq, Buffer, Vercel Blob, Cloudinary and Pollinations.
 
 FakeUpstream replaces ``requests.Session.request``, so Poster's real HTTP client
 (timeouts, error classification, JSON parsing) runs unchanged against it.
@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from PIL import Image
 
-OLLAMA_HOST = "ollama.test"
+GROQ_HOST = "groq.test"
 BUFFER_HOST = "api.buffer.test"
 BLOB_API_HOST = "blob.test"
 BLOB_STORE = "teststore123"
@@ -173,8 +173,8 @@ class FakeUpstream:
     def __init__(self) -> None:
         self.calls: list[Call] = []
         self.buffer = FakeBuffer()
-        self.ollama_replies: deque[str] = deque()
-        self.ollama_models = ["gemma4:31b", "llava:13b"]
+        self.groq_replies: deque[str] = deque()
+        self.groq_models = ["qwen/qwen3.8-27b", "qwen/qwen3-32b"]
         self.blobs: dict[str, bytes] = {}
         self.generated_image = image_bytes("PNG", (96, 96), (200, 80, 40))
         self.edited_image = image_bytes("PNG", (64, 48), (240, 120, 180))
@@ -182,9 +182,9 @@ class FakeUpstream:
 
     # -- scripting ------------------------------------------------------------------------------------------------
     def reply(self, *replies: str | dict[str, Any]) -> None:
-        """Queues Ollama replies (message content). Without any, DEFAULT_REPLY is used."""
+        """Queues Groq replies (message content). Without any, DEFAULT_REPLY is used."""
         for item in replies:
-            self.ollama_replies.append(item if isinstance(item, str) else json.dumps(item))
+            self.groq_replies.append(item if isinstance(item, str) else json.dumps(item))
 
     def fail(self, op: str, status: int = 500, data: Any = None, *, times: int = 1, exc: Exception | None = None,
              headers: dict[str, str] | None = None, after: bool = False) -> None:
@@ -217,8 +217,8 @@ class FakeUpstream:
     def classify(method: str, url: str, kwargs: dict[str, Any]) -> str:
         parsed = urlparse(url)
         host, path = parsed.hostname or "", parsed.path
-        if host == OLLAMA_HOST:
-            return "ollama.tags" if path.endswith("/api/tags") else "ollama.chat"
+        if host == GROQ_HOST:
+            return "groq.models" if path.endswith("/models") else "groq.chat"
         if host == BUFFER_HOST:
             query = (kwargs.get("json") or {}).get("query", "")
             match = re.search(r"(?:query|mutation) (\w+)", query)
@@ -234,13 +234,11 @@ class FakeUpstream:
         return f"unknown.{host}"
 
     def dispatch(self, call: Call) -> requests.Response:
-        if call.op == "ollama.tags":
-            return response(200, {"models": [{"name": name} for name in self.ollama_models]}, url=call.url)
-        if call.op == "ollama.chat":
-            reply = self.ollama_replies.popleft() if self.ollama_replies else json.dumps(DEFAULT_REPLY)
-            if "/v1/chat/completions" in call.url:
-                return response(200, {"choices": [{"message": {"content": reply}}]}, url=call.url)
-            return response(200, {"message": {"role": "assistant", "content": reply}}, url=call.url)
+        if call.op == "groq.models":
+            return response(200, {"object": "list", "data": [{"id": name} for name in self.groq_models]}, url=call.url)
+        if call.op == "groq.chat":
+            reply = self.groq_replies.popleft() if self.groq_replies else json.dumps(DEFAULT_REPLY)
+            return response(200, {"choices": [{"message": {"role": "assistant", "content": reply}}]}, url=call.url)
         if call.op.startswith("buffer."):
             body = call.json or {}
             return response(200, self.buffer.handle(body.get("query", ""), body.get("variables") or {}), url=call.url)

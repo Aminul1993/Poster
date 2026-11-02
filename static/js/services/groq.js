@@ -1,15 +1,15 @@
-/** OllamaService: image analysis and copywriting through the Poster server. */
+/** GroqService: image analysis and copywriting through the Poster server. */
 import { API_CONFIG, SERVER } from '../config.js';
 import { ApiError, throwIfAborted } from '../errors.js';
 import { prepareAnalysisImage } from '../image.js';
 import { isPlainObject } from '../util.js';
 
 /**
- * Sends the resized image and the user's preferences to /api/ollama/generate.
- * The server builds the prompt, calls Ollama with retries, and validates and
+ * Sends the resized image and the user's preferences to /api/groq/generate.
+ * The server builds the prompt, calls Groq with retries, and validates and
  * normalises the JSON reply (including one automatic "repair" turn).
  */
-export class OllamaService {
+export class GroqService {
   /**
    * @param {{api: ApiService, validation: ValidationService, notifier: NotificationService, getSettings: () => object}} deps
    */
@@ -23,11 +23,11 @@ export class OllamaService {
   /** @returns {boolean} */
   get isDemo() { return false; }
 
-  /** @throws {ApiError} kind "config" when the server has no Ollama setup */
+  /** @throws {ApiError} kind "config" when the server has no Groq setup */
   assertConfigured() {
-    if (!SERVER.ollama.configured) {
-      throw new ApiError(`Ollama is not set up on the server: ${SERVER.ollama.problem}`, {
-        kind: 'config', service: 'Ollama', hint: 'Add it to the .env file next to app.py and restart Poster.'
+    if (!SERVER.groq.configured) {
+      throw new ApiError(`Groq is not set up on the server: ${SERVER.groq.problem}`, {
+        kind: 'config', service: 'Groq', hint: 'Add it to the .env file next to app.py and restart Poster.'
       });
     }
   }
@@ -56,13 +56,13 @@ export class OllamaService {
   async testConnection({ settings, signal, onRetry } = {}) {
     const s = settings ?? this.getSettings();
     this.assertConfigured();
-    const data = await this.api.callWithRetry(API_CONFIG.routes.ollamaTest, {
-      json: this.options(s), timeoutMs: API_CONFIG.timeouts.testMs, signal, service: 'Ollama', onRetry
+    const data = await this.api.callWithRetry(API_CONFIG.routes.groqTest, {
+      json: this.options(s), timeoutMs: API_CONFIG.timeouts.testMs, signal, service: 'Groq', onRetry
     });
     return {
       models: Array.isArray(data.models) ? data.models.map(String) : [],
       modelAvailable: typeof data.modelAvailable === 'boolean' ? data.modelAvailable : null,
-      host: String(data.host || SERVER.ollama.host || '')
+      host: String(data.host || SERVER.groq.host || '')
     };
   }
 
@@ -79,18 +79,18 @@ export class OllamaService {
     try {
       image = await prepareAnalysisImage(item);
     } catch (error) {
-      throw new ApiError(`"${item.name}" could not be prepared for analysis: ${error.message}`, { kind: 'validation', service: 'Ollama' });
+      throw new ApiError(`"${item.name}" could not be prepared for analysis: ${error.message}`, { kind: 'validation', service: 'Groq' });
     }
     throwIfAborted(signal);
-    const data = await this.api.callWithRetry(API_CONFIG.routes.ollamaGenerate, {
+    const data = await this.api.callWithRetry(API_CONFIG.routes.groqGenerate, {
       json: { ...this.options(s, item), image, fileName: item.name },
       timeoutMs: API_CONFIG.timeouts.generateMs,
       signal,
-      service: 'Ollama',
+      service: 'Groq',
       onRetry
     });
     if (!isPlainObject(data.content)) {
-      throw new ApiError('The Poster server returned no content.', { kind: 'parse', service: 'Ollama' });
+      throw new ApiError('The Poster server returned no content.', { kind: 'parse', service: 'Groq' });
     }
     // The server already validated the reply; normalising again guarantees the editor's exact shape.
     const result = this.validation.normalizeGeneratedContent(data.content, s);

@@ -29,14 +29,14 @@ import { clamp, pluralize, uid } from './util.js';
  * @property {string} [state] done | partial | failed | cancelled
  */
 export class SchedulerService extends EventTarget {
-  constructor({ storage, notifier, validation, store, getSettings, getOllama, getBuffer }) {
+  constructor({ storage, notifier, validation, store, getSettings, getGroq, getBuffer }) {
     super();
     this.storage = storage;
     this.notifier = notifier;
     this.validation = validation;
     this.store = store;
     this.getSettings = getSettings;
-    this.getOllama = getOllama;
+    this.getGroq = getGroq;
     this.getBuffer = getBuffer;
     /** @type {Operation|null} */
     this.current = null;
@@ -147,11 +147,11 @@ export class SchedulerService extends EventTarget {
    */
   async generateItem(item, { signal, onRetry }) {
     const settings = this.getSettings();
-    const ollama = this.getOllama();
+    const groq = this.getGroq();
     const previous = { error: item.error, errorHint: item.errorHint, errorPhase: item.errorPhase };
     this.store.update(item.id, { busy: 'generating', error: null, errorHint: '', errorPhase: null }, { reason: 'status', persist: false });
     try {
-      const result = await ollama.generateContent(item, { signal, onRetry, settings });
+      const result = await groq.generateContent(item, { signal, onRetry, settings });
       const replaced = hasContent(item) ? item.content : item.previousContent;
       this.store.update(item.id, {
         busy: null, content: result.content, generatedContent: result.content, previousContent: replaced, result: null, generatedAt: new Date().toISOString(), showErrors: false

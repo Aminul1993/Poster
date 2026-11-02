@@ -1,14 +1,14 @@
 /**
  * Poster — AI social media publishing (browser side of the Flask app).
  *
- * The Flask server holds the credentials and talks to Ollama, Buffer and the
+ * The Flask server holds the credentials and talks to Groq, Buffer and the
  * media host. This code only calls the server's /api/* routes, so no API key
  * ever reaches the browser and CORS rules of those services do not apply.
  *
  * Modules (plain ES2020+, no dependencies):
  *   config, util, errors, time, settings  configuration and helpers
  *   storage, notify, validation, api       localStorage, notifications, checks, fetch
- *   services/ollama, imagegen, buffer      the Poster server's /api routes
+ *   services/groq, imagegen, buffer      the Poster server's /api routes
  *   demo                                   simulated services for Demo mode
  *   store, scheduler, feed                 gallery state, bulk runs, the posts list
  *   ui/controller and ui/*                 one view per dashboard card
@@ -18,13 +18,13 @@ import * as api from './app.js';
 import { app, loadSettings, showToast } from './app.js';
 import { APP_VERSION } from './config.js';
 import { ApiService } from './api.js';
-import { DemoBufferService, DemoImageGenService, DemoOllamaService } from './demo.js';
+import { DemoBufferService, DemoImageGenService, DemoGroqService } from './demo.js';
 import { BufferPostsFeed } from './feed.js';
 import { NotificationService } from './notify.js';
 import { SchedulerService } from './scheduler.js';
 import { BufferService } from './services/buffer.js';
 import { ImageGenService } from './services/imagegen.js';
-import { OllamaService } from './services/ollama.js';
+import { GroqService } from './services/groq.js';
 import { StorageService } from './storage.js';
 import { ImageStore } from './store.js';
 import { UIController } from './ui/controller.js';
@@ -44,8 +44,8 @@ function bootstrap() {
   app.settings = loadSettings();
   app.api = new ApiService();
   const deps = { api: app.api, validation: app.validation, notifier: app.notifier, storage: app.storage, getSettings: () => app.settings };
-  app.liveOllama = new OllamaService(deps);
-  app.demoOllama = new DemoOllamaService(deps);
+  app.liveGroq = new GroqService(deps);
+  app.demoGroq = new DemoGroqService(deps);
   app.liveImageGen = new ImageGenService(deps);
   app.demoImageGen = new DemoImageGenService(deps);
   app.liveBuffer = new BufferService(deps);
@@ -57,7 +57,7 @@ function bootstrap() {
     validation: app.validation,
     store: app.store,
     getSettings: () => app.settings,
-    getOllama: () => app.getOllama(),
+    getGroq: () => app.getGroq(),
     getBuffer: () => app.getBuffer()
   });
   app.feed = new BufferPostsFeed({ notifier: app.notifier, store: app.store, getBuffer: () => app.getBuffer() });

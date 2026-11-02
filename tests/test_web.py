@@ -33,20 +33,20 @@ class TestSharedRules:
 class TestModelAllowlist:
     @pytest.fixture
     def restricted(self, make_app: Any) -> Any:
-        return make_app(OLLAMA_MODELS="llava:13b").test_client()
+        return make_app(GROQ_MODELS="qwen/qwen3-32b").test_client()
 
     def test_other_models_are_refused(self, restricted: Any, fake: Any) -> None:
-        response = post(restricted, "/api/ollama/generate", generate_body(model="expensive-model:405b"))
+        response = post(restricted, "/api/groq/generate", generate_body(model="expensive-model:405b"))
         assert response.status_code == 400
-        assert "gemma4:31b, llava:13b" in response.get_json()["error"]["message"]
+        assert "qwen/qwen3.8-27b, qwen/qwen3-32b" in response.get_json()["error"]["message"]
         assert not fake.calls
 
     def test_listed_models_are_accepted(self, restricted: Any) -> None:
-        assert post(restricted, "/api/ollama/generate", generate_body(model="llava:13b")).status_code == 200
-        assert restricted.get("/api/config").get_json()["ollama"]["models"] == ["gemma4:31b", "llava:13b"]
+        assert post(restricted, "/api/groq/generate", generate_body(model="qwen/qwen3-32b")).status_code == 200
+        assert restricted.get("/api/config").get_json()["groq"]["models"] == ["qwen/qwen3.8-27b", "qwen/qwen3-32b"]
 
     def test_any_model_without_a_list(self, client: Any) -> None:
-        assert post(client, "/api/ollama/generate", generate_body(model="anything:7b")).status_code == 200
+        assert post(client, "/api/groq/generate", generate_body(model="anything:7b")).status_code == 200
 
 
 class TestObservability:
@@ -62,9 +62,9 @@ class TestObservability:
         assert re.search(r"POST /api/buffer/validate -> 200 in \d+\.\d\ds \[req-1\]", caplog.text)
 
     def test_file_names_cannot_forge_log_lines(self, client: Any, fake: Any, caplog: pytest.LogCaptureFixture) -> None:
-        fake.fail("ollama.chat", 503)
+        fake.fail("groq.chat", 503)
         with caplog.at_level(logging.WARNING, logger="poster"):
-            post(client, "/api/ollama/generate", generate_body(fileName="a.jpg\nCRITICAL forged"))
+            post(client, "/api/groq/generate", generate_body(fileName="a.jpg\nCRITICAL forged"))
         assert "a.jpg CRITICAL forged" in caplog.text and "\nCRITICAL forged" not in caplog.text
 
 
@@ -103,14 +103,14 @@ class TestMediaImageUrls:
 class TestTimeBudget:
     def test_retries_stop_at_the_budget(self, make_app: Any, fake: Any) -> None:
         client = make_app(POSTER_REQUEST_BUDGET="8").test_client()  # room for the 1 s and 2 s retries, not the 4 s one
-        fake.fail("ollama.chat", 503, times=4)
-        error = post(client, "/api/ollama/generate", generate_body()).get_json()["error"]
+        fake.fail("groq.chat", 503, times=4)
+        error = post(client, "/api/groq/generate", generate_body()).get_json()["error"]
         assert error["kind"] == "server" and len(error["retries"]) == 2
-        assert fake.ops() == ["ollama.chat"] * 3
+        assert fake.ops() == ["groq.chat"] * 3
 
     def test_browser_timeouts_follow_the_budget(self, make_app: Any) -> None:
         config = make_app(VERCEL="1").test_client().get("/api/config").get_json()
-        assert config["ollama"]["requestTimeout"] == 295
+        assert config["groq"]["requestTimeout"] == 295
         assert config["buffer"]["requestTimeout"] == 30 * 4 + 7 + 10
         assert config["limits"]["maxUploadBytes"] == 4 * 1024 * 1024
 
@@ -145,7 +145,7 @@ class TestUncertainScheduling:
 
 def test_data_url_with_whitespace(client: Any) -> None:
     body = generate_body(image="data:image/jpeg;base64,\n" + b64(image_bytes()))
-    assert post(client, "/api/ollama/generate", body).status_code == 200
+    assert post(client, "/api/groq/generate", body).status_code == 200
 
 
 def test_due_at_in_another_timezone(client: Any, fake: Any) -> None:

@@ -28,7 +28,7 @@ export class ApiError extends Error {
 
   /**
    * Whether retryRequest() should try again. Errors reported by the Poster
-   * server are final, because the server already retried Ollama or Buffer.
+   * server are final, because the server already retried Groq or Buffer.
    */
   get retryable() {
     if (this.fromServer) return false;

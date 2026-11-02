@@ -55,8 +55,8 @@ class TestPage:
         html = client.get("/").get_data(as_text=True)
         config = page_config(html)
         assert config["mode"] == "live"
-        assert config["ollama"]["configured"] and config["buffer"]["configured"]
-        for secret in ("test-ollama-key", "test-buffer-token", "test-pollinations-key"):
+        assert config["groq"]["configured"] and config["buffer"]["configured"]
+        for secret in ("test-groq-key", "test-buffer-token", "test-pollinations-key"):
             assert secret not in html
 
     def test_security_headers(self, client: Any) -> None:
@@ -71,14 +71,14 @@ class TestPage:
     def test_health_and_config(self, client: Any) -> None:
         health = client.get("/api/health").get_json()
         assert health["status"] == "ok"
-        assert health["ollama"] and health["buffer"] and health["imageGen"] and not health["media"]
+        assert health["groq"] and health["buffer"] and health["imageGen"] and not health["media"]
         config = client.get("/api/config").get_json()
-        assert set(config) >= {"version", "mode", "ollama", "buffer", "media", "imageGen", "limits"}
+        assert set(config) >= {"version", "mode", "groq", "buffer", "media", "imageGen", "limits"}
         assert config["buffer"]["tokenId"] == hashlib.sha256(b"test-buffer-token").hexdigest()[:12]
-        assert config["ollama"]["requestTimeout"] == (120 * 4 + 7) * 2 + 15
+        assert config["groq"]["requestTimeout"] == (120 * 4 + 7) * 2 + 15
 
-    @pytest.mark.parametrize(("env", "mode"), [({"POSTER_MODE": "demo"}, "demo"), ({"OLLAMA_ENDPOINT": "https://ollama.com",
-                                                "OLLAMA_API_KEY": ""}, "demo"), ({}, "live")])
+    @pytest.mark.parametrize(("env", "mode"), [({"POSTER_MODE": "demo"}, "demo"), ({"GROQ_API_KEY": ""}, "demo"),
+                                               ({}, "live")])
     def test_default_mode(self, make_app: Any, env: dict[str, str], mode: str) -> None:
         assert make_app(**env).test_client().get("/api/config").get_json()["mode"] == mode
 
@@ -132,17 +132,17 @@ class TestErrors:
 
 
 # =============================================================================
-# Ollama
+# Groq
 # =============================================================================
 
 def generate_body(**overrides: Any) -> dict[str, Any]:
-    return {"model": "gemma4:31b", "tone": "friendly", "extraInstructions": "", "descMin": 10, "descMax": 2200,
+    return {"model": "qwen/qwen3.8-27b", "tone": "friendly", "extraInstructions": "", "descMin": 10, "descMax": 2200,
             "image": b64(image_bytes()), "fileName": "beach.jpg", **overrides}
 
 
-class TestOllamaGenerate:
+class TestGroqGenerate:
     def test_normalised_content(self, client: Any, fake: Any) -> None:
-        response = post(client, "/api/ollama/generate", generate_body())
+        response = post(client, "/api/groq/generate", generate_body())
         assert response.status_code == 200
         data = response.get_json()
         assert data["content"] == {
@@ -155,29 +155,29 @@ class TestOllamaGenerate:
         }
         assert data["issues"] == [] and data["repaired"] is False and data["retries"] == []
         chat = fake.calls[0]
-        assert chat.op == "ollama.chat" and chat.url == "https://ollama.test/api/chat"
-        assert chat.kwargs["headers"]["Authorization"] == "Bearer test-ollama-key"
-        assert chat.json["format"] == "json" and chat.json["stream"] is False
-        user = chat.json["messages"][1]
-        assert user["images"] and "warm, conversational" in user["content"]
-        assert "Language: write \"description\" and \"alternative_description\" in English." in user["content"]
+        assert chat.op == "groq.chat" and chat.url == "https://groq.test/openai/v1/chat/completions"
+        assert chat.kwargs["headers"]["Authorization"] == "Bearer test-groq-key"
+        assert chat.json["response_format"] == {"type": "json_object"} and chat.json["stream"] is False
+        text, image = chat.json["messages"][1]["content"]
+        assert image["image_url"]["url"].startswith("data:image/jpeg;base64,") and "warm, conversational" in text["text"]
+        assert "Language: write \"description\" and \"alternative_description\" in English." in text["text"]
 
     def test_caption_language_reaches_the_prompt(self, client: Any, fake: Any) -> None:
-        assert post(client, "/api/ollama/generate", generate_body(language="bn-en")).status_code == 200
-        prompt = fake.calls[0].json["messages"][1]["content"]
+        assert post(client, "/api/groq/generate", generate_body(language="bn-en")).status_code == 200
+        prompt = fake.calls[0].json["messages"][1]["content"][0]["text"]
         assert "Bengali in Bangla script, mixed naturally with English words and phrases" in prompt
 
-    def test_openai_compatible_endpoint(self, make_app: Any, fake: Any) -> None:
-        client = make_app(OLLAMA_ENDPOINT="https://ollama.test/v1/chat/completions").test_client()
-        assert post(client, "/api/ollama/generate", generate_body()).status_code == 200
-        body = fake.calls[0].json
-        assert body["response_format"] == {"type": "json_object"}
-        assert body["messages"][1]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    def test_full_chat_url_endpoint(self, make_app: Any, fake: Any) -> None:
+        client = make_app(GROQ_ENDPOINT="https://groq.test/openai/v1/chat/completions/").test_client()
+        assert post(client, "/api/groq/generate", generate_body()).status_code == 200
+        assert fake.calls[0].url == "https://groq.test/openai/v1/chat/completions"
+        assert post(client, "/api/groq/test", {}).get_json()["host"] == "groq.test"
+        assert fake.calls[1].url == "https://groq.test/openai/v1/models"
 
     def test_tolerates_fences_think_tags_aliases_and_inline_tags(self, client: Any, fake: Any) -> None:
         fake.reply('<think>hmm</think>```json\n{"caption": "Coffee time is the best time of day #coffee #latte", '
                    '"tags": "cafe, morning", "score": "73", "categories": ["food"],}\n```')
-        data = post(client, "/api/ollama/generate", generate_body()).get_json()
+        data = post(client, "/api/groq/generate", generate_body()).get_json()
         content = data["content"]
         assert content["description"] == "Coffee time is the best time of day"
         assert content["hashtags"][:4] == ["#cafe", "#morning", "#coffee", "#latte"]
@@ -187,7 +187,7 @@ class TestOllamaGenerate:
 
     def test_repairs_malformed_reply_once(self, client: Any, fake: Any) -> None:
         fake.reply("Sorry, here you go: not json", json.dumps({"description": "Fixed caption for the image", "hashtags": []}))
-        data = post(client, "/api/ollama/generate", generate_body()).get_json()
+        data = post(client, "/api/groq/generate", generate_body()).get_json()
         assert data["repaired"] is True
         assert data["content"]["description"] == "Fixed caption for the image"
         second = fake.calls[1].json["messages"]
@@ -196,28 +196,28 @@ class TestOllamaGenerate:
 
     def test_gives_up_after_one_repair(self, client: Any, fake: Any) -> None:
         fake.reply("nope", "still nope")
-        response = post(client, "/api/ollama/generate", generate_body())
+        response = post(client, "/api/groq/generate", generate_body())
         assert response.status_code == 502
         assert response.get_json()["error"]["kind"] == "parse"
-        assert fake.ops() == ["ollama.chat", "ollama.chat"]
+        assert fake.ops() == ["groq.chat", "groq.chat"]
 
     def test_auth_failure_is_not_retried(self, client: Any, fake: Any) -> None:
-        fake.fail("ollama.chat", 401, {"error": "unauthorized"})
-        response = post(client, "/api/ollama/generate", generate_body())
+        fake.fail("groq.chat", 401, {"error": "unauthorized"})
+        response = post(client, "/api/groq/generate", generate_body())
         assert response.status_code == 502
         error = response.get_json()["error"]
-        assert error["kind"] == "auth" and error["status"] == 401 and error["service"] == "Ollama"
-        assert fake.ops() == ["ollama.chat"]
+        assert error["kind"] == "auth" and error["status"] == 401 and error["service"] == "Groq"
+        assert fake.ops() == ["groq.chat"]
 
     def test_server_error_is_retried(self, client: Any, fake: Any, waits: list[float]) -> None:
-        fake.fail("ollama.chat", 503, times=2)
-        data = post(client, "/api/ollama/generate", generate_body()).get_json()
+        fake.fail("groq.chat", 503, times=2)
+        data = post(client, "/api/groq/generate", generate_body()).get_json()
         assert [r["attempt"] for r in data["retries"]] == [1, 2]
         assert waits == [1, 2]
 
     def test_retries_are_reported_on_failure(self, client: Any, fake: Any, waits: list[float]) -> None:
-        fake.fail("ollama.chat", 500, times=4)
-        error = post(client, "/api/ollama/generate", generate_body()).get_json()["error"]
+        fake.fail("groq.chat", 500, times=4)
+        error = post(client, "/api/groq/generate", generate_body()).get_json()["error"]
         assert error["kind"] == "server" and len(error["retries"]) == 3
         assert waits == [1, 2, 4]
 
@@ -226,33 +226,33 @@ class TestOllamaGenerate:
         {"model": "bad model!"}, {"extraInstructions": "x" * 501}, {"descMax": "long"},
     ])
     def test_validation(self, client: Any, fake: Any, overrides: dict[str, Any]) -> None:
-        response = post(client, "/api/ollama/generate", generate_body(**overrides))
+        response = post(client, "/api/groq/generate", generate_body(**overrides))
         assert response.status_code == 400
         assert response.get_json()["error"]["kind"] == "validation"
         assert not fake.calls
 
     def test_data_url_image_is_accepted(self, client: Any) -> None:
         body = generate_body(image="data:image/png;base64," + b64(image_bytes("PNG")))
-        assert post(client, "/api/ollama/generate", body).status_code == 200
+        assert post(client, "/api/groq/generate", body).status_code == 200
 
     def test_not_configured(self, make_app: Any) -> None:
-        client = make_app(OLLAMA_ENDPOINT="https://ollama.com", OLLAMA_API_KEY="").test_client()
-        response = post(client, "/api/ollama/generate", generate_body())
+        client = make_app(GROQ_API_KEY="").test_client()
+        response = post(client, "/api/groq/generate", generate_body())
         assert response.status_code == 503
         assert response.get_json()["error"]["kind"] == "config"
 
 
-class TestOllamaTest:
+class TestGroqTest:
     def test_model_listed(self, client: Any) -> None:
-        data = post(client, "/api/ollama/test", {"model": "gemma4:31b"}).get_json()
-        assert data["modelAvailable"] is True and "llava:13b" in data["models"] and data["host"] == "ollama.test"
+        data = post(client, "/api/groq/test", {"model": "qwen/qwen3.8-27b"}).get_json()
+        assert data["modelAvailable"] is True and "qwen/qwen3-32b" in data["models"] and data["host"] == "groq.test"
 
     def test_model_missing(self, client: Any) -> None:
-        assert post(client, "/api/ollama/test", {"model": "mistral"}).get_json()["modelAvailable"] is False
+        assert post(client, "/api/groq/test", {"model": "mistral"}).get_json()["modelAvailable"] is False
 
-    def test_no_tags_endpoint(self, client: Any, fake: Any) -> None:
-        fake.fail("ollama.tags", 404)
-        data = post(client, "/api/ollama/test", {}).get_json()
+    def test_no_models_endpoint(self, client: Any, fake: Any) -> None:
+        fake.fail("groq.models", 404)
+        data = post(client, "/api/groq/test", {}).get_json()
         assert data["models"] == [] and data["modelAvailable"] is None
 
 

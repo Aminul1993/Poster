@@ -1,13 +1,13 @@
 # Poster
 
-Upload images (or generate them from a description, or have AI change an uploaded photo as you describe), generate captions, hashtags, a category and an engagement score with an Ollama vision model, then schedule the posts through Buffer.
+Upload images (or generate them from a description, or have AI change an uploaded photo as you describe), generate captions, hashtags, a category and an engagement score with a Groq vision model, then schedule the posts through Buffer.
 
 ## Layout
 
 - `app.py`: the entry point, for Vercel and for `python app.py`.
-- `poster/`: the Flask server. It holds the credentials and handles every call to Ollama, Buffer, Pollinations and the optional media host.
+- `poster/`: the Flask server. It holds the credentials and handles every call to Groq, Buffer, Pollinations and the optional media host.
   - `web.py`: routes, security headers, static assets. `auth.py`: the password.
-  - `services/`: `ollama.py`, `buffer.py`, `media.py` (Vercel Blob or an upload endpoint) and `imagegen.py` (Pollinations).
+  - `services/`: `groq.py`, `buffer.py`, `media.py` (Vercel Blob or an upload endpoint) and `imagegen.py` (Pollinations).
   - `content.py`: model reply to post content. `imaging.py`: thumbnails and AVIF copies.
   - `config.py`: settings, limits and API paths. `retry.py`, `http.py`, `validation.py`.
 - `templates/index.html` and `static/`: the dashboard. Its JavaScript is plain ES modules (`static/js/main.js` and what it imports, with one view per card in `static/js/ui/`), with no build step and no npm. It only talks to the server.
@@ -19,7 +19,7 @@ Upload images (or generate them from a description, or have AI change an uploade
 ```bash
 pip install -r requirements.txt
 cp .env.example .env        # Windows: copy .env.example .env
-# edit .env: OLLAMA_API_KEY, BUFFER_ACCESS_TOKEN, optionally POLLINATIONS_API_KEY and MEDIA_UPLOAD_ENDPOINT
+# edit .env: GROQ_API_KEY, BUFFER_ACCESS_TOKEN, optionally POLLINATIONS_API_KEY and MEDIA_UPLOAD_ENDPOINT
 python app.py               # http://127.0.0.1:5000
 ```
 
@@ -59,5 +59,5 @@ Tests never reach the real services or read your `.env`: the upstream APIs are r
 - On Vercel, request bodies are capped at 4.5 MB, so the browser re-encodes images over 4 MB as smaller JPEGs before uploading them. PNG and WEBP images over 40 megapixels are refused, because they are decoded at full size.
 - Hashtags keep letters, digits, underscores and the combining marks of scripts such as Bengali, Hindi and Tamil (`#বাংলাদেশ`, `#हिन्दी`).
 - Server-side calls retry timeouts, network errors and HTTP 429/5xx up to three times (1 s, 2 s, 4 s), within the request's time budget. Buffer post creation is retried only on 429/503, so a post is never created twice. When the answer to a post creation is lost (a timeout or a dropped connection), the dashboard looks for the post in Buffer before reporting a failure, so scheduling again does not duplicate it.
-- Set `OLLAMA_MODELS` to limit which models the dashboard may use.
-- Keep `POSTER_HOST=127.0.0.1` unless you set `POSTER_PASSWORD`: anyone who can reach the server could otherwise use your Buffer and Ollama credentials.
+- Set `GROQ_MODELS` to limit which models the dashboard may use.
+- Keep `POSTER_HOST=127.0.0.1` unless you set `POSTER_PASSWORD`: anyone who can reach the server could otherwise use your Buffer and Groq credentials.

@@ -107,12 +107,12 @@ def test_a_refusal_says_why_in_settings(live: Page) -> None:
 
 def test_auth_failure_stops_generation_with_a_banner(live: Page, fake: FakeUpstream) -> None:
     page = live
-    fake.fail("ollama.chat", 401, {"error": "invalid key"})
+    fake.fail("groq.chat", 401, {"error": "invalid key"})
     add_images(page, ("one.jpg", jpeg((1, 2, 3))), ("two.jpg", jpeg((200, 2, 3))))
     page.click("#gen-all")
     expect(page.locator("#op-title")).to_have_text("Stopped after an error")
     expect(page.locator("#banners .banner-error")).to_contain_text("Authentication failed")
-    expect(page.locator("#pill-ollama-detail")).to_have_text("Error")
+    expect(page.locator("#pill-groq-detail")).to_have_text("Error")
 
 
 def test_image_generation_and_connection_test(live: Page, fake: FakeUpstream) -> None:
@@ -124,9 +124,9 @@ def test_image_generation_and_connection_test(live: Page, fake: FakeUpstream) ->
     assert "pollinations" in fake.ops()
 
     page.click("#open-settings")
-    page.click("#test-ollama")
-    expect(page.locator("#ollama-test-result")).to_contain_text("Connected to ollama.test. 2 models available")
-    expect(page.locator("#pill-ollama-detail")).to_have_text("Connected")
+    page.click("#test-groq")
+    expect(page.locator("#groq-test-result")).to_contain_text("Connected to groq.test. 2 models available")
+    expect(page.locator("#pill-groq-detail")).to_have_text("Connected")
 
 
 def test_image_edit(live: Page, fake: FakeUpstream) -> None:
@@ -184,7 +184,7 @@ def test_password_protected_dashboard(serve: Callable[..., str], browser: Browse
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
     context.close()
     assert not errors
-    assert "ollama.chat" in fake.ops()
+    assert "groq.chat" in fake.ops()
 
 
 def test_caption_language_reaches_the_model(live: Page, fake: FakeUpstream) -> None:
@@ -193,5 +193,5 @@ def test_caption_language_reaches_the_model(live: Page, fake: FakeUpstream) -> N
     page.select_option("#ed-language", "bn-en")
     page.click("#ed-blank-generate")
     expect(page.locator("#op-title")).to_have_text("Content generation complete")
-    [chat] = [c for c in fake.calls if c.op == "ollama.chat"]
-    assert "Bengali in Bangla script, mixed naturally with English" in chat.json["messages"][1]["content"]
+    [chat] = [c for c in fake.calls if c.op == "groq.chat"]
+    assert "Bengali in Bangla script, mixed naturally with English" in chat.json["messages"][1]["content"][0]["text"]

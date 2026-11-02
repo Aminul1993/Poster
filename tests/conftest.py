@@ -20,11 +20,11 @@ from tests.fakes import FakeUpstream  # noqa: E402
 
 # Every setting Poster reads, so values from a local .env can never leak into a test.
 BASE_ENV: dict[str, str] = {
-    "OLLAMA_ENDPOINT": f"https://{fakes.OLLAMA_HOST}",
-    "OLLAMA_API_KEY": "test-ollama-key",
-    "OLLAMA_MODEL": "",
-    "OLLAMA_MODELS": "",
-    "MODEL": "gemma4:31b",
+    "GROQ_ENDPOINT": f"https://{fakes.GROQ_HOST}/openai/v1",
+    "GROQ_API_KEY": "test-groq-key",
+    "GROQ_MODEL": "",
+    "GROQ_MODELS": "",
+    "MODEL": "qwen/qwen3.8-27b",
     "BUFFER_ACCESS_TOKEN": "test-buffer-token",
     "BUFFER_API_URL": f"https://{fakes.BUFFER_HOST}",
     "BLOB_READ_WRITE_TOKEN": "",
@@ -35,7 +35,7 @@ BASE_ENV: dict[str, str] = {
     "MEDIA_UPLOAD_PRESET": "",
     "POLLINATIONS_API_KEY": "test-pollinations-key",
     "POLLINATIONS_EDIT_MODEL": "",
-    "OLLAMA_TIMEOUT": "",
+    "GROQ_TIMEOUT": "",
     "BUFFER_TIMEOUT": "",
     "MEDIA_TIMEOUT": "",
     "POLLINATIONS_TIMEOUT": "",

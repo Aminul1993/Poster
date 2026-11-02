@@ -77,7 +77,7 @@ def extract_json_object(raw: str) -> dict[str, Any]:
     text = _FENCE_RE.sub("", _THINK_RE.sub("", raw)).strip()
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end <= start:
-        raise ServiceError("The AI reply was not valid JSON.", kind="parse", service="Ollama", details=truncate(text, 300))
+        raise ServiceError("The AI reply was not valid JSON.", kind="parse", service="Groq", details=truncate(text, 300))
     candidate = text[start:end + 1]
     for attempt in (candidate, repair_json(candidate)):
         try:
@@ -86,7 +86,7 @@ def extract_json_object(raw: str) -> dict[str, Any]:
             continue
         if isinstance(data, dict):
             return data
-    raise ServiceError("The AI reply was not valid JSON.", kind="parse", service="Ollama", details=truncate(candidate, 300))
+    raise ServiceError("The AI reply was not valid JSON.", kind="parse", service="Groq", details=truncate(candidate, 300))
 
 
 def normalize_content(raw: dict[str, Any], desc_max: int) -> tuple[dict[str, Any], list[str]]:
@@ -125,7 +125,7 @@ def normalize_content(raw: dict[str, Any], desc_max: int) -> tuple[dict[str, Any
     if not description and alternative:
         description, alternative = alternative, ""
     if not description:
-        raise ServiceError("The AI response did not include a caption.", kind="parse", service="Ollama",
+        raise ServiceError("The AI response did not include a caption.", kind="parse", service="Groq",
                            details=truncate(json.dumps(raw, ensure_ascii=False), 400))
     if not alternative:
         issues.append("No alternative caption was returned.")

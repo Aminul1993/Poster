@@ -242,7 +242,7 @@ export class ValidationService {
     let alternative = cleanCaption(pick('alternative_description', 'alternative_caption', 'alt_description', 'alternate_caption', 'alternative', 'alt_caption'));
     if (!description && alternative) { description = alternative; alternative = ''; }
     if (!description) {
-      throw new ApiError('The AI response did not include a caption.', { kind: 'parse', service: 'Ollama', details: truncate(JSON.stringify(raw), 400) });
+      throw new ApiError('The AI response did not include a caption.', { kind: 'parse', service: 'Groq', details: truncate(JSON.stringify(raw), 400) });
     }
     if (!alternative) issues.push('No alternative caption was returned.');
 
@@ -309,7 +309,7 @@ export class ValidationService {
    * server must also have the relevant service configured, because the
    * credentials and endpoints live there.
    * @param {object} settings
-   * @param {{scope?: 'all'|'ollama'|'buffer', requireCredentials?: boolean}} [options]
+   * @param {{scope?: 'all'|'groq'|'buffer', requireCredentials?: boolean}} [options]
    * @returns {{valid: boolean, errors: Object<string,string>, warnings: string[]}}
    */
   validateSettings(settings, { scope = 'all', requireCredentials } = {}) {
@@ -321,11 +321,11 @@ export class ValidationService {
       if (!Number.isInteger(s[key]) || s[key] < min || s[key] > max) errors[key] = `${label} must be a whole number from ${min} to ${max}.`;
     };
 
-    if (scope === 'all' || scope === 'ollama') {
-      if (live && !SERVER.ollama.configured) {
-        errors.serverOllama = `Ollama is not set up on the server: ${SERVER.ollama.problem} Add it to the .env file next to app.py and restart Poster.`;
+    if (scope === 'all' || scope === 'groq') {
+      if (live && !SERVER.groq.configured) {
+        errors.serverGroq = `Groq is not set up on the server: ${SERVER.groq.problem} Add it to the .env file next to app.py and restart Poster.`;
       }
-      if (!s.model) errors.model = 'Enter a model name, for example gemma4:31b.';
+      if (!s.model) errors.model = 'Enter a model name, for example qwen/qwen3.8-27b.';
       else if (!/^[\w.\-/:]{1,100}$/.test(s.model)) errors.model = 'Model names contain only letters, numbers and . - _ / : characters.';
       inRange('aiConcurrency', 1, 4, 'Parallel requests');
       if (charCount(s.extraInstructions) > LIMITS.maxExtraInstructions) errors.extraInstructions = `Extra instructions are limited to ${LIMITS.maxExtraInstructions} characters.`;
@@ -362,7 +362,7 @@ export class ValidationService {
     if (isPlainObject(json.settings)) {
       if (json.app && json.app !== 'Poster') return { valid: false, errors: [`This file was exported by "${String(json.app)}", not Poster.`], ignored: [] };
       source = json.settings;
-    } else if (['MODEL', 'TIMEZONE', 'MODE', 'OLLAMA_ENDPOINT', 'OLLAMA_API_KEY', 'BUFFER_ACCESS_TOKEN'].some((key) => key in json)) {
+    } else if (['MODEL', 'TIMEZONE', 'MODE', 'OLLAMA_ENDPOINT', 'OLLAMA_API_KEY', 'GROQ_ENDPOINT', 'GROQ_API_KEY', 'BUFFER_ACCESS_TOKEN'].some((key) => key in json)) {
       source = { ...SettingsModel.fromConfigShape(json) };
       for (const key of Object.keys(json)) if (SettingsModel.serverOnlyKeys.includes(key)) source[key] = json[key];
     } else {

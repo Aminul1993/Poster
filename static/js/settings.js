@@ -9,7 +9,7 @@ export const SettingsModel = {
    * server. Imports skip them and report them as ignored.
    */
   serverOnlyKeys: Object.freeze(['ollamaEndpoint', 'ollamaApiKey', 'ollamaTimeoutSec', 'bufferToken', 'bufferApiUrl',
-    'bufferTimeoutSec', 'mediaEndpoint', 'mediaPreset', 'OLLAMA_ENDPOINT', 'OLLAMA_API_KEY', 'BUFFER_ACCESS_TOKEN',
+    'bufferTimeoutSec', 'mediaEndpoint', 'mediaPreset', 'OLLAMA_ENDPOINT', 'OLLAMA_API_KEY', 'GROQ_ENDPOINT', 'GROQ_API_KEY', 'BUFFER_ACCESS_TOKEN',
     'BUFFER_API_URL', 'MEDIA_UPLOAD_ENDPOINT', 'MEDIA_UPLOAD_PRESET']),
 
   /** Demo channels, always available in Demo mode. */
@@ -25,7 +25,7 @@ export const SettingsModel = {
     return {
       version: 2,
       mode: SERVER.mode === 'live' ? 'live' : 'demo',
-      model: String(SERVER.ollama.model || 'gemma4:31b').trim(),
+      model: String(SERVER.groq.model || 'qwen/qwen3.8-27b').trim(),
       aiConcurrency: 2,
       tone: 'friendly',
       language: 'en',

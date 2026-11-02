@@ -43,7 +43,7 @@ def load_env_file(path: Path) -> None:
 
 
 def is_placeholder(value: str) -> bool:
-    """Empty values and template placeholders such as ``YOUR_OLLAMA_API_KEY``."""
+    """Empty values and template placeholders such as ``YOUR_GROQ_API_KEY``."""
     return not value or value.upper().startswith("YOUR_")
 
 
@@ -94,11 +94,11 @@ class _Env:
 class Config:
     """Server settings. Build it with Config.from_env(); every field has a working default."""
 
-    ollama_endpoint: str = "https://ollama.com"
-    ollama_api_key: str = ""
-    model: str = "gemma4:31b"
+    groq_endpoint: str = "https://api.groq.com/openai/v1"
+    groq_api_key: str = ""
+    model: str = "qwen/qwen3.8-27b"
     # Models the browser may ask for; empty allows any.
-    ollama_models: tuple[str, ...] = ()
+    groq_models: tuple[str, ...] = ()
     buffer_access_token: str = ""
     buffer_api_url: str = "https://api.buffer.com"
     media_upload_endpoint: str = ""
@@ -110,7 +110,7 @@ class Config:
     pollinations_api_key: str = ""
     # The model that changes an uploaded image as described (see API["image_gen"]["edit_url"]).
     pollinations_edit_model: str = "kontext"
-    ollama_timeout: int = 120
+    groq_timeout: int = 120
     buffer_timeout: int = 30
     media_timeout: int = 120
     pollinations_timeout: int = 60
@@ -136,13 +136,13 @@ class Config:
             values = {**(read_env_file(env_file) if env_file is not None else {}), **environ}
         env = _Env(values)
         on_vercel = bool(env.text("VERCEL"))
-        model = env.text("OLLAMA_MODEL") or env.text("MODEL", "gemma4:31b")
-        allowed = env.items("OLLAMA_MODELS")
+        model = env.text("GROQ_MODEL") or env.text("MODEL", "qwen/qwen3.8-27b")
+        allowed = env.items("GROQ_MODELS")
         return cls(
-            ollama_endpoint=env.text("OLLAMA_ENDPOINT", "https://ollama.com"),
-            ollama_api_key=env.text("OLLAMA_API_KEY"),
+            groq_endpoint=env.text("GROQ_ENDPOINT", "https://api.groq.com/openai/v1"),
+            groq_api_key=env.text("GROQ_API_KEY"),
             model=model,
-            ollama_models=(model, *(m for m in allowed if m != model)) if allowed else (),
+            groq_models=(model, *(m for m in allowed if m != model)) if allowed else (),
             buffer_access_token=env.text("BUFFER_ACCESS_TOKEN"),
             buffer_api_url=env.text("BUFFER_API_URL", "https://api.buffer.com"),
             media_upload_endpoint=env.text("MEDIA_UPLOAD_ENDPOINT"),
@@ -153,7 +153,7 @@ class Config:
             public_base_url=env.text("PUBLIC_BASE_URL"),
             pollinations_api_key=env.text("POLLINATIONS_API_KEY"),
             pollinations_edit_model=env.text("POLLINATIONS_EDIT_MODEL", "kontext"),
-            ollama_timeout=env.number("OLLAMA_TIMEOUT", 120, 10, 600),
+            groq_timeout=env.number("GROQ_TIMEOUT", 120, 10, 600),
             buffer_timeout=env.number("BUFFER_TIMEOUT", 30, 5, 120),
             media_timeout=env.number("MEDIA_TIMEOUT", 120, 10, 600),
             pollinations_timeout=env.number("POLLINATIONS_TIMEOUT", 60, 10, 600),
@@ -172,10 +172,10 @@ class Config:
 
 # Central API configuration: every path, GraphQL document and retry rule.
 API: dict[str, Any] = {
-    "ollama": {
-        "native_chat_path": "/api/chat",
-        "openai_chat_path": "/v1/chat/completions",
-        "tags_path": "/api/tags",
+    "groq": {
+        # Relative to the base URL, e.g. https://api.groq.com/openai/v1.
+        "chat_path": "/chat/completions",
+        "models_path": "/models",
         "test_timeout": 20,
     },
     "buffer": {

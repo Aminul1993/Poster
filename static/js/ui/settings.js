@@ -77,7 +77,7 @@ export class SettingsView extends View {
       byId('channel-count').textContent = `${set.size} selected`;
       this.updateDirtyState();
     });
-    byId('test-ollama').addEventListener('click', () => this.testOllama());
+    byId('test-groq').addEventListener('click', () => this.testGroq());
     byId('connect-buffer').addEventListener('click', () => this.connectBuffer());
     // While the drawer is open, toasts would sit under its backdrop: what these actions did is said in its footer.
     byId('export-config').addEventListener('click', () => {
@@ -141,7 +141,7 @@ export class SettingsView extends View {
     if (!dialog.open) {
       this.noteText = '';
       this.fill(this.settings);
-      byId('ollama-test-result').hidden = true;
+      byId('groq-test-result').hidden = true;
       byId('buffer-test-result').hidden = true;
       dialog.showModal();
     }
@@ -199,10 +199,10 @@ export class SettingsView extends View {
     const row = (label, value, state = '') => el('div', {}, [el('dt', { text: label }), el('dd', { class: state ? `is-${state}` : '', text: value })]);
     const note = (problem) => el('div', {}, [el('span', { class: 'server-note', text: `${problem} Set it in the .env file next to app.py, then restart Poster.` })]);
     const status = (service) => row('Status', service.configured ? 'Configured on the server' : 'Not configured', service.configured ? 'ok' : 'missing');
-    const o = SERVER.ollama;
-    byId('ollama-server-info').replaceChildren(...[
+    const o = SERVER.groq;
+    byId('groq-server-info').replaceChildren(...[
       status(o),
-      row('Endpoint', o.host ? `${o.host}${o.style === 'openai' ? ' (OpenAI-compatible)' : ''}` : '—'),
+      row('Endpoint', o.host || '—'),
       row('Default model', o.model || '—'),
       o.models?.length ? row('Allowed models', o.models.join(', ')) : null,
       row('Timeout', `${o.timeout} s per request · up to 3 retries`),
@@ -375,38 +375,38 @@ export class SettingsView extends View {
     button.setAttribute('aria-busy', String(loading));
   }
 
-  async testOllama() {
+  async testGroq() {
     const { settings } = this.read();
-    const button = byId('test-ollama');
+    const button = byId('test-groq');
     if (this.formMode() === 'demo') {
-      this.showTestResult('ollama-test-result', 'info', 'Demo mode uses simulated AI, so no connection is needed. Switch the mode to Live to test your endpoint.');
+      this.showTestResult('groq-test-result', 'info', 'Demo mode uses simulated AI, so no connection is needed. Switch the mode to Live to test your endpoint.');
       return;
     }
-    const check = this.validation.validateSettings(settings, { scope: 'ollama', requireCredentials: true });
+    const check = this.validation.validateSettings(settings, { scope: 'groq', requireCredentials: true });
     if (!check.valid) {
       this.showErrors(check.errors);
-      this.showTestResult('ollama-test-result', 'error', Object.values(check.errors)[0]);
+      this.showTestResult('groq-test-result', 'error', Object.values(check.errors)[0]);
       return;
     }
     this.setLoading(button, true);
-    this.showTestResult('ollama-test-result', 'info', 'Testing the connection…');
+    this.showTestResult('groq-test-result', 'info', 'Testing the connection…');
     try {
-      const result = await this.app.liveOllama.testConnection({
+      const result = await this.app.liveGroq.testConnection({
         settings,
-        onRetry: ({ attempt, maxRetries, delayMs, error }) => this.notifier.log('warn', 'retry', `Ollama test: retry ${attempt}/${maxRetries} in ${delayMs / 1000}s (${error.message})`)
+        onRetry: ({ attempt, maxRetries, delayMs, error }) => this.notifier.log('warn', 'retry', `Groq test: retry ${attempt}/${maxRetries} in ${delayMs / 1000}s (${error.message})`)
       });
       if (result.modelAvailable === false) {
-        this.showTestResult('ollama-test-result', 'error', `Connected to ${result.host}, but "${settings.model}" is not in its list of ${pluralize(result.models.length, 'model')}. Check the model name.`);
-        this.notifier.log('warn', 'settings', `Ollama reachable, but model "${settings.model}" was not listed.`, result.models.slice(0, 20).join(', '));
+        this.showTestResult('groq-test-result', 'error', `Connected to ${result.host}, but "${settings.model}" is not in its list of ${pluralize(result.models.length, 'model')}. Check the model name.`);
+        this.notifier.log('warn', 'settings', `Groq reachable, but model "${settings.model}" was not listed.`, result.models.slice(0, 20).join(', '));
       } else {
         const detail = result.models.length ? `${pluralize(result.models.length, 'model')} available, including ${settings.model}.` : 'The model list is not available here; the first generation will confirm the model.';
-        this.showTestResult('ollama-test-result', 'ok', `Connected to ${result.host}. ${detail}`);
-        this.notifier.log('success', 'settings', `Ollama connection test passed (${result.host}).`);
-        if (settings.model === this.settings.model) { this.ui.health.ollama = { state: 'ok' }; this.ui.renderHeader(); }
+        this.showTestResult('groq-test-result', 'ok', `Connected to ${result.host}. ${detail}`);
+        this.notifier.log('success', 'settings', `Groq connection test passed (${result.host}).`);
+        if (settings.model === this.settings.model) { this.ui.health.groq = { state: 'ok' }; this.ui.renderHeader(); }
       }
     } catch (error) {
-      this.showTestResult('ollama-test-result', 'error', [error.message, error.hint].filter(Boolean).join(' '));
-      this.notifier.log('error', 'settings', `Ollama connection test failed: ${error.message}`, error.hint || error.details || '');
+      this.showTestResult('groq-test-result', 'error', [error.message, error.hint].filter(Boolean).join(' '));
+      this.notifier.log('error', 'settings', `Groq connection test failed: ${error.message}`, error.hint || error.details || '');
     } finally {
       this.setLoading(button, false);
     }
@@ -468,7 +468,7 @@ export class SettingsView extends View {
     for (const key of [STORAGE_KEYS.settings, STORAGE_KEYS.theme, STORAGE_KEYS.ui, STORAGE_KEYS.connection]) this.app.storage.remove(key);
     this.app.settings = SettingsModel.defaults();
     this.app.settingsSource = 'defaults';
-    this.ui.health = { ollama: null, buffer: null };
+    this.ui.health = { groq: null, buffer: null };
     this.ui.prefs = defaultPrefs();
     this.ui.restoreUiPrefs();
     this.ui.applyTheme(window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light', { persist: false });

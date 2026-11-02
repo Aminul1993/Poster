@@ -83,8 +83,8 @@ def test_timezones_and_cached_formatters(js: Any) -> None:
 def test_gateway_timeout_is_final(js: Any) -> None:
     error = js("""
       const { ApiService } = await m('api');
-      const e = ApiService.errorFromResponse(504, null, 'Ollama');
-      const proxy = ApiService.errorFromResponse(502, null, 'Ollama');
+      const e = ApiService.errorFromResponse(504, null, 'Groq');
+      const proxy = ApiService.errorFromResponse(502, null, 'Groq');
       return { kind: e.kind, fromServer: e.fromServer, retryable: e.retryable, uncertain: e.uncertain, proxyRetryable: proxy.retryable };
     """)
     assert error == {"kind": "timeout", "fromServer": True, "retryable": False, "uncertain": True, "proxyRetryable": True}

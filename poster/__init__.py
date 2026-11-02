@@ -3,8 +3,8 @@
 The package does four jobs:
 
 * serves the dashboard (``templates/index.html`` and ``static/``),
-* talks to Ollama: one image in; a caption, an alternative caption, hashtags,
-  a category and an engagement score out (``services/ollama.py``),
+* talks to Groq: one image in; a caption, an alternative caption, hashtags,
+  a category and an engagement score out (``services/groq.py``),
 * optionally talks to Pollinations: a written description in, an image out,
   as an alternative to uploading one (``services/imagegen.py``),
 * talks to Buffer's GraphQL API (token check, channels, scheduled posts) and,
@@ -15,7 +15,7 @@ The package does four jobs:
 
 Credentials stay on the server, in environment variables or a ``.env`` file
 next to app.py, and the browser never sees them. The browser only calls this
-server (same origin), so Ollama's and Buffer's CORS rules do not apply.
+server (same origin), so Groq's and Buffer's CORS rules do not apply.
 """
 
 from poster.web import create_app

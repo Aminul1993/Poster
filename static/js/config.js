@@ -46,7 +46,7 @@ export const SERVER = (() => {
   const fallback = {
     version: '',
     mode: 'demo',
-    ollama: { configured: false, problem: missing, model: 'gemma4:31b', models: [], host: '', timeout: 120, requestTimeout: 1000 },
+    groq: { configured: false, problem: missing, model: 'qwen/qwen3.8-27b', models: [], host: '', timeout: 120, requestTimeout: 1000 },
     buffer: { configured: false, problem: missing, tokenId: '', host: '', timeout: 30, requestTimeout: 160 },
     media: { configured: false, problem: missing, host: '', requestTimeout: 500 },
     imageGen: { configured: false, problem: missing, host: '', aspects: {}, editModel: '', maxPromptChars: 1000, requestTimeout: 260 },
@@ -59,7 +59,7 @@ export const SERVER = (() => {
     return {
       ...fallback,
       ...parsed,
-      ollama: { ...fallback.ollama, ...parsed.ollama },
+      groq: { ...fallback.groq, ...parsed.groq },
       buffer: { ...fallback.buffer, ...parsed.buffer },
       media: { ...fallback.media, ...parsed.media },
       imageGen: { ...fallback.imageGen, ...parsed.imageGen },
@@ -75,13 +75,13 @@ export const RULES = deepFreeze(SERVER.rules);
 
 /**
  * Central API configuration: every server route, timeout and retry rule.
- * The server performs the retries towards Ollama and Buffer; the browser only
+ * The server performs the retries towards Groq and Buffer; the browser only
  * retries when it cannot reach the Poster server itself.
  */
 export const API_CONFIG = Object.freeze({
   routes: Object.freeze({
-    ollamaTest: '/api/ollama/test',
-    ollamaGenerate: '/api/ollama/generate',
+    groqTest: '/api/groq/test',
+    groqGenerate: '/api/groq/generate',
     bufferValidate: '/api/buffer/validate',
     bufferConnect: '/api/buffer/connect',
     bufferSchedule: '/api/buffer/schedule',
@@ -96,7 +96,7 @@ export const API_CONFIG = Object.freeze({
   mediaFileField: 'file',
   timeouts: Object.freeze({
     testMs: 90000,
-    generateMs: SERVER.ollama.requestTimeout * 1000,
+    generateMs: SERVER.groq.requestTimeout * 1000,
     bufferMs: SERVER.buffer.requestTimeout * 1000,
     mediaMs: SERVER.media.requestTimeout * 1000,
     imageGenMs: SERVER.imageGen.requestTimeout * 1000

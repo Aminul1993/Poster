@@ -91,8 +91,8 @@
     <button type="button" class="mode-badge" id="mode-badge" data-mode="demo">
       <svg class="icon"><use href="#i-play"/></svg><span id="mode-badge-label">Demo mode</span>
     </button>
-    <span class="pill" id="pill-ollama" data-state="demo" role="status">
-      <span class="dot" aria-hidden="true"></span><span class="pill-label">Ollama</span><span class="pill-detail" id="pill-ollama-detail">Demo</span>
+    <span class="pill" id="pill-groq" data-state="demo" role="status">
+      <span class="dot" aria-hidden="true"></span><span class="pill-label">Groq</span><span class="pill-detail" id="pill-groq-detail">Demo</span>
     </span>
     <span class="pill" id="pill-buffer" data-state="demo" role="status">
       <span class="dot" aria-hidden="true"></span><span class="pill-label">Buffer</span><span class="pill-detail" id="pill-buffer-detail">Demo</span>
@@ -260,7 +260,7 @@
       <div class="card-header">
         <div>
           <h2 class="card-title" id="ai-title"><svg class="icon"><use href="#i-sparkles"/></svg>AI content &amp; scheduling</h2>
-          <p class="card-sub" id="ai-sub">gemma4:31b · Demo mode</p>
+          <p class="card-sub" id="ai-sub">qwen/qwen3.8-27b · Demo mode</p>
         </div>
       </div>
 
@@ -587,14 +587,14 @@
         </div>
       </section>
 
-      <section class="settings-section" id="settings-ollama" aria-labelledby="set-ollama-title">
-        <h3 id="set-ollama-title"><svg class="icon"><use href="#i-cpu"/></svg>Ollama · AI generation</h3>
-        <p class="section-desc">Each image is shrunk in your browser and sent to the Poster server, which asks Ollama to write the post. The Ollama address and key are set on the server.</p>
-        <dl class="server-info" id="ollama-server-info" aria-label="Ollama server configuration"></dl>
+      <section class="settings-section" id="settings-groq" aria-labelledby="set-groq-title">
+        <h3 id="set-groq-title"><svg class="icon"><use href="#i-cpu"/></svg>Groq · AI generation</h3>
+        <p class="section-desc">Each image is shrunk in your browser and sent to the Poster server, which asks Groq to write the post. The Groq address and key are set on the server.</p>
+        <dl class="server-info" id="groq-server-info" aria-label="Groq server configuration"></dl>
         <div class="field-row">
           <div class="field">
             <label class="label" for="set-model">Model</label>
-            <input class="input" id="set-model" type="text" autocomplete="off" spellcheck="false" placeholder="gemma4:31b" aria-describedby="set-model-error">
+            <input class="input" id="set-model" type="text" autocomplete="off" spellcheck="false" placeholder="qwen/qwen3.8-27b" aria-describedby="set-model-error">
             <p class="error-text" id="set-model-error" hidden></p>
           </div>
           <div class="field">
@@ -627,9 +627,9 @@
           <p class="error-text" id="set-extra-error" hidden></p>
         </div>
         <div class="row-actions">
-          <button type="button" class="btn btn-sm" id="test-ollama"><svg class="icon"><use href="#i-link"/></svg>Test connection</button>
+          <button type="button" class="btn btn-sm" id="test-groq"><svg class="icon"><use href="#i-link"/></svg>Test connection</button>
         </div>
-        <div class="test-result" id="ollama-test-result" role="status" hidden></div>
+        <div class="test-result" id="groq-test-result" role="status" hidden></div>
       </section>
 
       <section class="settings-section" id="settings-buffer" aria-labelledby="set-buffer-title">

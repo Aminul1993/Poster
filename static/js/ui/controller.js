@@ -38,7 +38,7 @@ export class UIController {
     this.log = new LogView(this);
     this.settingsView = new SettingsView(this);
     this.orchestrator = new Orchestrator(this);
-    this.health = { ollama: null, buffer: null };
+    this.health = { groq: null, buffer: null };
     this.lastStorageToast = 0;
     this.opTicker = null;
     this.lastOp = null;
@@ -161,25 +161,25 @@ export class UIController {
       pill.dataset.state = state.state;
       byId(`${id}-detail`).textContent = state.detail;
       pill.title = state.title;
-      pill.setAttribute('aria-label', `${id === 'pill-ollama' ? 'Ollama' : 'Buffer'}: ${state.detail}. ${state.title}`);
+      pill.setAttribute('aria-label', `${id === 'pill-groq' ? 'Groq' : 'Buffer'}: ${state.detail}. ${state.title}`);
     };
-    setPill('pill-ollama', this.ollamaState());
+    setPill('pill-groq', this.groqState());
     setPill('pill-buffer', this.bufferState());
     byId('pill-network').hidden = navigator.onLine !== false;
     // In Demo the badge already says it; the service labels would only repeat "Demo" twice more.
-    byId('pill-ollama').hidden = demo;
+    byId('pill-groq').hidden = demo;
     byId('pill-buffer').hidden = demo;
     byId('ai-sub').textContent = `${s.model}${demo ? ' (simulated)' : ''} · ${s.tone.charAt(0).toUpperCase()}${s.tone.slice(1)} tone · ${LANGUAGES[s.language] || 'English'}`;
   }
 
   /** @returns {{state: string, detail: string, title: string}} */
-  ollamaState() {
+  groqState() {
     const s = this.settings;
     if (s.mode === 'demo') return { state: 'demo', detail: 'Demo', title: 'Simulated AI responses (Demo mode).' };
-    if (this.health.ollama?.state === 'error') return { state: 'error', detail: 'Error', title: this.health.ollama.message };
-    if (!SERVER.ollama.configured) return { state: 'warn', detail: 'Not configured', title: `Server: ${SERVER.ollama.problem}` };
-    const host = SERVER.ollama.host || 'the server';
-    if (this.health.ollama?.state === 'ok') return { state: 'ok', detail: 'Connected', title: `${s.model} at ${host}` };
+    if (this.health.groq?.state === 'error') return { state: 'error', detail: 'Error', title: this.health.groq.message };
+    if (!SERVER.groq.configured) return { state: 'warn', detail: 'Not configured', title: `Server: ${SERVER.groq.problem}` };
+    const host = SERVER.groq.host || 'the server';
+    if (this.health.groq?.state === 'ok') return { state: 'ok', detail: 'Connected', title: `${s.model} at ${host}` };
     return { state: 'ok', detail: 'Ready', title: `${s.model} at ${host} (not tested yet)` };
   }
 
@@ -368,7 +368,7 @@ export class UIController {
     // Show the new posts as Buffer has them: one reload per scheduling run.
     if (op.kind === 'schedule' && op.succeeded) this.feed.load();
     const isGen = op.kind === 'generate';
-    const service = isGen ? 'ollama' : 'buffer';
+    const service = isGen ? 'groq' : 'buffer';
     const live = this.settings.mode === 'live';
     const stats = `${op.succeeded} succeeded · ${op.failed} failed · ${op.skipped} skipped · ${op.cancelled} not processed · ${op.retries} retries · ${formatDuration(op.finishedAt - op.startedAt)}`;
     if (live && op.succeeded) this.health[service] = { state: 'ok' };
@@ -420,7 +420,7 @@ export class UIController {
   /** Banner for errors that need user action (auth, configuration, network). */
   showServiceErrorBanner(error) {
     const service = error.service || 'Service';
-    const section = service === 'Ollama' ? 'settings-ollama' : service === 'Media host' ? 'settings-media' : 'settings-buffer';
+    const section = service === 'Groq' ? 'settings-groq' : service === 'Media host' ? 'settings-media' : 'settings-buffer';
     const actions = [{ label: 'Open settings', onClick: () => this.openSettings(section) }];
     if (this.settings.mode === 'live') actions.push({ label: 'Use Demo mode', onClick: () => this.setMode('demo'), primary: true });
     this.notifier.banner(`service-${service.toLowerCase().replace(/\W+/g, '-')}`, {
@@ -460,13 +460,13 @@ export class UIController {
     const s = this.settings;
     this.notifier.clearBanner('mode');
     if (s.mode === 'demo') {
-      const ready = SERVER.ollama.configured;
+      const ready = SERVER.groq.configured;
       this.notifier.banner('mode', {
         type: 'info',
         title: 'You are in Demo mode',
         message: ready
           ? 'AI captions and Buffer scheduling are simulated. The server is configured, so you can switch to Live mode whenever you are ready.'
-          : 'AI captions and Buffer scheduling are simulated, so you can try everything safely. To go live, add OLLAMA_API_KEY and BUFFER_ACCESS_TOKEN to the .env file next to app.py and restart Poster.',
+          : 'AI captions and Buffer scheduling are simulated, so you can try everything safely. To go live, add GROQ_API_KEY and BUFFER_ACCESS_TOKEN to the .env file next to app.py and restart Poster.',
         actions: ready
           ? [{ label: 'Switch to Live mode', onClick: () => this.setMode('live') }]
           : [{ label: 'Open settings', onClick: () => this.openSettings() }]
@@ -497,9 +497,9 @@ export class UIController {
     }
     if (mode === this.settings.mode) return;
     if (mode === 'live') {
-      const check = this.validation.validateSettings({ ...this.settings, mode: 'live' }, { scope: 'ollama', requireCredentials: true });
+      const check = this.validation.validateSettings({ ...this.settings, mode: 'live' }, { scope: 'groq', requireCredentials: true });
       if (!check.valid) {
-        this.openSettings('settings-ollama', { title: 'Live mode needs server configuration', message: Object.values(check.errors)[0] });
+        this.openSettings('settings-groq', { title: 'Live mode needs server configuration', message: Object.values(check.errors)[0] });
         return;
       }
       const ok = await this.confirmLive(this.settings);
@@ -510,8 +510,8 @@ export class UIController {
       this.openSettings(undefined, { title: 'Could not switch mode', message: Object.values(result.errors)[0] });
       return;
     }
-    for (const id of ['service-ollama', 'service-buffer', 'service-media-host']) this.notifier.clearBanner(id);
-    showToast(mode === 'demo' ? 'Demo mode: AI and scheduling are simulated.' : 'Live mode: requests go to Ollama and Buffer.', 'info', { title: `Switched to ${mode === 'demo' ? 'Demo' : 'Live'} mode` });
+    for (const id of ['service-groq', 'service-buffer', 'service-media-host']) this.notifier.clearBanner(id);
+    showToast(mode === 'demo' ? 'Demo mode: AI and scheduling are simulated.' : 'Live mode: requests go to Groq and Buffer.', 'info', { title: `Switched to ${mode === 'demo' ? 'Demo' : 'Live'} mode` });
   }
 
   /**
@@ -525,7 +525,7 @@ export class UIController {
     return this.confirm({
       title: 'Switch to Live mode?',
       message: [
-        `Captions will come from ${settings.model} on Ollama, and scheduling creates real posts in Buffer on ${channels.length ? channels.join(', ') : 'the channels you choose in Settings → Buffer'}.`,
+        `Captions will come from ${settings.model} on Groq, and scheduling creates real posts in Buffer on ${channels.length ? channels.join(', ') : 'the channels you choose in Settings → Buffer'}.`,
         rehearsed ? `${pluralize(rehearsed, 'post')} scheduled in Demo mode ${rehearsed === 1 ? 'is' : 'are'} not in Buffer, so ${rehearsed === 1 ? 'it' : 'they'} can be scheduled for real.` : ''
       ].filter(Boolean).join('\n\n'),
       confirmLabel: 'Switch to Live',
@@ -543,7 +543,7 @@ export class UIController {
       this.upcomingKpi = null;
       this.feed.load();
     }
-    if (previous.model !== next.model) this.health.ollama = null;
+    if (previous.model !== next.model) this.health.groq = null;
     if (previous.timezone !== next.timezone) byId('plan-start').value = '';
     this.renderAll();
     this.updateModeBanner();

@@ -33,9 +33,9 @@ export class Orchestrator extends View {
     }
     const settings = this.settings;
     if (settings.mode === 'live') {
-      const check = this.validation.validateSettings(settings, { scope: 'ollama', requireCredentials: true });
+      const check = this.validation.validateSettings(settings, { scope: 'groq', requireCredentials: true });
       if (!check.valid) {
-        this.ui.openSettings('settings-ollama', { title: 'Ollama is not configured', message: Object.values(check.errors)[0] });
+        this.ui.openSettings('settings-groq', { title: 'Groq is not configured', message: Object.values(check.errors)[0] });
         return null;
       }
       if (!this.ensureOnline()) return null;

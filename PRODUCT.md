@@ -17,7 +17,7 @@ The code is MIT-licensed on GitHub, but other self-hosters are not a confirmed a
 Poster turns a set of images into scheduled social posts. It does this in one pass:
 
 1. Add up to 10 images. Each can be uploaded, generated from a description, or made by AI-editing a photo.
-2. An Ollama vision model writes each image's post: a caption, an alternative caption, hashtags, a category and an estimated engagement score.
+2. A Groq vision model writes each image's post: a caption, an alternative caption, hashtags, a category and an estimated engagement score.
 3. The owner reviews and edits the posts, then sets publish times one at a time or with the planner (a first post time, then a fixed interval).
 4. Poster schedules the posts through Buffer. They can then be watched, edited and deleted until they are published.
 
@@ -30,7 +30,7 @@ Poster is a self-hosted batch publisher. A set of photos, or images generated on
 ## Operating Context
 
 - **Where it runs:** locally with `python app.py` at `127.0.0.1:5000`, or on the owner's Vercel project. On Vercel, `POSTER_PASSWORD` is required (HTTP Basic auth, any user name).
-- **Services:** Ollama (captions, local or Ollama Cloud), Buffer (scheduling, one account, several channels), Pollinations (image generation and editing, optional), and Vercel Blob or another media host (public image URLs for Buffer, optional).
+- **Services:** Groq (captions, through its OpenAI-compatible API), Buffer (scheduling, one account, several channels), Pollinations (image generation and editing, optional), and Vercel Blob or another media host (public image URLs for Buffer, optional).
 - **Demo mode:** without credentials, Poster starts in Demo mode. AI, image generation and scheduling are simulated. The header always shows whether Demo or Live is active.
 - **Workflow and UI names:**
   - **Add images**: Upload, Generate with AI or Edit with AI.
@@ -38,7 +38,7 @@ Poster is a self-hosted batch publisher. A set of photos, or images generated on
   - **AI content & scheduling**: generate or schedule this image, the selected images, or all of them; the Schedule planner; the post editor.
   - **Scheduled posts**: read from Buffer, filtered by All, Upcoming or Published.
   - **Activity log**.
-  - **Settings**: a side drawer with Mode, Ollama, Buffer, Media hosting, Scheduling, Content rules, and Import/export/reset.
+  - **Settings**: a side drawer with Mode, Groq, Buffer, Media hosting, Scheduling, Content rules, and Import/export/reset.
 - **Storage:** preferences, theme, drafts and the activity log live in the browser's localStorage. API keys and endpoints never leave the server and are never exported.
 
 ## Capabilities and Constraints
@@ -67,7 +67,7 @@ Poster is a self-hosted batch publisher. A set of photos, or images generated on
 - There is no build step and no npm. The dashboard is a single Flask/Jinja page (`templates/index.html`) with plain ES modules (`static/js/`) and one stylesheet (`static/css/poster.css`).
 - The Content Security Policy allows only same-origin scripts (with a nonce) and same-origin or inline styles, and connects only to its own server. Fonts, scripts and stylesheets must ship with the app; nothing loads from third-party origins.
 - Light and dark themes exist. The theme follows the system until the owner picks one.
-- The browser talks only to the Poster server, never directly to Ollama, Buffer or Pollinations.
+- The browser talks only to the Poster server, never directly to Groq, Buffer or Pollinations.
 
 ## Brand Commitments
 
