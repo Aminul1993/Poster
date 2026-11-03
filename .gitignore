@@ -7,3 +7,5 @@ venv/
 .mypy_cache/
 .ruff_cache/
 test-results/
+# The local post queue (SQLite)
+poster.db

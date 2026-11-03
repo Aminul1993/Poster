@@ -13,26 +13,27 @@ export const app = {
   settingsSource: 'defaults',
   /** @type {import('./storage.js').StorageService} */ storage: null,
   /** @type {import('./notify.js').NotificationService} */ notifier: null,
+  /** @type {import('./activity.js').ActivityLog} */ activity: null,
   /** @type {import('./validation.js').ValidationService} */ validation: null,
   /** @type {import('./api.js').ApiService} */ api: null,
   /** @type {import('./services/groq.js').GroqService} */ liveGroq: null,
   /** @type {import('./demo.js').DemoGroqService} */ demoGroq: null,
   /** @type {import('./services/imagegen.js').ImageGenService} */ liveImageGen: null,
   /** @type {import('./demo.js').DemoImageGenService} */ demoImageGen: null,
-  /** @type {import('./services/buffer.js').BufferService} */ liveBuffer: null,
-  /** @type {import('./demo.js').DemoBufferService} */ demoBuffer: null,
+  /** @type {import('./services/social.js').SocialService} */ liveSocial: null,
+  /** @type {import('./demo.js').DemoSocialService} */ demoSocial: null,
   /** @type {import('./store.js').ImageStore} */ store: null,
   /** @type {import('./scheduler.js').SchedulerService} */ scheduler: null,
-  /** @type {import('./feed.js').BufferPostsFeed} */ feed: null,
+  /** @type {import('./feed.js').PostsFeed} */ feed: null,
   /** @type {import('./ui/controller.js').UIController} */ ui: null,
   /** @returns {import('./services/groq.js').GroqService} the service for the current mode */
   getGroq() { return this.settings.mode === 'demo' ? this.demoGroq : this.liveGroq; },
   /** @returns {import('./services/imagegen.js').ImageGenService} the service for the current mode */
   getImageGen() { return this.settings.mode === 'demo' ? this.demoImageGen : this.liveImageGen; },
-  /** @returns {import('./services/buffer.js').BufferService} the service for the current mode */
-  getBuffer() { return this.settings.mode === 'demo' ? this.demoBuffer : this.liveBuffer; },
-  /** @param {'demo'|'live'} mode @returns {import('./services/buffer.js').BufferService} */
-  bufferFor(mode) { return mode === 'demo' ? this.demoBuffer : this.liveBuffer; }
+  /** @returns {import('./services/social.js').SocialService} the service for the current mode */
+  getSocial() { return this.settings.mode === 'demo' ? this.demoSocial : this.liveSocial; },
+  /** @param {'demo'|'live'} mode @returns {import('./services/social.js').SocialService} */
+  socialFor(mode) { return mode === 'demo' ? this.demoSocial : this.liveSocial; }
 };
 
 /**
@@ -98,24 +99,24 @@ export function validateSettings(settings = app.settings, options = {}) {
 }
 
 /**
- * Has the server validate its Buffer token and load the channels, then caches
+ * Has the server validate its Meta token and load the Pages and Instagram accounts, then caches
  * the result in this browser for the channel picker.
  * @param {{mode?: 'demo'|'live', signal?: AbortSignal, onRetry?: Function}} [options]
  * @returns {Promise<{account: object, channels: object[]}>}
  */
-export async function connectToBuffer(options = {}) {
-  const service = app.bufferFor(options.mode || app.settings.mode);
-  const connection = await service.connectToBuffer(options);
+export async function connectAccounts(options = {}) {
+  const service = app.socialFor(options.mode || app.settings.mode);
+  const connection = await service.connectAccounts(options);
   service.saveConnection(connection);
   return connection;
 }
 
 /**
- * Checks the Buffer personal access token configured on the server.
+ * Checks the Meta access token configured on the server.
  * @param {{signal?: AbortSignal, onRetry?: Function}} [options]
  */
-export function validateBufferToken(options = {}) {
-  return app.getBuffer().validateBufferToken(options);
+export function validateToken(options = {}) {
+  return app.getSocial().validateToken(options);
 }
 
 /**
@@ -125,16 +126,16 @@ export function validateBufferToken(options = {}) {
  * @returns {Promise<{url: string|null, thumbnailUrl: string|null}>}
  */
 export function uploadMedia(item, options = {}) {
-  return app.getBuffer().uploadMedia(item, options);
+  return app.getSocial().uploadMedia(item, options);
 }
 
 /**
- * Creates a scheduled post in Buffer for each channel.
+ * Queues the post on each channel; the server's publisher publishes it at its time.
  * @param {{text: string, channelIds: string[], dueAt: Date, mediaUrl?: string|null}} post
  * @param {object} [options]
  */
 export function schedulePost(post, options = {}) {
-  return app.getBuffer().schedulePost(post, options);
+  return app.getSocial().schedulePost(post, options);
 }
 
 /**
@@ -161,7 +162,11 @@ export function saveSettings(nextSettings) {
  */
 export function loadSettings() {
   const defaults = SettingsModel.defaults();
-  const stored = app.storage.get(STORAGE_KEYS.settings, null);
+  const saved = app.storage.get(STORAGE_KEYS.settings, null);
+  const stored = SettingsModel.withoutOldChannels(saved);
+  if (stored !== saved && saved.channelIds?.live?.length) {
+    app.notifier.log('info', 'settings', 'Channels saved by an earlier version of Poster were cleared. Connect in Settings → Facebook & Instagram and choose where posts go.');
+  }
   if (stored === null) {
     app.settingsSource = 'defaults';
     return defaults;

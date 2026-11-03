@@ -1,7 +1,7 @@
 /** The Activity log card. */
 import { showToast } from '../app.js';
 import { TimeZoneUtil } from '../time.js';
-import { el } from '../util.js';
+import { el, pluralize } from '../util.js';
 import { byId } from './dom.js';
 import { View } from './view.js';
 
@@ -11,17 +11,26 @@ export class LogView extends View {
     this.renderQueued = false;
   }
 
+  get activity() { return this.app.activity; }
+
   bind() {
     byId('log-filter').addEventListener('change', (event) => {
       this.ui.prefs.logFilter = event.target.value;
       this.ui.saveUiPrefs();
-      this.render();
+      this.activity.setFilter(event.target.value);
     });
+    byId('log-refresh').addEventListener('click', () => this.activity.load());
+    byId('log-more').addEventListener('click', () => this.activity.load({ more: true }));
     byId('clear-log').addEventListener('click', async () => {
-      const ok = await this.ui.confirm({ title: 'Clear the activity log?', message: 'All log entries are deleted from this browser.', confirmLabel: 'Clear log', danger: true });
+      const where = this.activity.remote ? 'from the server' : 'from this browser';
+      const ok = await this.ui.confirm({ title: 'Clear the activity log?', message: `All log entries are deleted ${where}.`, confirmLabel: 'Clear log', danger: true });
       if (!ok) return;
-      this.notifier.clearLog();
-      showToast('Activity log cleared.', 'info');
+      try {
+        await this.activity.clear();
+        showToast('Activity log cleared.', 'info');
+      } catch (error) {
+        showToast(error.message, 'error', { title: 'Could not clear the activity log' });
+      }
     });
   }
 
@@ -33,17 +42,11 @@ export class LogView extends View {
   }
 
   render() {
-    const filter = this.ui.prefs.logFilter;
-    const entries = this.notifier.entries;
-    const filtered = entries.filter((entry) => {
-      if (filter === 'all') return true;
-      if (filter === 'warn') return entry.level === 'warn' || entry.category === 'retry';
-      if (filter === 'user') return entry.category === 'user' || entry.category === 'settings' || entry.category === 'upload';
-      return entry.level === filter;
-    });
+    const log = this.activity;
+    const entries = log.entries;
     const list = byId('log-list');
     const today = new Date().toDateString();
-    list.replaceChildren(...filtered.slice().reverse().map((entry) => {
+    list.replaceChildren(...entries.map((entry) => {
       const date = new Date(entry.ts);
       // Device time, in the dashboard's one format: "4:00:05 pm" today, "Fri, 30 Oct, 4:00 pm" before.
       const time = date.toDateString() === today ? TimeZoneUtil.formatTime(date, undefined, { seconds: true }) : TimeZoneUtil.format(date, undefined);
@@ -53,13 +56,35 @@ export class LogView extends View {
         el('span', { class: 'log-msg' }, [entry.message, entry.details ? el('span', { class: 'log-detail', text: entry.details }) : null])
       ]);
     }));
-    byId('log-count').textContent = String(entries.length);
-    byId('clear-log').disabled = !entries.length;
-    list.hidden = !filtered.length;
-    byId('log-empty').hidden = filtered.length > 0;
-    byId('log-empty-title').textContent = entries.length ? 'No matching activity' : 'No activity yet';
-    byId('log-empty-text').textContent = entries.length
-      ? 'Nothing in the log matches this filter.'
-      : 'Uploads, generations, schedules, retries and errors are recorded here with timestamps.';
+    byId('log-count').textContent = `${entries.length}${log.next ? '+' : ''}`;
+    byId('clear-log').disabled = log.filter === 'all' && !entries.length && !log.next;
+    byId('log-refresh').hidden = !log.remote;
+    byId('log-refresh').disabled = Boolean(log.loading);
+    byId('log-refresh').classList.toggle('is-loading', log.loading === 'all');
+    list.setAttribute('aria-busy', String(Boolean(log.loading)));
+    list.hidden = !entries.length;
+    byId('log-empty').hidden = entries.length > 0;
+    if (!entries.length) {
+      const pending = log.remote && (log.loading || (!log.loadedAt && !log.error));
+      byId('log-empty-title').textContent = pending ? 'Loading the activity log…'
+        : log.error ? 'Could not load the activity log'
+          : log.filter === 'all' ? 'No activity yet' : 'No matching activity';
+      byId('log-empty-text').textContent = pending ? ''
+        : log.error ? [log.error.message, log.error.hint].filter(Boolean).join(' ')
+          : log.filter === 'all' ? 'Uploads, generations, schedules, publishing, retries and errors are recorded here with timestamps.'
+            : 'Nothing in the log matches this filter.';
+    }
+    const waiting = log.remote ? log.unsaved.length : 0;
+    byId('log-source').textContent = !log.remote
+      ? 'Kept in this browser only: the server has no database'
+      : log.error && entries.length
+        ? `Could not load more: ${log.error.message}`
+        : [log.loadedAt ? 'Read from the database' : '', log.loadedAt ? TimeZoneUtil.formatTime(new Date(log.loadedAt), undefined) : '',
+          waiting ? `${pluralize(waiting, 'entry', 'entries')} waiting to be saved` : ''].filter(Boolean).join(' · ');
+    byId('log-footer').hidden = !byId('log-source').textContent && !log.next;
+    const more = byId('log-more');
+    more.hidden = !log.next;
+    more.disabled = Boolean(log.loading);
+    more.classList.toggle('is-loading', log.loading === 'more');
   }
 }

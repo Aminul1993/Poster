@@ -2,7 +2,7 @@
 import { generateContentForImage, scheduleSinglePost, showToast } from '../app.js';
 import { LANGUAGES, LIMITS, SERVER } from '../config.js';
 import { showThumbnail } from '../image.js';
-import { serviceMeta } from '../services/buffer.js';
+import { instagramProblem, serviceMeta } from '../services/social.js';
 import { contentFromText, countedResult, emptyContent, hasContent, itemStatus, needsTime } from '../store.js';
 import { TimeZoneUtil } from '../time.js';
 import { applyScriptLang, charCount, el, formatBytes, icon, pluralize, relativeTime, scriptLang, scriptRuns, splitPostText, truncate } from '../util.js';
@@ -23,21 +23,21 @@ export class EditorView extends View {
     this.writing = new Set();
     this.announcedId = null;
     /** @type {{id: string, snapshot: object}|null} the scheduled post being edited in place, and how it was before */
-    this.bufferEdit = null;
-    this.savingBuffer = false;
+    this.postEdit = null;
+    this.savingPost = false;
   }
 
   /** Full editor render for the active image. */
   render() {
     const item = this.store.active;
-    if (this.bufferEdit && this.bufferEdit.id !== item?.id && !this.savingBuffer) {
-      // Leaving a post mid-edit puts it back as Buffer has it, so the draft never drifts from Buffer.
-      const edit = this.bufferEdit;
-      this.bufferEdit = null;
+    if (this.postEdit && this.postEdit.id !== item?.id && !this.savingPost) {
+      // Leaving a post mid-edit puts it back as the queue has it, so the draft never drifts from the queue.
+      const edit = this.postEdit;
+      this.postEdit = null;
       const other = this.store.get(edit.id);
       if (other) {
         this.store.update(edit.id, { ...edit.snapshot, showErrors: false }, { reason: 'status' });
-        showToast(`Your unsaved edit to "${truncate(other.name, 40)}" was discarded; Buffer still has the earlier version.`, 'info');
+        showToast(`Your unsaved edit to "${truncate(other.name, 40)}" was discarded; the scheduled post keeps the earlier version.`, 'info');
       }
     }
     const items = this.store.all();
@@ -75,23 +75,23 @@ export class EditorView extends View {
 
     const busy = item.busy === 'generating' || item.busy === 'scheduling';
     const running = this.scheduler.isRunning;
-    // A post already in Buffer is read-only until "Edit in Buffer", which saves straight to every channel copy.
+    // A scheduled post is read-only until "Edit scheduled post", which saves straight to every channel copy.
     const scheduled = Boolean(countedResult(item, s.mode));
     // Deleted in Scheduled posts while being edited here: it is an ordinary draft again.
-    if (!scheduled && this.bufferEdit?.id === item.id && !this.savingBuffer) this.bufferEdit = null;
-    const editingBuffer = scheduled && this.bufferEdit?.id === item.id;
-    const locked = scheduled && !editingBuffer;
-    byId('ed-fieldset').disabled = busy || this.savingBuffer;
-    // A post in Buffer is read-only rather than disabled: its words stay readable, and reachable with Tab.
+    if (!scheduled && this.postEdit?.id === item.id && !this.savingPost) this.postEdit = null;
+    const editingPost = scheduled && this.postEdit?.id === item.id;
+    const locked = scheduled && !editingPost;
+    byId('ed-fieldset').disabled = busy || this.savingPost;
+    // A scheduled post is read-only rather than disabled: its words stay readable, and reachable with Tab.
     for (const id of ['ed-description', 'ed-alt', 'ed-tag-input', 'ed-schedule']) byId(id).readOnly = locked;
-    // Only the words and the time live in Buffer; category, image URL and channels stay as scheduled.
+    // Only the words and the time can change once queued; category, image URL and channels stay as scheduled.
     for (const id of ['ed-category', 'ed-media-url']) byId(id).readOnly = scheduled;
     byId('ed-channels-edit').disabled = scheduled;
     byId('ed-swap').disabled = locked;
     for (const radio of document.querySelectorAll('input[name="ed-use"]')) radio.disabled = locked;
     editor.classList.toggle('is-locked', locked);
-    editor.classList.toggle('is-buffer-edit', editingBuffer);
-    for (const note of editor.querySelectorAll('.lock-text')) note.textContent = item.result?.mode === 'demo' ? 'Scheduled' : 'In Buffer';
+    editor.classList.toggle('is-post-edit', editingPost);
+    for (const note of editor.querySelectorAll('.lock-text')) note.textContent = 'Scheduled';
     // Before there is a caption, the editor offers the two ways to get one instead of an empty form.
     editor.classList.toggle('is-blank', !hasContent(item) && !item.busy && !this.writing.has(item.id));
     byId('editor-busy').hidden = !busy;
@@ -114,7 +114,7 @@ export class EditorView extends View {
     this.renderTags(content.hashtags);
     this.setValue('ed-category', content.category);
     this.setValue('ed-schedule', item.scheduleLocal || '');
-    // Once in Buffer the editor mirrors Buffer: an edit made in Scheduled posts shows here, read-only.
+    // Once queued, the editor mirrors the queue: an edit made in Scheduled posts shows here, read-only.
     if (locked && item.result.text) {
       const { caption, tags } = splitPostText(item.result.text);
       this.setValue(item.useAlternative ? 'ed-alt' : 'ed-description', caption);
@@ -143,30 +143,30 @@ export class EditorView extends View {
       let title;
       let lines;
       if (r.removed) {
-        title = 'Removed from Buffer';
+        title = 'Removed from the queue';
         const due = item.scheduleLocal ? TimeZoneUtil.zonedToUtc(item.scheduleLocal, s.timezone) : null;
         lines = [due && due.date.getTime() > Date.now()
           ? `Its posts were deleted. Schedule post puts it back at ${TimeZoneUtil.format(due.date, s.timezone)}, or pick a new time.`
           : 'Its posts were deleted. Pick a new time, then Schedule post.'];
       } else if (!counts) {
         title = 'Scheduled in Demo mode only';
-        lines = ['This was a rehearsal: the post is not in Buffer. Schedule it to publish it for real.'];
+        lines = ['This was a rehearsal: the post was never queued. Schedule it to publish it for real.'];
       } else {
-        title = `${r.mode === 'demo' ? 'In Demo mode (not in Buffer)' : 'In Buffer'} · ${TimeZoneUtil.format(new Date(r.dueAt), r.timezone || s.timezone)}`;
+        title = `${r.mode === 'demo' ? 'Scheduled in Demo mode' : 'Scheduled'} · ${TimeZoneUtil.format(new Date(r.dueAt), r.timezone || s.timezone)}`;
         lines = [`On ${(r.channels || []).join(', ') || 'no channel'}.`];
         if (r.failures?.length) lines.push(`Failed on: ${r.failures.map((f) => `${f.name} (${f.message})`).join('; ')}.`);
-        const place = r.mode === 'demo' ? 'in Demo mode' : 'in Buffer';
-        lines.push(editingBuffer
-          ? `Editing: change the caption, hashtags or time, then save ${r.mode === 'demo' ? 'in Demo mode' : 'to Buffer'}.`
-          : r.edited ? `Edited ${place}; shown as it is now.` : `Shown as it is ${place}.`);
+        const place = r.mode === 'demo' ? 'in Demo mode' : 'in the queue';
+        lines.push(editingPost
+          ? `Editing: change the caption, hashtags or time, then save${r.mode === 'demo' ? ' in Demo mode' : ''}.`
+          : r.edited ? `Edited ${place}; shown as it is now.` : `Shown as it is ${place}. Poster publishes it at its time.`);
       }
       byId('ed-result-title').textContent = title;
       byId('ed-result-text').textContent = lines.join(' ');
-      byId('ed-result-edit').hidden = !counts || editingBuffer || !(r.postIds || []).length;
-      byId('ed-result-edit-label').textContent = r.mode === 'demo' ? 'Edit post' : 'Edit in Buffer';
-      byId('ed-buffer-save').hidden = !editingBuffer;
-      byId('ed-buffer-cancel').hidden = !editingBuffer;
-      byId('ed-buffer-save-label').textContent = r.mode === 'demo' ? 'Save in Demo mode' : 'Save to Buffer';
+      byId('ed-result-edit').hidden = !counts || editingPost || !(r.postIds || []).length;
+      byId('ed-result-edit-label').textContent = r.mode === 'demo' ? 'Edit post' : 'Edit scheduled post';
+      byId('ed-social-save').hidden = !editingPost;
+      byId('ed-social-cancel').hidden = !editingPost;
+      byId('ed-social-save-label').textContent = r.mode === 'demo' ? 'Save in Demo mode' : 'Save changes';
       resultBox.classList.toggle('is-success', counts && !r.partial);
       resultBox.classList.toggle('is-info', !counts || Boolean(r.partial));
     }
@@ -180,7 +180,7 @@ export class EditorView extends View {
    */
   renderScheduleButton(item) {
     const scheduled = Boolean(countedResult(item, this.settings.mode));
-    byId('ed-schedule-post').disabled = this.scheduler.isRunning || this.bufferEdit?.id === item.id;
+    byId('ed-schedule-post').disabled = this.scheduler.isRunning || this.postEdit?.id === item.id;
     byId('ed-schedule-label').textContent = scheduled ? 'Schedule again' : 'Schedule post';
   }
 
@@ -197,7 +197,7 @@ export class EditorView extends View {
       noTime ? `${noTime} need${noTime === 1 ? 's' : ''} a time` : '',
       noCaption ? `${noCaption} without a caption` : '',
       failed ? `${failed} failed` : '',
-      removed ? `${removed} removed from Buffer` : ''
+      removed ? `${removed} removed from the queue` : ''
     ].filter(Boolean).join(' · ');
   }
 
@@ -262,11 +262,14 @@ export class EditorView extends View {
     }
     setFieldError('ed-media-url', this.validation.validateMediaUrl(item.mediaUrl));
     const mediaHint = byId('ed-media-hint');
-    if (item.mediaUrl) mediaHint.textContent = 'This URL is attached to the post in Buffer.';
+    const toInstagram = this.app.getSocial().hasInstagram(s);
+    if (item.mediaUrl) mediaHint.textContent = 'Facebook and Instagram fetch the image from this URL when the post is published.';
     else if (item.uploadedUrl) mediaHint.textContent = `Uploaded earlier: ${truncate(item.uploadedUrl, 70)}`;
-    else if (s.mode === 'demo') mediaHint.textContent = 'Demo mode simulates hosting. In Live mode, Buffer needs a public URL or a media host.';
+    else if (s.mode === 'demo') mediaHint.textContent = 'Demo mode simulates hosting. In Live mode, Facebook and Instagram need a public URL or a media host.';
     else if (SERVER.media.configured) mediaHint.textContent = `Leave empty to upload this image to ${SERVER.media.host || 'the media host'} when scheduling.`;
-    else mediaHint.textContent = 'Buffer attaches images from public URLs. Paste one here; no media host is configured on the server.';
+    else mediaHint.textContent = toInstagram
+      ? 'Instagram posts need an image from a public URL. Paste one here; no media host is configured on the server.'
+      : 'Facebook and Instagram fetch images from public URLs. Paste one here; no media host is configured on the server.';
 
     const text = countedResult(item, s.mode)?.text || this.scheduler.composeText(item);
     const preview = byId('ed-preview');
@@ -275,16 +278,10 @@ export class EditorView extends View {
     preview.classList.toggle('is-empty', !text);
     const length = charCount(text);
     const previewCount = byId('ed-preview-count');
-    const overX = length > 280 && this.postsToX();
-    previewCount.textContent = length ? `${length} characters${overX ? ' · over X’s 280 limit' : ''}` : '';
-    previewCount.classList.toggle('is-over', overX || length > s.descMax + LIMITS.previewSlackChars);
-  }
-
-  /** @returns {boolean} whether one of the selected channels is X, the only one with a 280-character limit */
-  postsToX() {
-    const buffer = this.app.getBuffer();
-    const channels = buffer.channels(this.settings);
-    return buffer.selectedChannelIds(this.settings).some((id) => serviceMeta(channels.find((c) => c.id === id)?.service).label === 'X');
+    // Instagram refuses captions over its limits (the image itself is always there); Facebook still takes them.
+    const instagram = text && toInstagram ? instagramProblem(text, true) : null;
+    previewCount.textContent = length ? `${length} characters${instagram ? ` · ${instagram} It will not go to Instagram.` : ''}` : '';
+    previewCount.classList.toggle('is-over', Boolean(instagram) || length > s.descMax + LIMITS.previewSlackChars);
   }
 
   /** @param {string[]} tags */
@@ -307,17 +304,18 @@ export class EditorView extends View {
 
   renderChannels() {
     const s = this.settings;
-    const buffer = this.app.getBuffer();
-    const ids = buffer.selectedChannelIds(s);
+    const social = this.app.getSocial();
+    const ids = social.selectedChannelIds(s);
     const box = byId('ed-channels');
     if (!ids.length) {
       box.replaceChildren(el('span', { class: 'chip chip-warning', text: 'No channels selected' }));
       return;
     }
     box.replaceChildren(...ids.map((id) => {
-      const channel = buffer.channels(s).find((c) => c.id === id);
+      const channel = social.channels(s).find((c) => c.id === id);
       const meta = serviceMeta(channel?.service);
-      return el('span', { class: 'chip chip-neutral no-dot', title: channel ? `${meta.label} · ${channel.organizationName || ''}` : id }, [
+      const title = channel ? [meta.label, channel.handle ? `@${channel.handle}` : '', channel.service === 'instagram' ? `linked to ${channel.pageName || 'a Page'}` : ''].filter(Boolean).join(' · ') : id;
+      return el('span', { class: 'chip chip-neutral no-dot', title }, [
         colorDot(meta.color),
         channel ? `${channel.name} · ${meta.label}` : `Channel ${truncate(id, 10)}`
       ]);
@@ -358,9 +356,9 @@ export class EditorView extends View {
     byId('ed-generate').addEventListener('click', () => generateContentForImage());
     byId('ed-schedule-post').addEventListener('click', () => scheduleSinglePost());
     byId('ed-restore').addEventListener('click', () => this.restorePrevious());
-    byId('ed-result-edit').addEventListener('click', () => this.startBufferEdit());
-    byId('ed-buffer-save').addEventListener('click', () => this.saveBufferEdit());
-    byId('ed-buffer-cancel').addEventListener('click', () => this.cancelBufferEdit());
+    byId('ed-result-edit').addEventListener('click', () => this.startPostEdit());
+    byId('ed-social-save').addEventListener('click', () => this.savePostEdit());
+    byId('ed-social-cancel').addEventListener('click', () => this.cancelPostEdit());
     byId('ed-blank-generate').addEventListener('click', () => generateContentForImage());
     byId('ed-write').addEventListener('click', () => {
       if (!this.store.active) return;
@@ -368,7 +366,7 @@ export class EditorView extends View {
       this.render();
       byId('ed-description').focus();
     });
-    byId('ed-channels-edit').addEventListener('click', () => this.ui.openSettings('settings-buffer'));
+    byId('ed-channels-edit').addEventListener('click', () => this.ui.openSettings('settings-social'));
     byId('ed-swap').addEventListener('click', () => {
       const item = this.store.active;
       if (!item || item.busy || this.isLocked(item)) return;
@@ -455,9 +453,9 @@ export class EditorView extends View {
     this.ui.gallery.revealEditor({ focus: true });
   }
 
-  /** @param {object} item @returns {boolean} whether the post is in Buffer and shown read-only (not being edited) */
+  /** @param {object} item @returns {boolean} whether the post is scheduled and shown read-only (not being edited) */
   isLocked(item) {
-    return Boolean(countedResult(item, this.settings.mode)) && this.bufferEdit?.id !== item.id;
+    return Boolean(countedResult(item, this.settings.mode)) && this.postEdit?.id !== item.id;
   }
 
   /**
@@ -471,16 +469,16 @@ export class EditorView extends View {
     }
     this.store.setActive(id);
     this.ui.gallery.revealEditor();
-    this.startBufferEdit();
+    this.startPostEdit();
   }
 
   /** Unlocks a scheduled post's caption, hashtags and time; Save sends them to every channel copy. */
-  startBufferEdit() {
+  startPostEdit() {
     const item = this.store.active;
     if (!item || !countedResult(item, this.settings.mode) || this.scheduler.isRunning) return;
     const r = countedResult(item, this.settings.mode);
-    this.bufferEdit = { id: item.id, snapshot: { content: item.content, useAlternative: item.useAlternative, scheduleLocal: item.scheduleLocal } };
-    // The fields start from the post as Buffer has it now, which is what the locked editor showed.
+    this.postEdit = { id: item.id, snapshot: { content: item.content, useAlternative: item.useAlternative, scheduleLocal: item.scheduleLocal } };
+    // The fields start from the post as the queue has it now, which is what the locked editor showed.
     const fields = {};
     if (r.text) fields.content = contentFromText(item.content, r.text, item.useAlternative);
     if (r.dueAt) fields.scheduleLocal = TimeZoneUtil.toLocalInput(new Date(r.dueAt), this.settings.timezone);
@@ -489,20 +487,20 @@ export class EditorView extends View {
     byId('ed-description').focus();
   }
 
-  /** Puts the post back as Buffer has it. */
-  cancelBufferEdit() {
-    const edit = this.bufferEdit;
-    if (!edit || this.savingBuffer) return;
-    this.bufferEdit = null;
+  /** Puts the post back as the queue has it. */
+  cancelPostEdit() {
+    const edit = this.postEdit;
+    if (!edit || this.savingPost) return;
+    this.postEdit = null;
     if (this.store.get(edit.id)) this.store.update(edit.id, { ...edit.snapshot, showErrors: false }, { reason: 'status' });
     this.render();
     byId('ed-result-edit').focus();
   }
 
   /** Sends the edited caption, hashtags and time to every channel copy of the post, then locks it again. */
-  async saveBufferEdit() {
-    const item = this.store.get(this.bufferEdit?.id);
-    if (!item || this.savingBuffer) return;
+  async savePostEdit() {
+    const item = this.store.get(this.postEdit?.id);
+    if (!item || this.savingPost) return;
     const check = this.validation.validatePost(item, this.settings);
     if (!check.valid) {
       this.store.update(item.id, { showErrors: true }, { reason: 'validation', persist: false });
@@ -511,23 +509,23 @@ export class EditorView extends View {
     }
     const r = item.result;
     const ids = r?.postIds || [];
-    const where = this.app.getBuffer().isDemo ? 'in Demo mode (not in Buffer)' : 'to Buffer';
+    const demo = this.app.getSocial().isDemo;
     // Only what changed is sent, as in the Scheduled-post dialog.
     const changes = {};
     const text = this.scheduler.composeText(item);
     if (text !== r.text) changes.text = text;
     if (!r.dueAt || Math.floor(check.date.getTime() / 60000) !== Math.floor(Date.parse(r.dueAt) / 60000)) changes.dueAt = check.date;
     if (!Object.keys(changes).length) {
-      this.bufferEdit = null;
-      showToast(where === 'to Buffer' ? 'Nothing changed, so Buffer was not updated.' : 'Nothing changed.', 'info');
+      this.postEdit = null;
+      showToast(demo ? 'Nothing changed.' : 'Nothing changed, so the scheduled post was not updated.', 'info');
       this.render();
       byId('ed-result-edit').focus();
       return;
     }
-    this.savingBuffer = true;
+    this.savingPost = true;
     this.render();
-    byId('ed-buffer-save').classList.add('is-loading');
-    byId('ed-buffer-cancel').disabled = true;
+    byId('ed-social-save').classList.add('is-loading');
+    byId('ed-social-cancel').disabled = true;
     const failed = [];
     for (const id of ids) {
       try {
@@ -536,21 +534,21 @@ export class EditorView extends View {
         failed.push([error.message, error.hint].filter(Boolean).join(' '));
       }
     }
-    this.savingBuffer = false;
-    byId('ed-buffer-save').classList.remove('is-loading');
-    byId('ed-buffer-cancel').disabled = false;
+    this.savingPost = false;
+    byId('ed-social-save').classList.remove('is-loading');
+    byId('ed-social-cancel').disabled = false;
     if (failed.length) {
       // Copies that saved keep the new version; the edit stays open so the owner can try again.
       const saved = ids.length - failed.length;
       // Cancel now goes back to what the saved copies have, not to the text from before.
       const now = this.store.get(item.id);
-      if (saved && now) this.bufferEdit.snapshot = { content: now.content, useAlternative: now.useAlternative, scheduleLocal: now.scheduleLocal };
+      if (saved && now) this.postEdit.snapshot = { content: now.content, useAlternative: now.useAlternative, scheduleLocal: now.scheduleLocal };
       this.render();
       showToast(`${failed[0]}${saved ? ` Saved on ${saved} of ${ids.length} channels.` : ''}`, 'error', { title: 'Not every copy was saved' });
       return;
     }
-    this.bufferEdit = null;
-    showToast(`Saved ${where} on ${pluralize(ids.length, 'channel')}.`, 'success');
+    this.postEdit = null;
+    showToast(`Saved${demo ? ' in Demo mode' : ''} on ${pluralize(ids.length, 'channel')}.`, 'success');
     this.render();
     byId('ed-result-edit').focus();
   }
@@ -580,7 +578,7 @@ export class EditorView extends View {
     const clears = item.errorPhase === 'schedule';
     this.store.update(item.id, {
       ...patch, error: clears ? null : item.error, errorHint: clears ? '' : item.errorHint, errorPhase: clears ? null : item.errorPhase,
-      // A post deleted from Buffer comes back into the batch once it has a new time.
+      // A post deleted from the queue comes back into the batch once it has a new time.
       ...(item.result?.removed && patch.scheduleLocal ? { result: null } : {})
     }, { reason: 'edit' });
     byId('ed-alert').hidden = !this.store.active.error;

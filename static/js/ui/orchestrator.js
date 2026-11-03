@@ -1,5 +1,6 @@
 /** Starts generation and scheduling runs: pre-flight checks, confirmations, then SchedulerService. */
 import { showToast } from '../app.js';
+import { instagramProblem } from '../services/social.js';
 import { countedResult, hasContent } from '../store.js';
 import { TimeZoneUtil } from '../time.js';
 import { pluralize, truncate } from '../util.js';
@@ -50,7 +51,7 @@ export class Orchestrator extends View {
         const untouched = item.content === item.generatedContent && !scheduled;
         const ok = untouched || await this.ui.confirm({
           title: 'Replace the existing content?',
-          message: `"${item.name}" already has a caption${scheduled ? ' and has been scheduled' : ''}. Generating again replaces the captions, hashtags and category, including your edits. You can restore the previous content once from the editor.${scheduled ? ' The post already in Buffer is not changed.' : ''}`,
+          message: `"${item.name}" already has a caption${scheduled ? ' and has been scheduled' : ''}. Generating again replaces the captions, hashtags and category, including your edits. You can restore the previous content once from the editor.${scheduled ? ' The post already scheduled is not changed.' : ''}`,
           confirmLabel: 'Regenerate',
           danger: true
         });
@@ -97,23 +98,23 @@ export class Orchestrator extends View {
       return null;
     }
     const settings = this.settings;
-    const buffer = this.app.getBuffer();
+    const social = this.app.getSocial();
     if (settings.mode === 'live') {
-      const check = this.validation.validateSettings(settings, { scope: 'buffer', requireCredentials: true });
+      const check = this.validation.validateSettings(settings, { scope: 'social', requireCredentials: true });
       if (!check.valid) {
-        this.ui.openSettings('settings-buffer', { title: 'Buffer is not configured', message: Object.values(check.errors)[0] });
+        this.ui.openSettings('settings-social', { title: 'Facebook and Instagram are not set up', message: Object.values(check.errors)[0] });
         return null;
       }
       if (!this.ensureOnline()) return null;
     }
-    const channelIds = buffer.selectedChannelIds(settings);
+    const channelIds = social.selectedChannelIds(settings);
     if (!channelIds.length) {
-      this.ui.openSettings('settings-buffer', { title: 'No Buffer channels selected', message: 'Choose at least one channel to post to, then save the settings.' });
+      this.ui.openSettings('settings-social', { title: 'No channels selected', message: 'Choose at least one Facebook Page or Instagram account to post to, then save the settings.' });
       return null;
     }
-    const channelProblem = buffer.checkChannels(channelIds, settings);
+    const channelProblem = social.checkChannels(channelIds, settings);
     if (channelProblem) {
-      this.ui.openSettings('settings-buffer', { title: 'A channel needs attention', message: channelProblem });
+      this.ui.openSettings('settings-social', { title: 'A channel needs attention', message: channelProblem });
       return null;
     }
 
@@ -133,8 +134,8 @@ export class Orchestrator extends View {
         return null;
       }
       if (countedResult(item, settings.mode)) {
-        // A second copy in Buffer is rarely wanted: the danger variant opens on Cancel.
-        const ok = await this.ui.confirm({ title: 'Schedule this post again?', message: `"${item.name}" is already scheduled. Scheduling again creates a second copy in Buffer.`, confirmLabel: 'Schedule a second copy', danger: true });
+        // A second copy is rarely wanted: the danger variant opens on Cancel.
+        const ok = await this.ui.confirm({ title: 'Schedule this post again?', message: `"${item.name}" is already scheduled. Scheduling again publishes a second copy.`, confirmLabel: 'Schedule a second copy', danger: true });
         if (!ok) return null;
       }
     } else {
@@ -149,11 +150,14 @@ export class Orchestrator extends View {
       if (!targets) return null;
     }
 
-    const channelNames = channelIds.map((id) => buffer.channelName(id, settings)).join(', ');
+    const channelNames = channelIds.map((id) => social.channelName(id, settings)).join(', ');
+    // Instagram refuses captions over its limits; the other channels still take those posts.
+    const refused = social.hasInstagram(settings) ? targets.filter((i) => instagramProblem(this.scheduler.composeText(i), true)).length : 0;
+    const instagramNote = refused ? ` ${pluralize(refused, 'post')} ${refused === 1 ? 'is' : 'are'} over Instagram's limits and will not go to Instagram.` : '';
     if (settings.mode === 'live') {
       const ok = await this.ui.confirm({
-        title: `Schedule ${pluralize(targets.length, 'post')} in Buffer?`,
-        message: `${this.describeTimes(targets)} Each post goes to ${channelNames}.${skipNote}`,
+        title: `Schedule ${pluralize(targets.length, 'post')}?`,
+        message: `${this.describeTimes(targets)} Each post goes to ${channelNames}.${instagramNote}${skipNote} Poster publishes each one at its time.`,
         confirmLabel: `Schedule ${pluralize(targets.length, 'post')}`
       });
       if (!ok) return null;

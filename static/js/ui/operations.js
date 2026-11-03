@@ -103,7 +103,7 @@ export class OperationsView extends View {
     const zone = this.settings.timezone;
     const times = [...op.dueTimes].sort((a, b) => a - b);
     const format = (ms) => TimeZoneUtil.format(new Date(ms), zone);
-    const where = op.demo ? ' in Demo mode (not in Buffer)' : ' in Buffer';
+    const where = op.demo ? ' in Demo mode (nothing is published)' : '';
     const span = times.length === 1 || times[0] === times[times.length - 1]
       ? `publishes ${format(times[0])}`
       : `first ${format(times[0])}, last ${format(times[times.length - 1])}`;
@@ -230,7 +230,7 @@ export class OperationsView extends View {
 
     let current;
     if (!finished) {
-      if (op.cancelRequested) current = isGen ? 'Cancelling…' : 'Cancelling… letting the post already sent to Buffer finish.';
+      if (op.cancelRequested) current = isGen ? 'Cancelling…' : 'Cancelling… letting the post already sent to the server finish.';
       else if (op.active.length) current = `Working on ${op.active.map((n) => `"${truncate(n, 40)}"`).join(', ')}`;
       else current = 'Starting…';
     } else if (!isGen && op.succeeded && op.dueTimes?.length) {

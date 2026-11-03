@@ -8,7 +8,7 @@ import { View } from './view.js';
 
 export class BulkEditView extends View {
   /**
-   * The selected posts this can change (a caption, not in Buffer, not busy), and how many it leaves alone.
+   * The selected posts this can change (a caption, not scheduled, not busy), and how many it leaves alone.
    * @returns {{editable: object[], scheduled: number, uncaptioned: number}}
    */
   targets() {

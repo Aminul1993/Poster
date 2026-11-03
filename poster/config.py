@@ -1,5 +1,5 @@
 """Configuration: environment variables (or a .env file), plus every constant the
-services share: API paths, GraphQL documents, retry rules and limits."""
+services share: API paths, Graph API fields, retry rules and limits."""
 
 from __future__ import annotations
 
@@ -99,8 +99,16 @@ class Config:
     model: str = "qwen/qwen3.8-27b"
     # Models the browser may ask for; empty allows any.
     groq_models: tuple[str, ...] = ()
-    buffer_access_token: str = ""
-    buffer_api_url: str = "https://api.buffer.com"
+    # A Meta system user token with access to the Facebook Pages and their Instagram accounts.
+    meta_access_token: str = ""
+    meta_graph_url: str = "https://graph.facebook.com"
+    meta_graph_version: str = "v23.0"
+    # With the app secret, every Graph API call carries an appsecret_proof.
+    meta_app_secret: str = ""
+    # Postgres URL for the post queue; without one (local runs only), a SQLite file next to app.py.
+    database_url: str = ""
+    # Bearer token the scheduler sends to /api/publish/due.
+    cron_secret: str = ""
     media_upload_endpoint: str = ""
     media_upload_preset: str = ""
     blob_read_write_token: str = ""
@@ -111,7 +119,7 @@ class Config:
     # The model that changes an uploaded image as described (see API["image_gen"]["edit_url"]).
     pollinations_edit_model: str = "kontext"
     groq_timeout: int = 120
-    buffer_timeout: int = 30
+    meta_timeout: int = 30
     media_timeout: int = 120
     pollinations_timeout: int = 60
     mode: str = "auto"  # auto | demo | live
@@ -143,8 +151,13 @@ class Config:
             groq_api_key=env.text("GROQ_API_KEY"),
             model=model,
             groq_models=(model, *(m for m in allowed if m != model)) if allowed else (),
-            buffer_access_token=env.text("BUFFER_ACCESS_TOKEN"),
-            buffer_api_url=env.text("BUFFER_API_URL", "https://api.buffer.com"),
+            meta_access_token=env.text("META_ACCESS_TOKEN"),
+            meta_graph_url=env.text("META_GRAPH_URL", "https://graph.facebook.com"),
+            meta_graph_version=env.text("META_GRAPH_VERSION", "v23.0"),
+            meta_app_secret=env.text("META_APP_SECRET"),
+            # Vercel's Supabase and Neon integrations set POSTGRES_URL (the pooled connection).
+            database_url=env.text("DATABASE_URL") or env.text("POSTGRES_URL"),
+            cron_secret=env.text("CRON_SECRET"),
             media_upload_endpoint=env.text("MEDIA_UPLOAD_ENDPOINT"),
             media_upload_preset=env.text("MEDIA_UPLOAD_PRESET"),
             blob_read_write_token=env.text("BLOB_READ_WRITE_TOKEN"),
@@ -154,7 +167,7 @@ class Config:
             pollinations_api_key=env.text("POLLINATIONS_API_KEY"),
             pollinations_edit_model=env.text("POLLINATIONS_EDIT_MODEL", "kontext"),
             groq_timeout=env.number("GROQ_TIMEOUT", 120, 10, 600),
-            buffer_timeout=env.number("BUFFER_TIMEOUT", 30, 5, 120),
+            meta_timeout=env.number("META_TIMEOUT", 30, 5, 120),
             media_timeout=env.number("MEDIA_TIMEOUT", 120, 10, 600),
             pollinations_timeout=env.number("POLLINATIONS_TIMEOUT", 60, 10, 600),
             mode=env.text("POSTER_MODE", "auto").lower(),
@@ -170,7 +183,7 @@ class Config:
         )
 
 
-# Central API configuration: every path, GraphQL document and retry rule.
+# Central API configuration: every path, Graph API field list and retry rule.
 API: dict[str, Any] = {
     "groq": {
         # Relative to the base URL, e.g. https://api.groq.com/openai/v1.
@@ -178,43 +191,56 @@ API: dict[str, Any] = {
         "models_path": "/models",
         "test_timeout": 20,
     },
-    "buffer": {
-        "queries": {
-            "account": "query PosterAccount { account { id email organizations { id name } } }",
-            "channels": (
-                "query PosterChannels($organizationId: OrganizationId!) { channels(input: { organizationId: $organizationId }) "
-                "{ id name displayName service timezone isDisconnected isLocked isQueuePaused } }"
-            ),
-            "create_post": (
-                "mutation PosterCreatePost($input: CreatePostInput!) { createPost(input: $input) { __typename "
-                "... on PostActionSuccess { post { id dueAt status } } ... on MutationError { message } } }"
-            ),
-            "post_status": "query PosterPostStatus($input: PostInput!) { post(input: $input) { id status } }",
-            "posts": (
-                "query PosterPosts($input: PostsInput!, $first: Int, $after: String) { posts(input: $input, first: $first, after: $after) "
-                "{ edges { node { ...PosterPostFields } } pageInfo { hasNextPage endCursor } } }"
-            ),
-            "edit_post": (
-                "mutation PosterEditPost($input: EditPostInput!) { editPost(input: $input) { __typename "
-                "... on PostActionSuccess { post { ...PosterPostFields } } ... on MutationError { message } } }"
-            ),
-            "delete_post": (
-                "mutation PosterDeletePost($input: DeletePostInput!) { deletePost(input: $input) { __typename "
-                "... on DeletePostSuccess { id } ... on MutationError { message } } }"
-            ),
-        },
-        # What the posts list and editPost read about each post.
-        "post_fields": (
-            "fragment PosterPostFields on Post { id status dueAt sentAt createdAt text channelId channelService externalLink "
-            "channel { name displayName } assets { thumbnail source } error { message } }"
-        ),
-        # Post statuses that mean the post is out of reach: it was published or is being published now.
+    "meta": {
+        # What /me/accounts reads about each Page: its own token, and the Instagram account linked to it.
+        "account_fields": "id,name,tasks,access_token,instagram_business_account{id,username,name}",
+        # Pages per /me/accounts request.
+        "accounts_limit": 100,
+        # Graph API error codes that mean "slow down": app, account and Page rate limits.
+        "rate_limit_codes": frozenset({4, 9, 17, 32, 613}),
+        # Recent posts read when looking for one whose publish answer was lost.
+        "recent_posts": 25,
+    },
+    "social": {
+        # Post statuses: scheduled (waiting), sending (being published), sent (published), error (given up on).
+        # Posts out of reach: published, or being published now.
         "published_statuses": frozenset({"sent", "sending"}),
+        # Posts that can still be edited or deleted. Editing a failed post puts it back in the queue.
+        "editable_statuses": ("scheduled", "error"),
         # The posts list's filters (None: every status) and their order by publish time.
-        "post_filters": {"all": None, "upcoming": ["scheduled", "needs_approval", "sending"], "published": ["sent"]},
+        "post_filters": {"all": None, "upcoming": ["scheduled", "sending"], "published": ["sent"]},
         "post_sort": {"all": "desc", "upcoming": "asc", "published": "desc"},
-        # Posts per page. Buffer allows few requests (100 per 15 minutes on the free plan), so pages are generous.
         "posts_page_size": 30,
+        # The publisher: posts per run (a run must end well within Vercel's 300 s), tries per post, and the
+        # minutes to wait before each new try.
+        "publish_batch": 10,
+        "max_attempts": 5,
+        "retry_minutes": (2, 5, 15, 30),
+        # Seconds of the time budget a post needs to be worth starting in this run.
+        "min_publish_seconds": 60,
+        # A post still "sending" this long after it was claimed was cut off; the next run checks whether it went out.
+        "stale_minutes": 10,
+        # Instagram's limits for a feed post (https://developers.facebook.com/docs/instagram-platform/content-publishing).
+        "instagram_caption_chars": 2200,
+        "instagram_hashtags": 30,
+    },
+    "activity": {
+        "levels": ("info", "success", "warn", "error"),
+        # The activity log's filters: entries at any of these levels or in any of these categories (None: every entry).
+        "filters": {
+            "all": None,
+            "error": {"levels": ["error"]},
+            "warn": {"levels": ["warn"], "categories": ["retry"]},
+            "success": {"levels": ["success"]},
+            "user": {"categories": ["user", "settings", "upload"]},
+        },
+        "page_size": 100,
+        # Entries kept in the database; older ones are deleted as new ones arrive.
+        "keep": 1000,
+        # Entries per save request, and the longest message and details stored.
+        "max_batch": 100,
+        "max_message_chars": 2000,
+        "max_details_chars": 1000,
     },
     "media": {
         "file_field": "file",
@@ -230,7 +256,7 @@ API: dict[str, Any] = {
         "avif_max_size": (1920, 1920),
         "avif_quality": 48,
         "avif_speed": 4,
-        # Buffer and the networks it posts to do not take AVIF, so /api/media/image/<name>.jpg converts the copy back.
+        # Facebook and Instagram do not take AVIF, so /api/media/image/<name>.jpg converts the copy back.
         "served_quality": 90,
         # The stored thumbnail, also AVIF. At this size a faster speed costs almost nothing in file size.
         "thumbnail_size": (400, 400),

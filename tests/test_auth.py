@@ -19,7 +19,7 @@ def basic(password: str, user: str = "me") -> dict[str, str]:
 class TestWithoutPassword:
     def test_local_requests_are_served(self, client: Any) -> None:
         assert client.get("/").status_code == 200
-        assert post(client, "/api/buffer/validate", {}).status_code == 200
+        assert post(client, "/api/social/validate", {}).status_code == 200
 
     @pytest.mark.parametrize("path", ["/", "/api/config"])
     def test_public_address_is_refused(self, client: Any, path: str) -> None:
@@ -32,7 +32,7 @@ class TestWithoutPassword:
         assert error["kind"] == "config"
 
     def test_dns_rebinding_host_is_refused(self, client: Any, fake: Any) -> None:
-        response = post(client, "/api/buffer/schedule", {}, base_url="http://attacker.example:5000")
+        response = post(client, "/api/social/schedule", {}, base_url="http://attacker.example:5000")
         assert response.status_code == 503
         assert not fake.calls
 
@@ -40,7 +40,7 @@ class TestWithoutPassword:
         assert client.get("/api/health", base_url=PUBLIC).status_code == 200
         assert client.get("/assets/any/js/main.js", base_url=PUBLIC).status_code == 200
 
-    def test_buffer_can_fetch_post_images(self, make_app: Any) -> None:
+    def test_meta_can_fetch_post_images(self, make_app: Any) -> None:
         client = make_app(**BLOB_ENV).test_client()
         assert client.get("/api/media/image/missing-image.jpg", base_url=PUBLIC).status_code == 404
 
@@ -57,14 +57,14 @@ class TestWithPassword:
         assert response.headers["WWW-Authenticate"].startswith('Basic realm="Poster"')
 
     def test_api_refusal_is_json(self, locked: Any, fake: Any) -> None:
-        response = post(locked, "/api/buffer/validate", {}, headers=basic("wrong"))
+        response = post(locked, "/api/social/validate", {}, headers=basic("wrong"))
         assert response.status_code == 401
         assert response.get_json()["error"]["kind"] == "auth"
         assert not fake.calls
 
     def test_correct_password_any_user(self, locked: Any) -> None:
         assert locked.get("/", base_url=PUBLIC, headers=basic("correct horse battery staple", "anyone")).status_code == 200
-        response = post(locked, "/api/buffer/validate", {}, headers=basic("correct horse battery staple"))
+        response = post(locked, "/api/social/validate", {}, headers=basic("correct horse battery staple"))
         assert response.status_code == 200
 
     def test_other_schemes_are_refused(self, locked: Any) -> None:
@@ -75,5 +75,5 @@ class TestWithPassword:
         assert locked.get("/assets/any/css/poster.css").status_code == 200
 
     def test_csrf_check_still_applies_after_login(self, locked: Any) -> None:
-        response = locked.post("/api/buffer/validate", json={}, headers=basic("correct horse battery staple"))
+        response = locked.post("/api/social/validate", json={}, headers=basic("correct horse battery staple"))
         assert response.status_code == 403

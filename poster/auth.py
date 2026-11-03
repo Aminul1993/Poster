@@ -16,8 +16,9 @@ from flask import Response, jsonify, request
 
 from poster.config import Config, is_local_host
 
-# Buffer fetches post images without credentials; health checks and static assets carry none either.
-PUBLIC_PATHS = ("/api/health", "/api/media/image/", "/assets/")
+# Facebook and Instagram fetch post images without credentials; health checks and static assets carry none
+# either. The publisher's scheduler sends CRON_SECRET instead, which the route checks (see web.publish_due).
+PUBLIC_PATHS = ("/api/health", "/api/media/image/", "/assets/", "/api/publish/due")
 CHALLENGE = 'Basic realm="Poster", charset="UTF-8"'
 
 

@@ -31,16 +31,19 @@ class HttpClient:
             self._local.session = session
         return session
 
-    def request(self, method: str, url: str, *, service: str, timeout: int, **kwargs: Any) -> tuple[int, Any, str]:
-        """Sends one request. Returns (status, parsed JSON or None, raw text)."""
-        response = self._send(method, url, service=service, timeout=timeout, **kwargs)
+    def request(self, method: str, url: str, *, service: str, timeout: int, check: bool = True,
+                **kwargs: Any) -> tuple[int, Any, str]:
+        """Sends one request. Returns (status, parsed JSON or None, raw text). With ``check`` off, an HTTP
+        error status is returned too, for callers that read the service's own error codes."""
+        response = self._send(method, url, service=service, timeout=timeout, check=check, **kwargs)
         return response.status_code, self._parse_json(response), response.text
 
     def request_bytes(self, method: str, url: str, *, service: str, timeout: int, **kwargs: Any) -> bytes:
         """Sends one request and returns the raw response body (for images)."""
         return self._send(method, url, service=service, timeout=timeout, **kwargs).content
 
-    def _send(self, method: str, url: str, *, service: str, timeout: int, **kwargs: Any) -> requests.Response:
+    def _send(self, method: str, url: str, *, service: str, timeout: int, check: bool = True,
+              **kwargs: Any) -> requests.Response:
         host = urlparse(url).netloc
         left = remaining_budget()
         if left is not None:
@@ -61,7 +64,7 @@ class HttpClient:
             raise ServiceError(f"The request to {service} failed ({exc.__class__.__name__}).", kind="network",
                                service=service) from exc
         log.info("%s %s %s -> %d in %.2fs", service, method, host, response.status_code, time.monotonic() - started)
-        if not response.ok:
+        if check and not response.ok:
             raise self._http_error(response, self._parse_json(response), response.text, service)
         return response
 

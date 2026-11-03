@@ -9,7 +9,7 @@ export class ApiError extends Error {
    *          fromServer?: boolean, uncertain?: boolean, retries?: Array<object>, cause?: *}} [options]
    *   kind: cancelled | timeout | network | offline | auth | rate_limit | server | client | not_found | parse | config | validation
    *   fromServer: the Poster server classified this error (after its own retries)
-   *   uncertain: the request failed, but may still have taken effect (a post may exist in Buffer)
+   *   uncertain: the request failed, but may still have taken effect (a post may have been queued)
    *   retries: retries the server performed before giving up
    */
   constructor(message, { kind = 'unknown', status = 0, service = '', details = '', hint = '', fromServer = false, uncertain = false, retries = [], cause } = {}) {
@@ -28,7 +28,7 @@ export class ApiError extends Error {
 
   /**
    * Whether retryRequest() should try again. Errors reported by the Poster
-   * server are final, because the server already retried Groq or Buffer.
+   * server are final, because the server already retried Groq or Meta.
    */
   get retryable() {
     if (this.fromServer) return false;

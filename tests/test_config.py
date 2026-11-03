@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from poster.config import Config, check_url, is_local_host, read_env_file
+from poster.store import PostStore, postgres_dsn
 
 
 def test_defaults() -> None:
@@ -35,9 +36,9 @@ def test_env_file_values_lose_to_the_environment(tmp_path: Path) -> None:
 
 def test_numbers_are_clamped_and_bad_ones_ignored(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING, logger="poster"):
-        config = Config.from_env({"GROQ_TIMEOUT": "9999", "BUFFER_TIMEOUT": "soon"}, env_file=None)
-    assert config.groq_timeout == 600 and config.buffer_timeout == 30
-    assert "BUFFER_TIMEOUT='soon' is not a whole number" in caplog.text
+        config = Config.from_env({"GROQ_TIMEOUT": "9999", "META_TIMEOUT": "soon"}, env_file=None)
+    assert config.groq_timeout == 600 and config.meta_timeout == 30
+    assert "META_TIMEOUT='soon' is not a whole number" in caplog.text
 
 
 def test_model_allowlist_always_includes_the_default() -> None:
@@ -60,3 +61,26 @@ def test_is_local_host(host: str, local: bool) -> None:
 def test_check_url(url: str, https_only: bool, problem: str | None) -> None:
     result = check_url(url, "X", https_only=https_only)
     assert (result is None) if problem is None else (problem in (result or ""))
+
+
+def test_database_url_from_the_vercel_integration() -> None:
+    supabase = "postgres://postgres.abc:pw@aws-0-eu.pooler.supabase.com:6543/postgres?sslmode=require&supa=base-pooler.x"
+    assert Config.from_env({"POSTGRES_URL": supabase}, env_file=None).database_url == supabase
+    both = Config.from_env({"POSTGRES_URL": supabase, "DATABASE_URL": "postgresql://db.test/poster"}, env_file=None)
+    assert both.database_url == "postgresql://db.test/poster"
+
+
+def test_postgres_url_keeps_only_what_libpq_knows() -> None:
+    url = "postgres://u:p@pooler.test:6543/postgres?sslmode=require&supa=base-pooler.x&pgbouncer=true"
+    assert postgres_dsn(url) == "postgres://u:p@pooler.test:6543/postgres?sslmode=require"
+
+
+@pytest.mark.parametrize(("env", "problem"), [
+    ({}, None),  # a local SQLite file
+    ({"DATABASE_URL": "postgres://db.test/poster"}, None),
+    ({"DATABASE_URL": "mysql://db.test/poster"}, "must be a postgres:// URL"),
+    ({"VERCEL": "1"}, "On Vercel, scheduled posts need a Postgres database"),
+])
+def test_database_problems(env: dict[str, str], problem: str | None) -> None:
+    store = PostStore(Config.from_env({"DATABASE_URL": "", "POSTGRES_URL": "", **env}, env_file=None))
+    assert (store.problem is None) if problem is None else (problem in (store.problem or ""))

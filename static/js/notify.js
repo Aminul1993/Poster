@@ -1,29 +1,14 @@
-/** NotificationService: toasts, banners and the activity log. */
-import { LIMITS, STORAGE_KEYS, TIMING } from './config.js';
-import { $, debounce, el, icon, isPlainObject, truncate, uid } from './util.js';
+/** NotificationService: toasts, banners and entries for the activity log. */
+import { TIMING } from './config.js';
+import { $, el, icon } from './util.js';
 
-/**
- * @typedef {Object} LogEntry
- * @property {string} id
- * @property {string} ts ISO timestamp
- * @property {'info'|'success'|'warn'|'error'} level
- * @property {string} category user | ai | schedule | retry | upload | settings | system
- * @property {string} message
- * @property {string} [details]
- */
 export class NotificationService extends EventTarget {
-  /** @param {StorageService} storage */
-  constructor(storage) {
+  /** @param {import('./activity.js').ActivityLog} activity where log() records entries */
+  constructor(activity) {
     super();
-    this.storage = storage;
+    this.activity = activity;
     this.toastRegion = $('#toast-region');
     this.bannerRegion = $('#banners');
-    const stored = storage.get(STORAGE_KEYS.log, []);
-    /** @type {LogEntry[]} */
-    this.entries = Array.isArray(stored) ? stored.filter((e) => isPlainObject(e) && typeof e.message === 'string').slice(-LIMITS.maxLogEntries) : [];
-    this.persistLog = debounce(() => {
-      this.storage.set(STORAGE_KEYS.log, this.entries, { shrink: (entries) => entries.slice(-LIMITS.logEntriesWhenFull) });
-    }, TIMING.logPersistMs);
   }
 
   /**
@@ -136,28 +121,14 @@ export class NotificationService extends EventTarget {
   }
 
   /**
-   * Records an activity log entry (persisted, newest last).
-   * @param {LogEntry['level']} level
+   * Records an activity log entry, which is saved to the server's database.
+   * @param {import('./activity.js').LogEntry['level']} level
    * @param {string} category
    * @param {string} message
    * @param {string} [details]
-   * @returns {LogEntry}
+   * @returns {import('./activity.js').LogEntry}
    */
   log(level, category, message, details = '') {
-    const entry = { id: uid('log'), ts: new Date().toISOString(), level, category, message: String(message) };
-    if (details) entry.details = truncate(String(details), 600);
-    this.entries.push(entry);
-    if (this.entries.length > LIMITS.maxLogEntries) this.entries.splice(0, this.entries.length - LIMITS.maxLogEntries);
-    this.persistLog();
-    this.dispatchEvent(new CustomEvent('log', { detail: entry }));
-    return entry;
-  }
-
-  /** Removes every log entry. */
-  clearLog() {
-    this.entries = [];
-    this.persistLog();
-    this.persistLog.flush();
-    this.dispatchEvent(new CustomEvent('log', { detail: null }));
+    return this.activity.add(level, category, message, details);
   }
 }

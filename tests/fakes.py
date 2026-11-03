@@ -1,4 +1,4 @@
-"""In-memory stand-ins for Groq, Buffer, Vercel Blob, Cloudinary and Pollinations.
+"""In-memory stand-ins for Groq, Meta's Graph API, Vercel Blob, Cloudinary and Pollinations.
 
 FakeUpstream replaces ``requests.Session.request``, so Poster's real HTTP client
 (timeouts, error classification, JSON parsing) runs unchanged against it.
@@ -9,10 +9,10 @@ from __future__ import annotations
 import base64
 import io
 import json
-import re
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -20,7 +20,8 @@ import requests
 from PIL import Image
 
 GROQ_HOST = "groq.test"
-BUFFER_HOST = "api.buffer.test"
+META_HOST = "graph.meta.test"
+META_TOKEN = "test-meta-token"
 BLOB_API_HOST = "blob.test"
 BLOB_STORE = "teststore123"
 BLOB_PUBLIC_HOST = f"{BLOB_STORE}.public.blob.vercel-storage.com"
@@ -72,99 +73,120 @@ class Call:
         return self.kwargs.get("json")
 
 
-@dataclass
-class FakeBuffer:
-    """Just enough of Buffer's GraphQL API for Poster."""
+def graph_time(value: datetime | None = None) -> str:
+    """A time as the Graph API writes it: 2026-10-08T13:30:00+0000."""
+    return (value or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%S+0000")
 
-    email: str = "owner@example.test"
-    organizations: list[dict[str, str]] = field(default_factory=lambda: [{"id": "org1", "name": "Org One"}])
-    channels: dict[str, list[dict[str, Any]]] = field(default_factory=lambda: {"org1": [
-        {"id": "ch1", "name": "poster.studio", "displayName": "Poster Studio", "service": "instagram", "timezone": "UTC",
-         "isDisconnected": False, "isLocked": False, "isQueuePaused": False},
-        {"id": "ch2", "name": "poster-inc", "displayName": "Poster Inc.", "service": "linkedin", "timezone": "UTC",
-         "isDisconnected": False, "isLocked": False, "isQueuePaused": False},
-        {"id": "ch3", "name": "old", "displayName": "Old Page", "service": "facebook", "timezone": "UTC",
-         "isDisconnected": True, "isLocked": False, "isQueuePaused": False},
-    ]})
-    posts: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+@dataclass
+class FakeMeta:
+    """Just enough of Meta's Graph API for Poster: a Page with a linked Instagram account, and a Page the
+    token cannot post to. Published posts land in ``feed`` (Facebook) and ``media`` (Instagram)."""
+
+    user: dict[str, str] = field(default_factory=lambda: {"id": "su1", "name": "Poster System User"})
+    pages: list[dict[str, Any]] = field(default_factory=lambda: [
+        {"id": "pg1", "name": "Poster Studio", "access_token": "page-token-1", "tasks": ["CREATE_CONTENT", "MANAGE"],
+         "instagram_business_account": {"id": "ig1", "username": "poster.studio", "name": "Poster Studio IG"}},
+        {"id": "pg2", "name": "Read-only Page", "access_token": "page-token-2", "tasks": ["ANALYZE"]},
+    ])
+    feed: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    media: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    containers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # The status a new Instagram container reports at first (then FINISHED).
+    container_status: str = "FINISHED"
     next_id: int = 1
 
-    def channel(self, channel_id: str) -> dict[str, Any] | None:
-        return next((c for items in self.channels.values() for c in items if c["id"] == channel_id), None)
+    def page_token(self, object_id: str) -> str | None:
+        """The access token that may act on a Page, its Instagram account or their posts."""
+        for page in self.pages:
+            account = page.get("instagram_business_account") or {}
+            if object_id in (page["id"], account.get("id")) or object_id.startswith(f"{page['id']}_"):
+                return str(page["access_token"])
+        return None
 
-    def org_of(self, channel_id: str) -> str | None:
-        return next((org for org, items in self.channels.items() if any(c["id"] == channel_id for c in items)), None)
-
-    def add_post(self, channel_id: str, text: str, due_at: str, *, status: str = "scheduled", image: str | None = None,
-                 created_at: str = "2026-01-01T00:00:00Z") -> dict[str, Any]:
-        post_id = f"post{self.next_id}"
+    def new_id(self, prefix: str) -> str:
+        value = f"{prefix}{self.next_id}"
         self.next_id += 1
-        channel = self.channel(channel_id) or {"name": channel_id, "displayName": channel_id, "service": "instagram"}
-        self.posts[post_id] = {
-            "id": post_id, "status": status, "dueAt": due_at, "sentAt": due_at if status == "sent" else None,
-            "createdAt": created_at, "text": text, "channelId": channel_id, "channelService": channel["service"],
-            "externalLink": f"https://social.test/{post_id}" if status == "sent" else None,
-            "channel": {"name": channel["name"], "displayName": channel["displayName"]},
-            "assets": [{"thumbnail": image, "source": image}] if image else [], "error": None,
-        }
-        return self.posts[post_id]
+        return value
 
     @staticmethod
-    def error(code: str, message: str) -> dict[str, Any]:
-        return {"errors": [{"message": message, "extensions": {"code": code}}]}
+    def error(code: int, message: str, status: int = 400, subcode: int = 0) -> tuple[int, dict[str, Any]]:
+        error: dict[str, Any] = {"message": message, "type": "OAuthException", "code": code, "fbtrace_id": "trace1"}
+        if subcode:
+            error["error_subcode"] = subcode
+        return status, {"error": error}
 
-    def handle(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        operation = re.search(r"(?:query|mutation) (\w+)", query)
-        name = operation.group(1) if operation else ""
-        if name == "PosterAccount":
-            return {"data": {"account": {"id": "acc1", "email": self.email, "organizations": self.organizations}}}
-        if name == "PosterChannels":
-            return {"data": {"channels": self.channels.get(variables["organizationId"], [])}}
-        if name == "PosterCreatePost":
-            data = variables["input"]
-            if not self.channel(data["channelId"]):
-                return {"data": {"createPost": {"__typename": "InvalidInputError", "message": "Unknown channel"}}}
-            image = data["assets"][0]["image"]["url"] if data.get("assets") else None
-            post = self.add_post(data["channelId"], data["text"], data["dueAt"], image=image)
-            return {"data": {"createPost": {"__typename": "PostActionSuccess",
-                                            "post": {"id": post["id"], "dueAt": post["dueAt"], "status": post["status"]}}}}
-        if name == "PosterPostStatus":
-            post = self.posts.get(variables["input"]["id"])
-            if not post:
-                return self.error("NOT_FOUND", "Post not found")
-            return {"data": {"post": {"id": post["id"], "status": post["status"]}}}
-        if name == "PosterPosts":
-            return {"data": {"posts": self.page(variables)}}
-        if name == "PosterEditPost":
-            data = variables["input"]
-            post = self.posts.get(data["id"])
-            if not post:
-                return self.error("NOT_FOUND", "Post not found")
-            if "text" in data:
-                post["text"] = data["text"]
-            if "dueAt" in data:
-                post["dueAt"] = data["dueAt"]
-            return {"data": {"editPost": {"__typename": "PostActionSuccess", "post": post}}}
-        if name == "PosterDeletePost":
-            post_id = variables["input"]["id"]
-            if self.posts.pop(post_id, None) is None:
-                return self.error("NOT_FOUND", "Post not found")
-            return {"data": {"deletePost": {"__typename": "DeletePostSuccess", "id": post_id}}}
-        return self.error("BAD_REQUEST", f"Unknown operation {name}")
+    def all_posts(self) -> list[dict[str, Any]]:
+        return [post for posts in (*self.feed.values(), *self.media.values()) for post in posts]
 
-    def page(self, variables: dict[str, Any]) -> dict[str, Any]:
-        data = variables["input"]
-        statuses = (data.get("filter") or {}).get("status")
-        posts = [p for p in self.posts.values()
-                 if self.org_of(p["channelId"]) == data["organizationId"] and (not statuses or p["status"] in statuses)]
-        reverse = data["sort"][0]["direction"] == "desc"
-        posts.sort(key=lambda p: p["dueAt"] or "", reverse=reverse)
-        start = int(variables.get("after") or 0)
-        first = int(variables.get("first") or 30)
-        chunk = posts[start:start + first]
-        more = start + first < len(posts)
-        return {"edges": [{"node": p} for p in chunk],
-                "pageInfo": {"hasNextPage": more, "endCursor": str(start + first) if more else None}}
+    def handle(self, method: str, path: str, params: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        parts = path.strip("/").split("/")[1:]  # without the version
+        token = params.get("access_token")
+        if parts[0] == "me":
+            if token != META_TOKEN:
+                return self.error(190, "Invalid OAuth access token.", 400)
+            if parts == ["me"]:
+                return 200, self.user
+            return 200, {"data": self.pages, "paging": {}}
+        target = parts[0]
+        expected = self.page_token(target) or self.page_token(self.containers.get(target, {}).get("ig", ""))
+        if expected is None:
+            if target in self.containers or any(p["id"] == target for p in self.all_posts()):
+                expected = self.page_token(self.owner_of(target))
+            else:
+                return self.error(100, f"Unsupported get request. Object with ID '{target}' does not exist.", subcode=33)
+        if token != expected:
+            return self.error(190, "Invalid OAuth access token.", 400)
+        edge = parts[1] if len(parts) > 1 else ""
+        page = next((pg for pg in self.pages if pg["id"] == target), None)
+        if method == "POST" and edge in ("photos", "feed") and page is not None:
+            if "CREATE_CONTENT" not in page.get("tasks", []):
+                return self.error(200, "(#200) The user hasn't authorized the application to perform this action", 403)
+            post_id = f"{target}_{self.new_id('p')}"
+            self.feed.setdefault(target, []).insert(0, {
+                "id": post_id, "message": params.get("message", ""), "created_time": graph_time(),
+                "permalink_url": f"https://www.facebook.com/{post_id}", "image": params.get("url")})
+            return 200, ({"id": self.new_id("photo"), "post_id": post_id} if edge == "photos" else {"id": post_id})
+        if method == "GET" and edge == "posts" and page is not None:
+            return 200, {"data": self.feed.get(target, [])}
+        if method == "POST" and edge == "media":
+            container_id = self.new_id("c")
+            self.containers[container_id] = {"ig": target, "image_url": params.get("image_url"),
+                                              "caption": params.get("caption", ""), "status_code": self.container_status}
+            return 200, {"id": container_id}
+        if method == "POST" and edge == "media_publish":
+            container = self.containers.get(str(params.get("creation_id")))
+            if container is None or container["ig"] != target:
+                return self.error(100, "Invalid parameter", subcode=2207001)
+            if container["status_code"] != "FINISHED":
+                return self.error(9007, "Media ID is not available", subcode=2207027)
+            container["status_code"] = "PUBLISHED"
+            media_id = self.new_id("m")
+            self.media.setdefault(target, []).insert(0, {
+                "id": media_id, "caption": container["caption"], "timestamp": graph_time(),
+                "permalink": f"https://www.instagram.com/p/{media_id}/", "image": container["image_url"]})
+            return 200, {"id": media_id}
+        if method == "GET" and edge == "media":
+            return 200, {"data": self.media.get(target, [])}
+        if method == "GET" and not edge:
+            if target in self.containers:
+                container = self.containers[target]
+                code = container["status_code"]
+                if code == "IN_PROGRESS":
+                    container["status_code"] = "FINISHED"  # ready on the next look
+                return 200, {"id": target, "status_code": code, "status": "Finished: Media has been uploaded"}
+            post = next((p for p in self.all_posts() if p["id"] == target), None)
+            if post is not None:
+                return 200, {"id": target, **{k: post[k] for k in ("permalink_url", "permalink") if k in post}}
+        return self.error(100, f"Unknown path {method} {path}")
+
+    def owner_of(self, object_id: str) -> str:
+        if object_id in self.containers:
+            return str(self.containers[object_id]["ig"])
+        for owner, posts in (*self.feed.items(), *self.media.items()):
+            if any(p["id"] == object_id for p in posts):
+                return owner
+        return ""
 
 
 class FakeUpstream:
@@ -172,7 +194,7 @@ class FakeUpstream:
 
     def __init__(self) -> None:
         self.calls: list[Call] = []
-        self.buffer = FakeBuffer()
+        self.meta = FakeMeta()
         self.groq_replies: deque[str] = deque()
         self.groq_models = ["qwen/qwen3.8-27b", "qwen/qwen3-32b"]
         self.blobs: dict[str, bytes] = {}
@@ -189,7 +211,7 @@ class FakeUpstream:
     def fail(self, op: str, status: int = 500, data: Any = None, *, times: int = 1, exc: Exception | None = None,
              headers: dict[str, str] | None = None, after: bool = False) -> None:
         """The next ``times`` calls of ``op`` get this HTTP status (or raise ``exc``). With ``after``, the call
-        takes effect first and only its answer is lost (a timeout after Buffer created the post)."""
+        takes effect first and only its answer is lost (a timeout after Meta published the post)."""
         def make(call: Call) -> requests.Response:
             if after:
                 self.dispatch(call)
@@ -219,10 +241,17 @@ class FakeUpstream:
         host, path = parsed.hostname or "", parsed.path
         if host == GROQ_HOST:
             return "groq.models" if path.endswith("/models") else "groq.chat"
-        if host == BUFFER_HOST:
-            query = (kwargs.get("json") or {}).get("query", "")
-            match = re.search(r"(?:query|mutation) (\w+)", query)
-            return f"buffer.{match.group(1) if match else '?'}"
+        if host == META_HOST:
+            parts = path.strip("/").split("/")[1:]
+            edge = parts[1] if len(parts) > 1 else ""
+            if parts == ["me"]:
+                return "meta.me"
+            if parts == ["me", "accounts"]:
+                return "meta.accounts"
+            if edge:
+                return f"meta.{edge}" if method == "POST" or edge != "media" else "meta.media_list"
+            fields = str((kwargs.get("params") or {}).get("fields", ""))
+            return "meta.container" if "status_code" in fields else "meta.object"
         if host == BLOB_API_HOST:
             return "blob.put"
         if host == BLOB_PUBLIC_HOST:
@@ -239,9 +268,10 @@ class FakeUpstream:
         if call.op == "groq.chat":
             reply = self.groq_replies.popleft() if self.groq_replies else json.dumps(DEFAULT_REPLY)
             return response(200, {"choices": [{"message": {"role": "assistant", "content": reply}}]}, url=call.url)
-        if call.op.startswith("buffer."):
-            body = call.json or {}
-            return response(200, self.buffer.handle(body.get("query", ""), body.get("variables") or {}), url=call.url)
+        if call.op.startswith("meta."):
+            params = call.kwargs.get("params") or call.kwargs.get("data") or {}
+            status, data = self.meta.handle(call.method, urlparse(call.url).path, dict(params))
+            return response(status, data, url=call.url)
         if call.op == "blob.put":
             pathname = parse_qs(urlparse(call.url).query)["pathname"][0]
             public = f"https://{BLOB_PUBLIC_HOST}/{pathname}"

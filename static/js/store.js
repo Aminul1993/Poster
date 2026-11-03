@@ -10,7 +10,7 @@ export function emptyContent() {
 }
 
 /**
- * The draft content with its caption (or alternative caption) and hashtags taken from a post's text as Buffer has it.
+ * The draft content with its caption (or alternative caption) and hashtags taken from a post's text as the queue has it.
  * @param {object|null} content @param {string} text @param {boolean} useAlternative @returns {object}
  */
 export function contentFromText(content, text, useAlternative) {
@@ -25,7 +25,7 @@ export function hasContent(item) {
 }
 
 /**
- * The item's schedule result as it counts in `mode`: a post scheduled in Demo mode is not in Buffer, so it
+ * The item's schedule result as it counts in `mode`: a post scheduled in Demo mode is never published, so it
  * does not count once Poster is live.
  * @param {object} item @param {'demo'|'live'} mode @returns {object|null}
  */
@@ -66,8 +66,8 @@ export function itemStatus(item, settings) {
   if (item.busy === 'scheduling') return { key: 'scheduling', label: 'Scheduling…', chip: 'info' };
   if (item.busy === 'queued') return { key: 'queued', label: 'Queued', chip: 'neutral' };
   if (item.error) return { key: 'error', label: 'Failed', chip: 'danger' };
-  // Deleted from Buffer on purpose: it waits, out of "All ready", until the owner plans it again.
-  if (item.result?.removed) return { key: 'removed', label: 'Removed from Buffer', chip: 'neutral', hint: 'Its posts were deleted. Give it a new time to schedule it again.' };
+  // Deleted from the queue on purpose: it waits, out of "All ready", until the owner plans it again.
+  if (item.result?.removed) return { key: 'removed', label: 'Removed from the queue', chip: 'neutral', hint: 'Its posts were deleted. Give it a new time to schedule it again.' };
   const result = countedResult(item, settings.mode);
   if (result?.partial) return { key: 'partial', label: 'Partly scheduled', chip: 'warning', hint: 'Scheduled on some channels; the others failed. The editor lists why.' };
   if (result?.mode === 'demo') return { key: 'scheduled', label: 'Scheduled · Demo', chip: 'success' };
@@ -289,7 +289,7 @@ export class ImageStore extends EventTarget {
   }
 
   /**
-   * Updates the schedule result of images whose Buffer posts changed, open in
+   * Updates the schedule result of images whose queued posts changed, open in
    * the gallery or saved as drafts.
    * @param {string[]} postIds
    * @param {object|null} patch fields to change, or null when the posts were deleted (an image with
@@ -305,7 +305,7 @@ export class ImageStore extends EventTarget {
         ? { ...result, postIds: remaining, channels: (result.channels || []).filter((_, i) => keep[i]) }
         : { mode: result.mode, removed: true, removedAt: new Date().toISOString(), dueAt: result.dueAt, timezone: result.timezone };
     };
-    // An edit made in Buffer becomes the draft itself, so deleting the post later never brings back older text.
+    // An edit made to a scheduled post becomes the draft itself, so deleting the post later never brings back older text.
     const draftFields = (holder) => {
       const fields = {};
       if (patch?.dueAt && holder.result?.timezone) fields.scheduleLocal = TimeZoneUtil.toLocalInput(new Date(patch.dueAt), holder.result.timezone);

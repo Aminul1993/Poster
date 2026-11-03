@@ -614,7 +614,8 @@ fieldset:disabled .tag, .editor.is-locked .tag { padding-right: 10px; }
 .sched-actions { display: flex; gap: 2px; grid-column: 3; grid-row: 1; }
 .sched-body { grid-column: 2; grid-row: 1; min-width: 0; }
 .sched-item .error-text { margin-top: 4px; }
-.sched-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 20px 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.sched-publisher-alert { margin: 0 20px 12px; }
+.sched-footer, .log-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 20px 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
 .log-item {
   display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 10px; align-items: baseline;
   padding: 7px 20px; font-size: 12.5px;
@@ -1005,13 +1006,13 @@ dialog::backdrop { background: rgba(10, 13, 20, .55); -webkit-backdrop-filter: b
 .editor-notes > summary .chev { margin-left: auto; align-self: center; color: var(--muted); transition: transform .2s var(--ease); }
 .editor-notes[open] > summary { margin-bottom: 14px; }
 .editor-notes[open] > summary .chev { transform: rotate(90deg); }
-/* A locked field says so in its label: the words and time are as Buffer has them; the rest stays as scheduled. */
+/* A locked field says so in its label: the words and time are as the queue has them; the rest stays as scheduled. */
 .lock-note {
   display: none; align-items: center; gap: 4px; margin-left: 6px; vertical-align: -1px;
   font-size: 11.5px; font-weight: 600; color: var(--muted);
 }
 .lock-note .icon { width: 12px; height: 12px; color: var(--faint); }
-.editor.is-locked .lock-note, .editor.is-buffer-edit .lock-note.is-kept { display: inline-flex; }
+.editor.is-locked .lock-note, .editor.is-post-edit .lock-note.is-kept { display: inline-flex; }
 /* A locked post shows only what it holds: no resize grip, no example placeholder, no "add a tag" instructions. */
 .textarea[readonly] { resize: none; }
 .input[readonly]::placeholder, .textarea[readonly]::placeholder { color: transparent; }

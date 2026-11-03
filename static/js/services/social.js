@@ -1,15 +1,12 @@
-/** BufferService: Buffer scheduling through the Poster server. */
+/** SocialService: Facebook and Instagram posts, queued and published by the Poster server. */
 import { API_CONFIG, RULES, SERVER, STORAGE_KEYS } from '../config.js';
 import { ApiError } from '../errors.js';
 import { prepareUploadImage } from '../image.js';
 import { isPlainObject, truncate } from '../util.js';
 
-/** Display names and colours for Buffer services. */
+/** Display names and colours for the networks Poster publishes to. */
 export const SERVICE_META = Object.freeze({
-  instagram: ['Instagram', '#d6246e'], facebook: ['Facebook', '#1877f2'], linkedin: ['LinkedIn', '#0a66c2'],
-  twitter: ['X', '#111827'], threads: ['Threads', '#1f2937'], bluesky: ['Bluesky', '#1185fe'], mastodon: ['Mastodon', '#6364ff'],
-  pinterest: ['Pinterest', '#e60023'], tiktok: ['TikTok', '#111111'], youtube: ['YouTube', '#ff0000'],
-  googlebusiness: ['Google Business', '#4285f4'], startpage: ['Start Page', '#2c4bff'], substack: ['Substack', '#ff6719']
+  instagram: ['Instagram', '#d6246e'], facebook: ['Facebook', '#1877f2']
 });
 
 /** @param {string} service @returns {{label: string, color: string}} */
@@ -25,14 +22,34 @@ export const PUBLISHED_STATUSES = RULES.publishedStatuses;
 /** Statuses each filter of the posts list shows (null: all), as the server applies them. */
 export const POST_FILTERS = RULES.postFilters;
 
+/** Instagram's limits for a feed post, which the server enforces per channel. */
+export const INSTAGRAM = RULES.instagram || { maxCaptionChars: 2200, maxHashtags: 30 };
+
+const HASHTAG_RE = /(?<![\p{L}\p{N}_])#[\p{L}\p{N}\p{M}_]+/gu;
+
 /**
- * A post as the posts list shows it, read from Buffer.
+ * Why Instagram would refuse a post, or null. The server refuses the same posts on Instagram channels
+ * (and still queues them on Facebook).
+ * @param {string} text the full post text @param {boolean} hasImage @returns {string|null}
+ */
+export function instagramProblem(text, hasImage) {
+  if (!hasImage) return 'Instagram posts need an image.';
+  if ([...String(text)].length > INSTAGRAM.maxCaptionChars) return `Instagram captions are limited to ${INSTAGRAM.maxCaptionChars.toLocaleString('en')} characters.`;
+  const tags = new Set(String(text).toLowerCase().match(HASHTAG_RE) || []);
+  if (tags.size > INSTAGRAM.maxHashtags) return `Instagram allows at most ${INSTAGRAM.maxHashtags} hashtags per post.`;
+  return null;
+}
+
+/**
+ * A post as the posts list shows it, read from the server's queue. Status is scheduled (waiting for its
+ * time), sending (being published), sent (published) or error (the publisher gave up; it can be edited to
+ * try again, or deleted).
  * @typedef {{postId: string, status: string, published: boolean, dueAt: string|null, sentAt: string|null, createdAt: string|null,
  *            text: string, channelId: string, channelName: string, service: string, thumbnail: string|null,
- *            externalLink: string|null, error: string|null}} BufferPost
+ *            externalLink: string|null, error: string|null, attempts: number}} SocialPost
  */
 
-/** @param {object} p @returns {BufferPost} */
+/** @param {object} p @returns {SocialPost} */
 export function normalizePost(p) {
   const text = (value) => (typeof value === 'string' && value ? value : null);
   const https = (value) => (typeof value === 'string' && value.startsWith('https://') ? value : null);
@@ -42,14 +59,14 @@ export function normalizePost(p) {
     channelId: String(p.channelId || ''), channelName: String(p.channelName || ''), service: String(p.service || ''),
     // Demo posts keep the browser-made thumbnail as a data: URL.
     thumbnail: https(p.thumbnail) || (String(p.thumbnail || '').startsWith('data:image/') ? p.thumbnail : null),
-    externalLink: https(p.externalLink), error: text(p.error)
+    externalLink: https(p.externalLink), error: text(p.error), attempts: Number(p.attempts) || 0
   };
 }
 
 /**
  * Sorts posts the way the server does for a filter: upcoming soonest first,
  * everything else newest first.
- * @param {BufferPost[]} posts @param {string} filter @returns {BufferPost[]}
+ * @param {SocialPost[]} posts @param {string} filter @returns {SocialPost[]}
  */
 export function sortPosts(posts, filter) {
   const key = (p) => p.dueAt || p.createdAt || '';
@@ -60,7 +77,7 @@ export function sortPosts(posts, filter) {
 /**
  * Checks the server's answer to listing, editing or deleting posts.
  * @param {object} data
- * @returns {{posts: BufferPost[], next: Object<string, string>|null, deleted: string[],
+ * @returns {{posts: SocialPost[], next: string|null, deleted: string[], publisher: {lastRunAt: string|null}|null,
  *            failures: Array<{postId: string, message: string, reason: 'published'|'missing'|'error'}>}}
  */
 export function normalizePostResults(data) {
@@ -68,8 +85,11 @@ export function normalizePostResults(data) {
   const failures = Array.isArray(data.failures) ? data.failures.filter((f) => isPlainObject(f) && f.postId) : [];
   return {
     posts: posts.map(normalizePost),
-    next: isPlainObject(data.next) && Object.keys(data.next).length ? data.next : null,
+    next: typeof data.next === 'string' && data.next ? data.next : null,
     deleted: Array.isArray(data.deleted) ? data.deleted.map(String) : [],
+    publisher: isPlainObject(data.publisher)
+      ? { lastRunAt: typeof data.publisher.lastRunAt === 'string' && data.publisher.lastRunAt ? data.publisher.lastRunAt : null }
+      : null,
     failures: failures.map((f) => ({
       postId: String(f.postId), message: String(f.message || 'Unknown error'),
       reason: ['published', 'missing'].includes(f.reason) ? f.reason : 'error'
@@ -78,12 +98,13 @@ export function normalizePostResults(data) {
 }
 
 /**
- * Buffer through the Poster server. The server holds the personal access
- * token and talks to Buffer's GraphQL API; the browser caches the account and
- * channels (keyed by a fingerprint of the server's token) so the channel
- * picker works without reconnecting.
+ * Facebook Pages and Instagram accounts through the Poster server. The server
+ * holds the Meta access token, keeps the queue of scheduled posts and
+ * publishes each one at its time; the browser caches the channels (keyed by a
+ * fingerprint of the server's token) so the channel picker works without
+ * reconnecting.
  */
-export class BufferService {
+export class SocialService {
   /**
    * @param {{api: ApiService, validation: ValidationService, notifier: NotificationService,
    *          storage: StorageService, getSettings: () => object}} deps
@@ -110,7 +131,7 @@ export class BufferService {
     const all = this.storage.get(STORAGE_KEYS.connection, null);
     const live = isPlainObject(all) && isPlainObject(all.live) ? all.live : null;
     if (!live || !Array.isArray(live.channels)) return null;
-    if (!SERVER.buffer.tokenId || live.tokenId !== SERVER.buffer.tokenId) return null;
+    if (!SERVER.social.tokenId || live.tokenId !== SERVER.social.tokenId) return null;
     return live;
   }
 
@@ -121,7 +142,7 @@ export class BufferService {
         account: connection.account,
         channels: connection.channels,
         connectedAt: new Date().toISOString(),
-        tokenId: connection.tokenId || SERVER.buffer.tokenId
+        tokenId: connection.tokenId || SERVER.social.tokenId
       }
     });
   }
@@ -142,8 +163,14 @@ export class BufferService {
     return channel ? `${channel.name} (${serviceMeta(channel.service).label})` : `Channel ${truncate(id, 12)}`;
   }
 
+  /** @param {object} [settings] @returns {boolean} whether an Instagram account is among the selected channels */
+  hasInstagram(settings = this.getSettings()) {
+    const known = this.channels(settings);
+    return this.selectedChannelIds(settings).some((id) => known.find((c) => c.id === id)?.service === 'instagram');
+  }
+
   /**
-   * Detects selected channels that are unknown, disconnected or locked.
+   * Detects selected channels that are unknown or that the token cannot post to.
    * @param {string[]} ids @returns {string|null} problem description
    */
   checkChannels(ids) {
@@ -151,17 +178,31 @@ export class BufferService {
     if (!known.length) return null;
     for (const id of ids) {
       const channel = known.find((c) => c.id === id);
-      if (!channel) return `A selected channel (${truncate(id, 14)}) no longer exists in your Buffer account. Reconnect in Settings → Buffer.`;
-      if (!channel.usable) return `${channel.name} (${serviceMeta(channel.service).label}) is ${channel.isDisconnected ? 'disconnected' : 'locked'} in Buffer. Reconnect it in Buffer or deselect it in Settings.`;
+      if (!channel) return `A selected channel (${truncate(id, 14)}) is no longer available to the server's Meta token. Reconnect in Settings → Facebook & Instagram.`;
+      if (!channel.usable) return `${channel.name} (${serviceMeta(channel.service).label}): ${channel.problem || 'the token cannot post here.'} Fix it in Meta Business settings or deselect it in Settings.`;
     }
     return null;
   }
 
-  /** @throws {ApiError} kind "config" when the server has no Buffer token */
+  /** @throws {ApiError} kind "config" when the server has no Meta token or no database */
   assertConfigured() {
-    if (!SERVER.buffer.configured) {
-      throw new ApiError(`Buffer is not set up on the server: ${SERVER.buffer.problem}`, {
-        kind: 'config', service: 'Buffer', hint: 'Add BUFFER_ACCESS_TOKEN to the .env file next to app.py and restart Poster.'
+    if (!SERVER.social.configured) {
+      throw new ApiError(`Facebook and Instagram are not set up on the server: ${SERVER.social.problem}`, {
+        kind: 'config', service: 'Meta', hint: 'Add META_ACCESS_TOKEN (and, on Vercel, a Postgres DATABASE_URL) to the server configuration and restart Poster.'
+      });
+    }
+  }
+
+  /**
+   * The posts list reads and changes the server's queue alone, so it works with a database even before
+   * the Meta token is set.
+   * @throws {ApiError} kind "config" when the server has no database
+   */
+  assertDatabase() {
+    const database = SERVER.social.database;
+    if (!database?.configured) {
+      throw new ApiError(`The server has no database for scheduled posts: ${database?.problem || 'not configured.'}`, {
+        kind: 'config', service: 'Database', hint: 'Set DATABASE_URL (or POSTGRES_URL) in the server configuration and restart Poster.'
       });
     }
   }
@@ -169,38 +210,38 @@ export class BufferService {
   /* ---------------------------------------------------------- public API */
 
   /**
-   * Verifies the server's personal access token by reading the account.
+   * Verifies the server's Meta access token by reading who it belongs to.
    * @param {{signal?: AbortSignal, onRetry?: Function}} [ctx]
-   * @returns {Promise<{id: string, email: string, organizations: Array<{id: string, name: string}>}>}
+   * @returns {Promise<{id: string, name: string}>}
    */
-  async validateBufferToken({ signal, onRetry } = {}) {
+  async validateToken({ signal, onRetry } = {}) {
     this.assertConfigured();
-    const data = await this.api.callWithRetry(API_CONFIG.routes.bufferValidate, {
-      json: {}, timeoutMs: API_CONFIG.timeouts.bufferMs, signal, service: 'Buffer', onRetry
+    const data = await this.api.callWithRetry(API_CONFIG.routes.socialValidate, {
+      json: {}, timeoutMs: API_CONFIG.timeouts.socialMs, signal, service: 'Meta', onRetry
     });
-    if (!isPlainObject(data.account)) throw new ApiError('Buffer returned unexpected account data.', { kind: 'parse', service: 'Buffer' });
+    if (!isPlainObject(data.account)) throw new ApiError('Meta returned unexpected account data.', { kind: 'parse', service: 'Meta' });
     return data.account;
   }
 
   /**
-   * Validates the token and loads every channel of every organization.
+   * Validates the token and loads every Page it manages, each followed by its linked Instagram account.
    * @param {{signal?: AbortSignal, onRetry?: Function}} [ctx]
    * @returns {Promise<{account: object, channels: object[], tokenId: string}>}
    */
-  async connectToBuffer({ signal, onRetry } = {}) {
+  async connectAccounts({ signal, onRetry } = {}) {
     this.assertConfigured();
-    const data = await this.api.callWithRetry(API_CONFIG.routes.bufferConnect, {
-      json: {}, timeoutMs: API_CONFIG.timeouts.bufferMs * 3, signal, service: 'Buffer', onRetry
+    const data = await this.api.callWithRetry(API_CONFIG.routes.socialConnect, {
+      json: {}, timeoutMs: API_CONFIG.timeouts.socialMs * 2, signal, service: 'Meta', onRetry
     });
     if (!isPlainObject(data.account) || !Array.isArray(data.channels)) {
-      throw new ApiError('Buffer returned an unexpected channel list.', { kind: 'parse', service: 'Buffer' });
+      throw new ApiError('Meta returned an unexpected channel list.', { kind: 'parse', service: 'Meta' });
     }
     return { account: data.account, channels: data.channels.filter(isPlainObject), tokenId: String(data.tokenId || '') };
   }
 
   /**
-   * Resolves the public URL Buffer should attach. Buffer has no upload
-   * endpoint, so the image must be publicly hosted:
+   * Resolves the public URL Facebook and Instagram fetch the image from. The
+   * image must be publicly hosted:
    *   1. a URL the user pasted for this image, else
    *   2. a URL from an earlier upload of this image, else
    *   3. the server uploads it to its media host and returns the URL, else
@@ -216,7 +257,7 @@ export class BufferService {
     const manual = String(item.mediaUrl || '').trim();
     if (manual) {
       const error = this.validation.validateMediaUrl(manual);
-      if (error) throw new ApiError(`"${item.name}": ${error}`, { kind: 'validation', service: 'Buffer' });
+      if (error) throw new ApiError(`"${item.name}": ${error}`, { kind: 'validation', service: 'Meta' });
       return { url: manual, thumbnailUrl: null };
     }
     if (item.uploadedUrl) return { url: item.uploadedUrl, thumbnailUrl: null };
@@ -233,43 +274,43 @@ export class BufferService {
       const thumbnailUrl = typeof data.thumbnailUrl === 'string' && data.thumbnailUrl.startsWith('https://') ? data.thumbnailUrl : null;
       return { url: data.url, thumbnailUrl };
     }
-    if (s.requireMedia) {
-      throw new ApiError(`"${item.name}" has no public image URL. Buffer attaches images from public URLs: paste one in the editor, or set BLOB_READ_WRITE_TOKEN (Vercel Blob) or MEDIA_UPLOAD_ENDPOINT on the server.`, { kind: 'validation', service: 'Buffer' });
+    if (s.requireMedia || this.hasInstagram(s)) {
+      throw new ApiError(`"${item.name}" has no public image URL. Facebook and Instagram fetch images from public URLs: paste one in the editor, or set BLOB_READ_WRITE_TOKEN (Vercel Blob) or MEDIA_UPLOAD_ENDPOINT on the server.`, { kind: 'validation', service: 'Meta' });
     }
     return { url: null, thumbnailUrl: null };
   }
 
   /**
-   * Creates one scheduled post per channel (mode "customScheduled").
-   * Channels are independent on the server: failures on some are reported
-   * while the others still go out. The browser does not retry this call,
-   * because a request that reached the server may already have created posts.
-   * @param {{text: string, channelIds: string[], dueAt: Date, mediaUrl?: string|null}} post
+   * Queues one post per channel; the server's publisher publishes each at
+   * its time. Channels are independent on the server: the ones that cannot
+   * take the post are reported while the others are queued. Sending the same
+   * `requestKey` again returns the posts already queued for it, so a request
+   * whose answer was lost can safely be sent again.
+   * @param {{text: string, channelIds: string[], dueAt: Date, mediaUrl?: string|null, requestKey: string}} post
    * @param {{settings?: object, onRetry?: Function}} [ctx]
    * @returns {Promise<{posts: Array<{channelId: string, postId: string, dueAt: string, status: string}>, failures: Array<{channelId: string, message: string, uncertain: boolean}>}>}
-   *   uncertain: the request failed in a way that may still have created the post
    */
   async schedulePost(post, { onRetry } = {}) {
     this.assertConfigured();
     if (!Array.isArray(post.channelIds) || !post.channelIds.length) {
-      throw new ApiError('No Buffer channels selected. Choose at least one in Settings → Buffer.', { kind: 'config', service: 'Buffer' });
+      throw new ApiError('No channels selected. Choose at least one in Settings → Facebook & Instagram.', { kind: 'config', service: 'Meta' });
     }
     if (!(post.dueAt instanceof Date) || Number.isNaN(post.dueAt.getTime()) || post.dueAt.getTime() <= Date.now()) {
-      throw new ApiError('The publish time must be a valid future date.', { kind: 'validation', service: 'Buffer' });
+      throw new ApiError('The publish time must be a valid future date.', { kind: 'validation', service: 'Meta' });
     }
-    if (!String(post.text || '').trim()) throw new ApiError('The post text is empty.', { kind: 'validation', service: 'Buffer' });
+    if (!String(post.text || '').trim()) throw new ApiError('The post text is empty.', { kind: 'validation', service: 'Meta' });
     const channelProblem = this.checkChannels(post.channelIds);
-    if (channelProblem) throw new ApiError(channelProblem, { kind: 'config', service: 'Buffer' });
+    if (channelProblem) throw new ApiError(channelProblem, { kind: 'config', service: 'Meta' });
 
-    const data = await this.api.call(API_CONFIG.routes.bufferSchedule, {
-      json: { text: post.text, channelIds: post.channelIds, dueAt: post.dueAt.toISOString(), mediaUrl: post.mediaUrl || null },
-      timeoutMs: API_CONFIG.timeouts.bufferMs * Math.max(1, post.channelIds.length),
-      service: 'Buffer',
+    const data = await this.api.call(API_CONFIG.routes.socialSchedule, {
+      json: { text: post.text, channelIds: post.channelIds, dueAt: post.dueAt.toISOString(), mediaUrl: post.mediaUrl || null, requestKey: post.requestKey || null },
+      timeoutMs: API_CONFIG.timeouts.socialMs,
+      service: 'Meta',
       onRetry
     });
     const posts = Array.isArray(data.posts) ? data.posts.filter((p) => isPlainObject(p) && p.postId) : [];
     const failures = Array.isArray(data.failures) ? data.failures.filter(isPlainObject) : [];
-    if (!posts.length) throw new ApiError('Buffer did not confirm any scheduled post.', { kind: 'parse', service: 'Buffer' });
+    if (!posts.length) throw new ApiError('The server did not confirm any scheduled post.', { kind: 'parse', service: 'Meta' });
     return {
       posts: posts.map((p) => ({ channelId: String(p.channelId), postId: String(p.postId), dueAt: String(p.dueAt || post.dueAt.toISOString()), status: String(p.status || 'scheduled') })),
       failures: failures.map((f) => ({ channelId: String(f.channelId), message: String(f.message || 'Unknown error'), uncertain: f.uncertain === true }))
@@ -277,45 +318,42 @@ export class BufferService {
   }
 
   /**
-   * One page of the account's posts, read straight from Buffer.
-   * @param {{filter: 'all'|'upcoming'|'published', after?: Object<string, string>|null}} query
+   * One page of the queued and published posts.
+   * @param {{filter: 'all'|'upcoming'|'published', after?: string|null}} query
    *   after: the previous page's `next`, for the page after it
-   * @returns {Promise<{posts: BufferPost[], next: Object<string, string>|null}>}
+   * @returns {Promise<{posts: SocialPost[], next: string|null, publisher: {lastRunAt: string|null}|null}>}
    */
   async listPosts({ filter, after = null }) {
-    this.assertConfigured();
-    // Organizations known from connecting save the server a Buffer request.
-    const organizationIds = (this.getConnection()?.account?.organizations || []).map((o) => o.id).filter(Boolean);
-    const data = await this.api.call(API_CONFIG.routes.bufferPosts, {
-      json: { filter, after, organizationIds },
-      timeoutMs: API_CONFIG.timeouts.bufferMs * Math.max(2, organizationIds.length), service: 'Buffer'
+    this.assertDatabase();
+    const data = await this.api.call(API_CONFIG.routes.socialPosts, {
+      json: { filter, after }, timeoutMs: API_CONFIG.timeouts.socialMs, service: 'Meta'
     });
-    const { posts, next } = normalizePostResults(data);
-    return { posts, next };
+    const { posts, next, publisher } = normalizePostResults(data);
+    return { posts, next, publisher };
   }
 
   /**
    * Changes the text and/or publish time of posts. The server skips posts
-   * that are published by now.
+   * that are published (or being published) by now; a failed post goes back
+   * in the queue.
    * @param {string[]} postIds @param {{text?: string, dueAt?: Date}} changes
    */
   async editPosts(postIds, { text, dueAt }) {
-    return this.#changePosts(API_CONFIG.routes.bufferEditPosts, postIds, { text: text ?? null, dueAt: dueAt ? dueAt.toISOString() : null });
+    return this.#changePosts(API_CONFIG.routes.socialEditPosts, postIds, { text: text ?? null, dueAt: dueAt ? dueAt.toISOString() : null });
   }
 
   /**
-   * Deletes posts from Buffer. The server skips posts that are published by now.
+   * Deletes posts from the queue. The server skips posts that are published by now.
    * @param {string[]} postIds
    */
   async deletePosts(postIds) {
-    return this.#changePosts(API_CONFIG.routes.bufferDeletePosts, postIds, {});
+    return this.#changePosts(API_CONFIG.routes.socialDeletePosts, postIds, {});
   }
 
   async #changePosts(route, postIds, fields) {
-    this.assertConfigured();
-    // The server reads each post before changing it: two Buffer calls per post.
+    this.assertDatabase();
     const data = await this.api.call(route, {
-      json: { postIds, ...fields }, timeoutMs: API_CONFIG.timeouts.bufferMs * 2 * Math.max(1, postIds.length), service: 'Buffer'
+      json: { postIds, ...fields }, timeoutMs: API_CONFIG.timeouts.socialMs, service: 'Meta'
     });
     return normalizePostResults(data);
   }

@@ -176,8 +176,8 @@ export class ValidationService {
     if (!text) return null;
     let url;
     try { url = new URL(text); } catch { return 'Enter a full URL, for example https://cdn.example.com/photo.jpg.'; }
-    if (url.protocol !== 'https:') return 'The image URL must start with https:// so Buffer can fetch it.';
-    if (isLocalHost(url.hostname)) return 'Buffer cannot reach local addresses. Use a publicly hosted image URL.';
+    if (url.protocol !== 'https:') return 'The image URL must start with https:// so Facebook and Instagram can fetch it.';
+    if (isLocalHost(url.hostname)) return 'Facebook and Instagram cannot reach local addresses. Use a publicly hosted image URL.';
     return null;
   }
 
@@ -309,7 +309,7 @@ export class ValidationService {
    * server must also have the relevant service configured, because the
    * credentials and endpoints live there.
    * @param {object} settings
-   * @param {{scope?: 'all'|'groq'|'buffer', requireCredentials?: boolean}} [options]
+   * @param {{scope?: 'all'|'groq'|'social', requireCredentials?: boolean}} [options]
    * @returns {{valid: boolean, errors: Object<string,string>, warnings: string[]}}
    */
   validateSettings(settings, { scope = 'all', requireCredentials } = {}) {
@@ -331,9 +331,9 @@ export class ValidationService {
       if (charCount(s.extraInstructions) > LIMITS.maxExtraInstructions) errors.extraInstructions = `Extra instructions are limited to ${LIMITS.maxExtraInstructions} characters.`;
     }
 
-    if ((scope === 'all' || scope === 'buffer') && live && !SERVER.buffer.configured) {
-      const message = `Buffer is not set up on the server: ${SERVER.buffer.problem} Add it to the .env file next to app.py and restart Poster.`;
-      if (scope === 'buffer') errors.serverBuffer = message;
+    if ((scope === 'all' || scope === 'social') && live && !SERVER.social.configured) {
+      const message = `Facebook and Instagram are not set up on the server: ${SERVER.social.problem} Add it to the .env file next to app.py (on Vercel, to the project's environment variables) and restart Poster.`;
+      if (scope === 'social') errors.serverSocial = message;
       else warnings.push(`${message} Until then AI generation works, but scheduling does not.`);
     }
 
@@ -361,8 +361,8 @@ export class ValidationService {
     let source;
     if (isPlainObject(json.settings)) {
       if (json.app && json.app !== 'Poster') return { valid: false, errors: [`This file was exported by "${String(json.app)}", not Poster.`], ignored: [] };
-      source = json.settings;
-    } else if (['MODEL', 'TIMEZONE', 'MODE', 'OLLAMA_ENDPOINT', 'OLLAMA_API_KEY', 'GROQ_ENDPOINT', 'GROQ_API_KEY', 'BUFFER_ACCESS_TOKEN'].some((key) => key in json)) {
+      source = SettingsModel.withoutOldChannels(json.settings);
+    } else if (['MODEL', 'TIMEZONE', 'MODE', 'OLLAMA_ENDPOINT', 'OLLAMA_API_KEY', 'GROQ_ENDPOINT', 'GROQ_API_KEY', 'BUFFER_ACCESS_TOKEN', 'META_ACCESS_TOKEN'].some((key) => key in json)) {
       source = { ...SettingsModel.fromConfigShape(json) };
       for (const key of Object.keys(json)) if (SettingsModel.serverOnlyKeys.includes(key)) source[key] = json[key];
     } else {

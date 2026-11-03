@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import logging
 import mimetypes
 import re
 import secrets
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -19,6 +21,7 @@ from flask import Blueprint, Flask, current_app, g, jsonify, redirect, render_te
 from werkzeug.exceptions import HTTPException, NotFound
 
 from poster import validation
+from poster.activity import ActivityLog
 from poster.auth import require_login
 from poster.config import API, APP_VERSION, BASE_DIR, LANGUAGES, LIMITS, TONES, Config, check_url, is_local_host
 from poster.content import FALLBACK_TAGS, STOP_WORDS
@@ -26,10 +29,12 @@ from poster.errors import ServiceError
 from poster.http import HttpClient
 from poster.imaging import IMAGE_EXTENSIONS, sniff_image
 from poster.retry import RetryLog, time_budget
-from poster.services.buffer import BufferService, ThumbnailFinder
 from poster.services.groq import GroqService
 from poster.services.imagegen import ImageGenService
 from poster.services.media import MediaService
+from poster.services.meta import MetaService
+from poster.services.social import SocialService, UrlMapper
+from poster.store import PostStore
 
 log = logging.getLogger("poster")
 
@@ -54,7 +59,8 @@ class Services:
 
     config: Config
     groq: GroqService
-    buffer: BufferService
+    social: SocialService
+    activity: ActivityLog
     media: MediaService
     image_gen: ImageGenService
     # Content hash of static/, so asset URLs change whenever a file does and can be cached forever.
@@ -83,8 +89,11 @@ def create_app(config: Config | None = None, *, http: HttpClient | None = None) 
     app = Flask("poster", root_path=str(BASE_DIR), static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = LIMITS["max_image_bytes"] + 1024 * 1024
     app.json.sort_keys = False  # type: ignore[attr-defined]
+    store = PostStore(config)
+    activity = ActivityLog(store)
     app.extensions["poster"] = Services(
-        config=config, groq=GroqService(http, config), buffer=BufferService(http, config),
+        config=config, groq=GroqService(http, config),
+        social=SocialService(MetaService(http, config), store, activity, cron_secret=config.cron_secret), activity=activity,
         media=MediaService(http, config), image_gen=ImageGenService(http, config), asset_version=asset_version(STATIC_DIR),
     )
     app.register_blueprint(bp)
@@ -106,7 +115,7 @@ def server_config() -> dict[str, Any]:
         "version": APP_VERSION,
         "mode": default_mode(),
         "groq": s.groq.public_info(),
-        "buffer": s.buffer.public_info(),
+        "social": s.social.public_info(),
         "media": s.media.public_info(),
         "imageGen": s.image_gen.public_info(),
         "limits": {"maxImageBytes": LIMITS["max_image_bytes"], "maxUploadBytes": s.config.max_upload_bytes,
@@ -124,8 +133,11 @@ def server_config() -> dict[str, Any]:
                         "maxLow": LIMITS["min_caption_max"], "maxHigh": LIMITS["max_caption_chars"],
                         "defaultMin": LIMITS["default_caption_min"], "defaultMax": LIMITS["default_caption_max"]},
             "prompt": {"min": LIMITS["min_prompt_chars"], "max": LIMITS["max_prompt_chars"]},
-            "postFilters": API["buffer"]["post_filters"],
-            "publishedStatuses": sorted(API["buffer"]["published_statuses"]),
+            "postFilters": API["social"]["post_filters"],
+            "publishedStatuses": sorted(API["social"]["published_statuses"]),
+            "activity": {"filters": API["activity"]["filters"], "maxBatch": API["activity"]["max_batch"]},
+            "instagram": {"maxCaptionChars": API["social"]["instagram_caption_chars"],
+                          "maxHashtags": API["social"]["instagram_hashtags"]},
             "retry": {"maxRetries": retry["max_retries"], "delaysMs": [d * 1000 for d in retry["delays"]],
                       "retryableStatus": sorted(retry["retryable_status"]), "retryableKinds": sorted(retry["retryable_kinds"])},
         },
@@ -167,8 +179,8 @@ def security_headers(response: Any) -> Any:
     response.headers["X-Request-Id"] = getattr(g, "request_id", "")
     if response.mimetype == "text/html":
         nonce = getattr(g, "csp_nonce", "")
-        # https: images, because the posts list shows Buffer's thumbnails from wherever each image is hosted
-        # (Buffer, Vercel Blob, a media host or a URL pasted in the editor).
+        # https: images, because the posts list shows each post's image from wherever it is hosted
+        # (Vercel Blob, a media host or a URL pasted in the editor).
         response.headers["Content-Security-Policy"] = (
             f"default-src 'self'; script-src 'self' 'nonce-{nonce}'; style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
@@ -214,7 +226,7 @@ def handle_unexpected(error: Exception) -> Any:
 # =============================================================================
 
 def public_base_url() -> str:
-    """This server's public https:// address. Buffer fetches post images from it (see media_image)."""
+    """This server's public https:// address. Facebook and Instagram fetch post images from it (see media_image)."""
     configured = services().config.public_base_url
     if configured:
         problem = check_url(configured, "PUBLIC_BASE_URL", https_only=True)
@@ -222,16 +234,17 @@ def public_base_url() -> str:
             raise ServiceError(problem, kind="config", service="Media host")
         return configured.rstrip("/")
     if is_local_host(urlparse(request.host_url).hostname or ""):
-        raise ServiceError("Buffer fetches post images from this server, which is running on a local address it cannot reach.",
+        raise ServiceError("Facebook and Instagram fetch post images from this server, which is running on a local address "
+                           "they cannot reach.",
                            kind="config", service="Media host",
                            hint="Deploy Poster (for example to Vercel), or set PUBLIC_BASE_URL to a public https:// address of this server.")
     return f"https://{request.host}"
 
 
-def stored_thumbnails() -> ThumbnailFinder | None:
-    """Maps an image this server serves from its AVIF copy (see media_image) to its thumbnail on Vercel Blob,
-    so the posts list shows the small thumbnail instead of pulling each full image through this server.
-    Image URLs start with PUBLIC_BASE_URL, or with this server's own address when it is unset."""
+def served_image_mapper(make: Callable[[str, str], str]) -> UrlMapper | None:
+    """Maps an image URL this server serves from its AVIF copy on Vercel Blob (see media_image) to
+    ``make(prefix, name)``, and other URLs to None. Image URLs start with PUBLIC_BASE_URL, or with this
+    server's own address when it is unset."""
     media = services().media
     if not media.uses_blob or not media.configured:
         return None
@@ -242,10 +255,22 @@ def stored_thumbnails() -> ThumbnailFinder | None:
         for prefix in prefixes:
             if url.startswith(prefix):
                 match = _IMAGE_FILE_RE.fullmatch(url[len(prefix):].split("?")[0].lower())
-                return media.blob_url(f"{match[1]}.thumb.avif") if match else None
+                return make(prefix, match[1]) if match else None
         return None
 
     return find
+
+
+def stored_thumbnails() -> UrlMapper | None:
+    """An image's thumbnail on Vercel Blob, so the posts list shows the small thumbnail instead of pulling
+    each full image through this server."""
+    media = services().media
+    return served_image_mapper(lambda _prefix, name: media.blob_url(f"{name}.thumb.avif"))
+
+
+def served_as_jpeg() -> UrlMapper | None:
+    """The .jpg URL of an image this server serves: Instagram takes JPEG only."""
+    return served_image_mapper(lambda prefix, name: f"{prefix}{name}.jpg")
 
 
 def run(label: str, action: Callable[[RetryLog], dict[str, Any]]) -> Any:
@@ -286,8 +311,8 @@ def assets(version: str, filename: str) -> Any:
 @bp.get("/api/health")
 def health() -> Any:
     s = services()
-    return jsonify(status="ok", version=APP_VERSION, groq=s.groq.configured, buffer=s.buffer.configured,
-                   media=s.media.configured, imageGen=s.image_gen.configured)
+    return jsonify(status="ok", version=APP_VERSION, groq=s.groq.configured, social=s.social.configured,
+                   database=s.social.store.configured, media=s.media.configured, imageGen=s.image_gen.configured)
 
 
 @bp.get("/api/config")
@@ -332,41 +357,43 @@ def image_edit() -> Any:
     return run("Image edit", lambda retries: services().image_gen.edit(image, prompt, retries))
 
 
-@bp.post("/api/buffer/validate")
-def buffer_validate() -> Any:
-    return run("Buffer validate", lambda retries: {"account": services().buffer.validate_token(retries)})
+@bp.post("/api/social/validate")
+def social_validate() -> Any:
+    return run("Meta validate", lambda retries: {"account": services().social.meta.validate_token(retries)})
 
 
-@bp.post("/api/buffer/connect")
-def buffer_connect() -> Any:
-    buffer = services().buffer
-    return run("Buffer connect", lambda retries: {**buffer.connect(retries), "tokenId": buffer.token_id})
+@bp.post("/api/social/connect")
+def social_connect() -> Any:
+    meta = services().social.meta
+    return run("Meta connect", lambda retries: {**meta.connect(retries), "tokenId": meta.token_id})
 
 
-@bp.post("/api/buffer/schedule")
-def buffer_schedule() -> Any:
+@bp.post("/api/social/schedule")
+def social_schedule() -> Any:
+    """Queues the post on each channel; the publisher publishes it when it falls due."""
     body = validation.json_body()
     text = validation.parse_post_text(body.get("text"))
     channel_ids = validation.parse_channel_ids(body.get("channelIds"))
     due_at = validation.parse_due_at(body.get("dueAt"))
     media_url = validation.parse_media_url(body.get("mediaUrl"))
-    return run("Buffer schedule", lambda retries: services().buffer.schedule(text, channel_ids, due_at, media_url, retries))
+    request_key = validation.parse_request_key(body.get("requestKey"))
+    jpeg_for = served_as_jpeg()
+    return run("Schedule", lambda retries: services().social.schedule(text, channel_ids, due_at, media_url, request_key,
+                                                                       retries, jpeg_for))
 
 
-@bp.post("/api/buffer/posts")
-def buffer_posts() -> Any:
-    """A page of the account's posts, read straight from Buffer (nothing is stored)."""
+@bp.post("/api/social/posts")
+def social_posts() -> Any:
+    """A page of the queued and published posts."""
     body = validation.json_body()
     status_filter = validation.parse_post_filter(body.get("filter"))
-    organization_ids = validation.parse_organization_ids(body.get("organizationIds"))
-    after = validation.parse_cursors(body.get("after"))
+    after = validation.parse_cursor(body.get("after"))
     thumbnails = stored_thumbnails()
-    return run("Buffer posts", lambda retries: services().buffer.list_posts(organization_ids, status_filter, after, retries,
-                                                                            thumbnails))
+    return run("Posts", lambda _retries: services().social.list_posts(status_filter, after, thumbnails))
 
 
-@bp.post("/api/buffer/posts/edit")
-def buffer_posts_edit() -> Any:
+@bp.post("/api/social/posts/edit")
+def social_posts_edit() -> Any:
     """Changes the text and/or publish time of posts that are not published yet."""
     body = validation.json_body()
     post_ids = validation.parse_post_ids(body.get("postIds"))
@@ -375,14 +402,52 @@ def buffer_posts_edit() -> Any:
     if text is None and due_at is None:
         raise ServiceError('Nothing to change: send a new "text" or "dueAt".', kind="validation")
     thumbnails = stored_thumbnails()
-    return run("Buffer edit", lambda retries: services().buffer.edit_posts(post_ids, text, due_at, retries, thumbnails))
+    return run("Edit", lambda _retries: services().social.edit_posts(post_ids, text, due_at, thumbnails))
 
 
-@bp.post("/api/buffer/posts/delete")
-def buffer_posts_delete() -> Any:
+@bp.post("/api/social/posts/delete")
+def social_posts_delete() -> Any:
     """Deletes posts that are not published yet."""
     post_ids = validation.parse_post_ids(validation.json_body().get("postIds"))
-    return run("Buffer delete", lambda retries: services().buffer.delete_posts(post_ids, retries))
+    return run("Delete", lambda _retries: services().social.delete_posts(post_ids))
+
+
+@bp.post("/api/activity")
+def activity_save() -> Any:
+    """Saves activity log entries the dashboard recorded. An entry sent again (after a lost answer) is stored once."""
+    entries = validation.parse_activity_entries(validation.json_body().get("entries"))
+    return run("Activity", lambda _retries: services().activity.save(entries))
+
+
+@bp.post("/api/activity/list")
+def activity_list() -> Any:
+    """A page of the activity log, newest first."""
+    body = validation.json_body()
+    name = validation.parse_activity_filter(body.get("filter"))
+    after = validation.parse_cursor(body.get("after"))
+    return run("Activity", lambda _retries: services().activity.page(name, after))
+
+
+@bp.post("/api/activity/clear")
+def activity_clear() -> Any:
+    """Deletes every activity log entry."""
+    return run("Activity", lambda _retries: services().activity.clear())
+
+
+@bp.get("/api/publish/due")
+def publish_due() -> Any:
+    """Publishes the posts that are due. A scheduler calls it every minute with ``Authorization: Bearer
+    <CRON_SECRET>``: cron-job.org or similar on Vercel's Hobby plan, Vercel Cron on Pro. It needs no
+    dashboard password (see auth.PUBLIC_PATHS), only the secret."""
+    secret = services().config.cron_secret
+    if not secret:
+        raise ServiceError("CRON_SECRET is not set on the server, so the publisher cannot be called.", kind="config",
+                           service="Publisher", hint="Set CRON_SECRET to a long random value and send it as a Bearer token.")
+    auth = request.headers.get("Authorization", "")
+    supplied = auth[7:] if auth[:7].lower() == "bearer " else ""
+    if not hmac.compare_digest(supplied.encode(), secret.encode()):
+        return jsonify(error={"message": "Send the CRON_SECRET as a Bearer token.", "kind": "auth"}), 401
+    return run("Publish", lambda retries: services().social.publish_due(retries))
 
 
 @bp.post("/api/media/upload")
@@ -400,7 +465,7 @@ def media_upload() -> Any:
     media = services().media
     if not media.uses_blob:
         return run("Media upload", lambda retries: {"url": media.upload(filename, data, mimetype, retries)})
-    # Vercel Blob keeps a thumbnail and an AVIF copy, and Buffer gets this server's URL for the image.
+    # Vercel Blob keeps a thumbnail and an AVIF copy, and the post gets this server's URL for the image.
     base_url = public_base_url()
 
     def store(retries: RetryLog) -> dict[str, Any]:
@@ -413,7 +478,7 @@ def media_upload() -> Any:
 
 @bp.get(f"{MEDIA_IMAGE_PATH}<filename>")
 def media_image(filename: str) -> Any:
-    """Serves an uploaded image from its AVIF copy on Vercel Blob. Buffer fetches post images from here.
+    """Serves an uploaded image from its AVIF copy on Vercel Blob. Facebook and Instagram fetch post images from here.
     Takes the name /api/media/upload returned, with .jpg, .png or .webp to get the image converted to
     that format, or alone or with .avif to get the AVIF copy."""
     match = _IMAGE_FILE_RE.fullmatch(filename.lower())
@@ -438,7 +503,9 @@ def media_image(filename: str) -> Any:
 
 def log_startup(app: Flask) -> None:
     s = cast(Services, app.extensions["poster"])
-    for name, service in (("Groq", s.groq), ("Buffer", s.buffer), ("Media host", s.media), ("Pollinations", s.image_gen)):
+    named: tuple[tuple[str, Any], ...] = (("Groq", s.groq), ("Meta", s.social.meta), ("Database", s.social.store),
+                                          ("Media host", s.media), ("Pollinations", s.image_gen))
+    for name, service in named:
         if service.configured:
             log.info("%s: configured", name)
         else:
@@ -447,3 +514,30 @@ def log_startup(app: Flask) -> None:
         log.warning("POSTER_PASSWORD is not set, so only requests to a local address (such as 127.0.0.1) are served.")
     with app.app_context():
         log.info("Default mode: %s", default_mode())
+
+
+def start_local_publisher(app: Flask, interval: int = 60) -> threading.Thread | None:
+    """Publishes due posts every ``interval`` seconds while ``python app.py`` runs. (On Vercel nothing runs
+    between requests, so a scheduler calls /api/publish/due instead.) A run that overlaps one from
+    elsewhere is safe: each post is claimed atomically before it is published."""
+    s = cast(Services, app.extensions["poster"])
+    if not s.social.configured:
+        log.warning("Publisher: not started (%s)", s.social.problem)
+        return None
+
+    def loop() -> None:
+        while True:
+            with app.app_context():
+                try:
+                    with time_budget(max(60, interval * 4)):
+                        s.social.publish_due(RetryLog("Publish"))
+                except ServiceError as error:
+                    log.warning("Publisher: %s", error.message)
+                except Exception:
+                    log.exception("Publisher failed")
+            time.sleep(interval)
+
+    thread = threading.Thread(target=loop, name="poster-publisher", daemon=True)
+    thread.start()
+    log.info("Publisher: publishing due posts every %d s", interval)
+    return thread

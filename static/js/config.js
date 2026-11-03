@@ -21,8 +21,13 @@ const FALLBACK_RULES = {
   maxCategoryChars: 40,
   caption: { minLow: 1, minHigh: 500, maxLow: 20, maxHigh: 10000, defaultMin: 10, defaultMax: 2200 },
   prompt: { min: 3, max: 1000 },
-  postFilters: { all: null, upcoming: ['scheduled', 'needs_approval', 'sending'], published: ['sent'] },
+  postFilters: { all: null, upcoming: ['scheduled', 'sending'], published: ['sent'] },
   publishedStatuses: ['sending', 'sent'],
+  activity: {
+    filters: { all: null, error: { levels: ['error'] }, warn: { levels: ['warn'], categories: ['retry'] }, success: { levels: ['success'] }, user: { categories: ['user', 'settings', 'upload'] } },
+    maxBatch: 100
+  },
+  instagram: { maxCaptionChars: 2200, maxHashtags: 30 },
   retry: { maxRetries: 3, delaysMs: [1000, 2000, 4000], retryableStatus: [429, 500, 502, 503, 504], retryableKinds: ['network', 'rate_limit', 'timeout'] }
 };
 
@@ -47,7 +52,10 @@ export const SERVER = (() => {
     version: '',
     mode: 'demo',
     groq: { configured: false, problem: missing, model: 'qwen/qwen3.8-27b', models: [], host: '', timeout: 120, requestTimeout: 1000 },
-    buffer: { configured: false, problem: missing, tokenId: '', host: '', timeout: 30, requestTimeout: 160 },
+    social: {
+      configured: false, problem: missing, tokenId: '', host: '', version: '', timeout: 30, requestTimeout: 160,
+      database: { configured: false, problem: missing, kind: '' }, cronSecretSet: false
+    },
     media: { configured: false, problem: missing, host: '', requestTimeout: 500 },
     imageGen: { configured: false, problem: missing, host: '', aspects: {}, editModel: '', maxPromptChars: 1000, requestTimeout: 260 },
     limits: {},
@@ -60,7 +68,7 @@ export const SERVER = (() => {
       ...fallback,
       ...parsed,
       groq: { ...fallback.groq, ...parsed.groq },
-      buffer: { ...fallback.buffer, ...parsed.buffer },
+      social: { ...fallback.social, ...parsed.social },
       media: { ...fallback.media, ...parsed.media },
       imageGen: { ...fallback.imageGen, ...parsed.imageGen },
       rules: { ...FALLBACK_RULES, ...parsed.rules }
@@ -75,19 +83,22 @@ export const RULES = deepFreeze(SERVER.rules);
 
 /**
  * Central API configuration: every server route, timeout and retry rule.
- * The server performs the retries towards Groq and Buffer; the browser only
+ * The server performs the retries towards Groq and Meta; the browser only
  * retries when it cannot reach the Poster server itself.
  */
 export const API_CONFIG = Object.freeze({
   routes: Object.freeze({
     groqTest: '/api/groq/test',
     groqGenerate: '/api/groq/generate',
-    bufferValidate: '/api/buffer/validate',
-    bufferConnect: '/api/buffer/connect',
-    bufferSchedule: '/api/buffer/schedule',
-    bufferPosts: '/api/buffer/posts',
-    bufferEditPosts: '/api/buffer/posts/edit',
-    bufferDeletePosts: '/api/buffer/posts/delete',
+    socialValidate: '/api/social/validate',
+    socialConnect: '/api/social/connect',
+    socialSchedule: '/api/social/schedule',
+    socialPosts: '/api/social/posts',
+    socialEditPosts: '/api/social/posts/edit',
+    socialDeletePosts: '/api/social/posts/delete',
+    activitySave: '/api/activity',
+    activityList: '/api/activity/list',
+    activityClear: '/api/activity/clear',
     mediaUpload: '/api/media/upload',
     imageGenerate: '/api/image/generate',
     imageEdit: '/api/image/edit'
@@ -97,9 +108,10 @@ export const API_CONFIG = Object.freeze({
   timeouts: Object.freeze({
     testMs: 90000,
     generateMs: SERVER.groq.requestTimeout * 1000,
-    bufferMs: SERVER.buffer.requestTimeout * 1000,
+    socialMs: SERVER.social.requestTimeout * 1000,
     mediaMs: SERVER.media.requestTimeout * 1000,
-    imageGenMs: SERVER.imageGen.requestTimeout * 1000
+    imageGenMs: SERVER.imageGen.requestTimeout * 1000,
+    activityMs: 30000
   }),
   retry: RULES.retry
 });
@@ -117,7 +129,7 @@ export const LIMITS = Object.freeze({
   allowedExtensions: Object.freeze(['jpg', 'jpeg', 'png', 'webp']),
   minHashtags: RULES.hashtags.min,
   maxHashtags: RULES.hashtags.max,
-  /** Longest post text the server sends to Buffer. */
+  /** Longest post text the server accepts. */
   maxPostChars: RULES.maxTextChars,
   maxCategoryChars: RULES.maxCategoryChars,
   /** How far the post preview may run past the caption maximum (hashtags included) before it is flagged. */
@@ -130,13 +142,12 @@ export const LIMITS = Object.freeze({
   /** Gallery and editor thumbnails; matches the thumbnails the server stores. */
   previewMaxEdge: 400,
   thumbMaxEdge: 160,
+  /** Activity log entries kept in browser storage: those not saved to the server yet, or all of them without a database. */
   maxLogEntries: 300,
   /** Entries kept when browser storage is full. */
   logEntriesWhenFull: 80,
   maxDrafts: 150,
   draftsWhenFull: 40,
-  /** Pages of upcoming posts read when looking for a post whose creation answer was lost. */
-  reconcilePages: 5,
   maxExtraInstructions: RULES.maxExtraChars,
   minPromptChars: RULES.prompt.min,
   maxPromptChars: Number(SERVER.imageGen.maxPromptChars) || RULES.prompt.max
@@ -146,6 +157,8 @@ export const LIMITS = Object.freeze({
 export const TIMING = Object.freeze({
   toastMs: Object.freeze({ error: 9000, warning: 7000, info: 4500, success: 4500 }),
   logPersistMs: 500,
+  /** Wait before saving activity log entries again after the server could not be reached. */
+  logRetryMs: 30000,
   draftPersistMs: 600,
   opTickerMs: 1000,
   /** Minimum gap between two "storage problem" toasts. */
@@ -158,7 +171,7 @@ export const STORAGE_KEYS = Object.freeze({
   theme: 'theme',
   ui: 'ui',
   drafts: 'drafts',
-  /** No longer written: scheduled posts come from Buffer. Old copies are removed at start. */
+  /** No longer written: scheduled posts come from the server's queue. Old copies are removed at start. */
   schedules: 'schedules',
   log: 'log',
   connection: 'connection'

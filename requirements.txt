@@ -14,6 +14,9 @@ itsdangerous==2.2.0       # via flask
 jinja2==3.1.6             # via flask
 markupsafe==3.0.4         # via flask, jinja2, werkzeug
 pillow==12.3.0            # via -r requirements.in
+psycopg==3.3.6            # via -r requirements.in
+psycopg-binary==3.3.6     # via psycopg
 requests==2.34.2          # via -r requirements.in
+typing-extensions==4.16.0  # via psycopg
 urllib3==2.8.0            # via requests
 werkzeug==3.1.9           # via flask

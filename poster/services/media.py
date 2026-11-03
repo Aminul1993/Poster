@@ -1,4 +1,4 @@
-"""Media host: gives Buffer a public URL for an image (Buffer only takes public image URLs)."""
+"""Media host: gives Facebook and Instagram a public URL for an image (Meta fetches images only from public URLs)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ log = logging.getLogger("poster")
 
 
 class MediaService(ConfiguredService):
-    """Gives Buffer a public URL for an image.
+    """Gives Meta a public URL for an image.
 
     With BLOB_READ_WRITE_TOKEN, a thumbnail and a compressed AVIF copy of the
     image go to Vercel Blob (never the original file), and GET
@@ -86,7 +86,7 @@ class MediaService(ConfiguredService):
                 value = value.get(key) if isinstance(value, dict) else None
             if isinstance(value, str) and re.match(r"^https?://", value, re.I):
                 if not value.startswith("https://"):
-                    raise ServiceError("The media host returned an http:// URL. Buffer needs https:// image URLs.",
+                    raise ServiceError("The media host returned an http:// URL. Facebook and Instagram need https:// image URLs.",
                                        kind="client", service=self.service)
                 return value
         raise ServiceError("The media host accepted the upload but did not return a public URL.", kind="parse",
@@ -140,7 +140,7 @@ class MediaService(ConfiguredService):
         return f"{base}/{API['media']['blob_folder']}/{name}"
 
     def blob_headers(self, mimetype: str) -> dict[str, str]:
-        """Headers for a Vercel Blob put. Public access, because Buffer's fetch reaches the files without
+        """Headers for a Vercel Blob put. Public access, because Meta's fetch reaches the files without
         credentials. No random suffix: store_packed() picks unique names itself, so load_packed() can find
         a file by name, and a retried put may overwrite its own earlier attempt."""
         headers = {

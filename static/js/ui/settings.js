@@ -1,7 +1,7 @@
-/** The Settings drawer: preferences, server status, Buffer channels, import, export and reset. */
-import { connectToBuffer, exportConfig, importConfig, saveSettings, showToast } from '../app.js';
+/** The Settings drawer: preferences, server status, Facebook and Instagram channels, import, export and reset. */
+import { connectAccounts, exportConfig, importConfig, saveSettings, showToast } from '../app.js';
 import { LANGUAGES, LIMITS, SERVER, STORAGE_KEYS } from '../config.js';
-import { serviceMeta } from '../services/buffer.js';
+import { serviceMeta } from '../services/social.js';
 import { SettingsModel } from '../settings.js';
 import { TimeZoneUtil } from '../time.js';
 import { charCount, el, formatBytes, icon, pluralize, truncate } from '../util.js';
@@ -78,7 +78,7 @@ export class SettingsView extends View {
       this.updateDirtyState();
     });
     byId('test-groq').addEventListener('click', () => this.testGroq());
-    byId('connect-buffer').addEventListener('click', () => this.connectBuffer());
+    byId('connect-social').addEventListener('click', () => this.connectSocial());
     // While the drawer is open, toasts would sit under its backdrop: what these actions did is said in its footer.
     byId('export-config').addEventListener('click', () => {
       const { settings } = this.read();
@@ -142,7 +142,7 @@ export class SettingsView extends View {
       this.noteText = '';
       this.fill(this.settings);
       byId('groq-test-result').hidden = true;
-      byId('buffer-test-result').hidden = true;
+      byId('social-test-result').hidden = true;
       dialog.showModal();
     }
     const section = sectionId ? byId(sectionId) : null;
@@ -208,11 +208,16 @@ export class SettingsView extends View {
       row('Timeout', `${o.timeout} s per request · up to 3 retries`),
       o.configured ? null : note(o.problem)
     ].filter(Boolean));
-    const b = SERVER.buffer;
-    byId('buffer-server-info').replaceChildren(...[
+    const b = SERVER.social;
+    const database = b.database || {};
+    byId('social-server-info').replaceChildren(...[
       status(b),
-      row('API', b.host || '—'),
+      row('Graph API', [b.host, b.version].filter(Boolean).join(' · ') || '—'),
       row('Access token', b.tokenId ? 'Set on the server' : 'Missing', b.tokenId ? 'ok' : 'missing'),
+      row('Post queue', database.configured ? (database.kind === 'postgres' ? 'Postgres' : 'SQLite file next to app.py') : 'No database',
+        database.configured ? 'ok' : 'missing'),
+      row('Publisher secret', b.cronSecretSet ? 'CRON_SECRET is set' : 'CRON_SECRET is not set: nothing can call /api/publish/due',
+        b.cronSecretSet ? 'ok' : 'missing'),
       b.configured ? null : note(b.problem)
     ].filter(Boolean));
     const m = SERVER.media;
@@ -322,28 +327,31 @@ export class SettingsView extends View {
   renderChannelList() {
     const mode = this.formMode();
     const list = byId('channel-list');
-    const channels = mode === 'demo' ? SettingsModel.demoChannels : (this.app.liveBuffer.getConnection()?.channels || []);
+    const channels = mode === 'demo' ? SettingsModel.demoChannels : (this.app.liveSocial.getConnection()?.channels || []);
     const selected = new Set(this.channelDraft[mode]);
-    byId('connect-buffer-label').textContent = mode === 'demo' ? 'Reload demo channels' : (channels.length ? 'Reconnect & refresh channels' : 'Connect & load channels');
+    byId('connect-social-label').textContent = mode === 'demo' ? 'Reload demo channels' : (channels.length ? 'Reconnect & refresh channels' : 'Connect & load channels');
     if (!channels.length) {
       const savedIds = this.channelDraft.live;
       list.replaceChildren(el('p', { class: 'hint', text: savedIds.length
         ? `${pluralize(savedIds.length, 'channel')} selected from an earlier connection or import. Connect to see their names and status.`
-        : (SERVER.buffer.configured ? 'Connect to load the channels of the Buffer account configured on the server.' : 'Buffer is not configured on the server, so there are no channels to load.') }));
+        : (SERVER.social.configured
+          ? 'Connect to load the Facebook Pages the server\'s Meta token manages, and the Instagram accounts linked to them.'
+          : 'Facebook and Instagram are not set up on the server, so there are no channels to load.') }));
       byId('channel-count').textContent = savedIds.length ? `${savedIds.length} selected` : '';
       return;
     }
     list.replaceChildren(...channels.map((channel) => {
       const meta = serviceMeta(channel.service);
       const disabled = !channel.usable;
-      const status = channel.isDisconnected ? 'disconnected' : channel.isLocked ? 'locked' : channel.isQueuePaused ? 'queue paused' : '';
+      const linked = channel.service === 'instagram' && channel.pageName ? `linked to ${channel.pageName}` : '';
       return el('label', { class: `channel${disabled ? ' is-disabled' : ''}` }, [
         el('input', { type: 'checkbox', checked: selected.has(channel.id), disabled, dataset: { channelId: channel.id }, 'aria-label': `${channel.name} on ${meta.label}` }),
         // A touch darker than the brand colour, so the white initial passes 4.5:1 on every network's colour.
         el('span', { class: 'channel-avatar', style: `background:color-mix(in srgb, ${meta.color} 76%, #000)`, 'aria-hidden': 'true', text: meta.label.charAt(0) }),
         el('span', { class: 'channel-info' }, [
           el('span', { class: 'channel-name', text: channel.name, style: 'display:block' }),
-          el('span', { class: 'channel-sub', style: 'display:block', text: [meta.label, channel.handle ? `@${channel.handle}` : '', channel.organizationName, status].filter(Boolean).join(' · ') })
+          el('span', { class: 'channel-sub', style: 'display:block', text: [meta.label, channel.handle ? `@${channel.handle}` : '', linked].filter(Boolean).join(' · ') }),
+          disabled && channel.problem ? el('span', { class: 'channel-sub error-text', style: 'display:block', text: channel.problem }) : null
         ])
       ]);
     }));
@@ -412,45 +420,47 @@ export class SettingsView extends View {
     }
   }
 
-  async connectBuffer() {
+  async connectSocial() {
     const { settings } = this.read();
     const mode = this.formMode();
-    const button = byId('connect-buffer');
+    const button = byId('connect-social');
     if (mode === 'live') {
-      const check = this.validation.validateSettings(settings, { scope: 'buffer', requireCredentials: true });
+      const check = this.validation.validateSettings(settings, { scope: 'social', requireCredentials: true });
       if (!check.valid) {
         this.showErrors(check.errors);
-        this.showTestResult('buffer-test-result', 'error', Object.values(check.errors)[0]);
+        this.showTestResult('social-test-result', 'error', Object.values(check.errors)[0]);
         return;
       }
     }
     this.setLoading(button, true);
-    this.showTestResult('buffer-test-result', 'info', mode === 'demo' ? 'Loading demo channels…' : 'Verifying the token and loading channels…');
+    this.showTestResult('social-test-result', 'info', mode === 'demo' ? 'Loading demo channels…' : 'Verifying the token and loading channels…');
     try {
-      const connection = await connectToBuffer({
+      const connection = await connectAccounts({
         mode,
         settings,
-        onRetry: ({ attempt, maxRetries, delayMs, error }) => this.notifier.log('warn', 'retry', `Buffer connect: retry ${attempt}/${maxRetries} in ${delayMs / 1000}s (${error.message})`)
+        onRetry: ({ attempt, maxRetries, delayMs, error }) => this.notifier.log('warn', 'retry', `Meta connect: retry ${attempt}/${maxRetries} in ${delayMs / 1000}s (${error.message})`)
       });
       const usable = connection.channels.filter((c) => c.usable);
       const known = new Set(connection.channels.map((c) => c.id));
       const kept = this.channelDraft[mode].filter((id) => known.has(id));
       this.channelDraft[mode] = kept.length ? kept : usable.map((c) => c.id);
       const unusable = connection.channels.length - usable.length;
+      const pages = connection.channels.filter((c) => c.service === 'facebook').length;
+      const accounts = connection.channels.length - pages;
       const summary = mode === 'demo'
-        ? `Demo workspace loaded with ${pluralize(connection.channels.length, 'sample channel')}.`
-        : `Connected as ${connection.account.email || 'your Buffer account'} · ${pluralize(connection.channels.length, 'channel')} in ${pluralize(connection.account.organizations.length, 'organization')}${unusable ? ` (${unusable} disconnected or locked)` : ''}.`;
-      this.showTestResult('buffer-test-result', connection.channels.length ? 'ok' : 'error', connection.channels.length ? summary : 'Connected, but this account has no channels. Connect a social account in Buffer first.');
-      this.notifier.log('success', 'settings', mode === 'demo' ? 'Loaded demo channels.' : `Connected to Buffer: ${pluralize(connection.channels.length, 'channel')} found.`);
+        ? `Demo channels loaded: ${pluralize(pages, 'Facebook Page')} and ${pluralize(accounts, 'Instagram account')}.`
+        : `Connected as ${connection.account.name || 'the Meta system user'} · ${pluralize(pages, 'Facebook Page')} and ${pluralize(accounts, 'Instagram account')}${unusable ? ` (${unusable} the token cannot post to)` : ''}.`;
+      this.showTestResult('social-test-result', connection.channels.length ? 'ok' : 'error', connection.channels.length ? summary : 'Connected, but the token manages no Facebook Pages. Assign the Page to the system user in Meta Business settings first.');
+      this.notifier.log('success', 'settings', mode === 'demo' ? 'Loaded demo channels.' : `Connected to Meta: ${pluralize(connection.channels.length, 'channel')} found.`);
       if (mode === 'live') {
-        this.ui.health.buffer = { state: 'ok' };
+        this.ui.health.social = { state: 'ok' };
         this.ui.renderHeader();
       }
       this.renderChannelList();
       this.updateDirtyState();
     } catch (error) {
-      this.showTestResult('buffer-test-result', 'error', [error.message, error.hint].filter(Boolean).join(' '));
-      this.notifier.log('error', 'settings', `Buffer connection failed: ${error.message}`, error.hint || error.details || '');
+      this.showTestResult('social-test-result', 'error', [error.message, error.hint].filter(Boolean).join(' '));
+      this.notifier.log('error', 'settings', `Meta connection failed: ${error.message}`, error.hint || error.details || '');
     } finally {
       this.setLoading(button, false);
     }
@@ -459,7 +469,7 @@ export class SettingsView extends View {
   async resetAll() {
     const ok = await this.ui.confirm({
       title: 'Reset all settings?',
-      message: 'This restores the server defaults and removes your saved preferences, channel selections, the cached Buffer connection, theme and interface preferences.\n\nImages, drafts, scheduled posts and the activity log are kept. Credentials on the server are not affected.',
+      message: 'This restores the server defaults and removes your saved preferences, channel selections, the cached Facebook and Instagram connection, theme and interface preferences.\n\nImages, drafts, scheduled posts and the activity log are kept. Credentials on the server are not affected.',
       confirmLabel: 'Reset all settings',
       danger: true
     });
@@ -468,7 +478,7 @@ export class SettingsView extends View {
     for (const key of [STORAGE_KEYS.settings, STORAGE_KEYS.theme, STORAGE_KEYS.ui, STORAGE_KEYS.connection]) this.app.storage.remove(key);
     this.app.settings = SettingsModel.defaults();
     this.app.settingsSource = 'defaults';
-    this.ui.health = { groq: null, buffer: null };
+    this.ui.health = { groq: null, social: null };
     this.ui.prefs = defaultPrefs();
     this.ui.restoreUiPrefs();
     this.ui.applyTheme(window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light', { persist: false });

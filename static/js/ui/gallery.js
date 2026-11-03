@@ -137,7 +137,7 @@ export class GalleryView extends View {
   }
 
   /** The post as it stands, under the photo: the caption's first line, then the publish time and hashtag count. */
-  /** The post as it stands: Buffer's text and time once it is scheduled (and maybe edited there), otherwise the draft. */
+  /** The post as it stands: the queue's text and time once it is scheduled (and maybe edited there), otherwise the draft. */
   postView(item) {
     const result = countedResult(item, this.settings.mode);
     const content = item.content || emptyContent();
@@ -169,7 +169,7 @@ export class GalleryView extends View {
   renderListFields(refs, item) {
     const content = item.content || emptyContent();
     const view = this.postView(item);
-    // Editable rows keep the draft exactly as typed; a scheduled row shows the post as Buffer has it.
+    // Editable rows keep the draft exactly as typed; a scheduled row shows the post as the queue has it.
     const caption = view.locked ? view.caption : (item.useAlternative ? content.alternative_description : content.description);
     const time = view.locked && view.due ? TimeZoneUtil.toLocalInput(view.due, this.settings.timezone) : item.scheduleLocal || '';
     const locked = Boolean(item.busy) || view.locked;
@@ -242,7 +242,7 @@ export class GalleryView extends View {
     const sideBySide = window.matchMedia?.(SIDE_BY_SIDE).matches;
     byId('editor').scrollIntoView({ block: sideBySide ? 'nearest' : 'start', behavior: reduce ? 'auto' : 'smooth' });
     if (!focus) return;
-    // Focus goes where the next step is: Generate before any caption, "Edit in Buffer" on a locked post, else the caption.
+    // Focus goes where the next step is: Generate before any caption, "Edit scheduled post" on a locked post, else the caption.
     const caption = byId('ed-description');
     let target = caption;
     if (byId('editor').classList.contains('is-blank')) target = byId('ed-blank-generate');

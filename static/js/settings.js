@@ -10,27 +10,31 @@ export const SettingsModel = {
    */
   serverOnlyKeys: Object.freeze(['ollamaEndpoint', 'ollamaApiKey', 'ollamaTimeoutSec', 'bufferToken', 'bufferApiUrl',
     'bufferTimeoutSec', 'mediaEndpoint', 'mediaPreset', 'OLLAMA_ENDPOINT', 'OLLAMA_API_KEY', 'GROQ_ENDPOINT', 'GROQ_API_KEY', 'BUFFER_ACCESS_TOKEN',
-    'BUFFER_API_URL', 'MEDIA_UPLOAD_ENDPOINT', 'MEDIA_UPLOAD_PRESET']),
+    'BUFFER_API_URL', 'META_ACCESS_TOKEN', 'MEDIA_UPLOAD_ENDPOINT', 'MEDIA_UPLOAD_PRESET']),
+
+  /**
+   * Settings saved before version 3 chose channels of the scheduling service Poster used before. Those IDs
+   * mean nothing to Meta, so they are dropped when such settings are loaded or imported.
+   */
+  channelsVersion: 3,
 
   /** Demo channels, always available in Demo mode. */
   demoChannels: Object.freeze([
-    { id: 'demo-instagram', name: 'Poster Studio', handle: 'poster.studio', service: 'instagram', organizationName: 'Demo workspace', usable: true },
-    { id: 'demo-linkedin', name: 'Poster Inc.', handle: 'poster-inc', service: 'linkedin', organizationName: 'Demo workspace', usable: true },
-    { id: 'demo-facebook', name: 'Poster Community', handle: 'postercommunity', service: 'facebook', organizationName: 'Demo workspace', usable: true },
-    { id: 'demo-twitter', name: 'Poster', handle: 'posterapp', service: 'twitter', organizationName: 'Demo workspace', usable: true }
+    { id: 'demo-facebook', name: 'Poster Studio', handle: '', service: 'facebook', pageId: 'demo-facebook', pageName: 'Poster Studio', usable: true, problem: null },
+    { id: 'demo-instagram', name: 'Poster Studio', handle: 'poster.studio', service: 'instagram', pageId: 'demo-facebook', pageName: 'Poster Studio', usable: true, problem: null }
   ]),
 
   /** @returns {object} default preferences, derived from the server configuration */
   defaults() {
     return {
-      version: 2,
+      version: 3,
       mode: SERVER.mode === 'live' ? 'live' : 'demo',
       model: String(SERVER.groq.model || 'qwen/qwen3.8-27b').trim(),
       aiConcurrency: 2,
       tone: 'friendly',
       language: 'en',
       extraInstructions: '',
-      channelIds: { live: [], demo: ['demo-instagram', 'demo-linkedin'] },
+      channelIds: { live: [], demo: ['demo-facebook', 'demo-instagram'] },
       requireMedia: true,
       timezone: TimeZoneUtil.browserZone(),
       intervalMinutes: 60,
@@ -58,7 +62,7 @@ export const SettingsModel = {
     const ids = (list, fallback) => (Array.isArray(list) ? [...new Set(list.filter((v) => typeof v === 'string' && v.trim()).map((v) => v.trim()))] : fallback);
     const channelSrc = isPlainObject(src.channelIds) ? src.channelIds : {};
     return {
-      version: 2,
+      version: 3,
       mode: src.mode === 'live' || src.mode === 'demo' ? src.mode : d.mode,
       model: str('model') || d.model,
       aiConcurrency: int('aiConcurrency'),
@@ -88,5 +92,15 @@ export const SettingsModel = {
     }
     if (out.mode === 'auto') delete out.mode;
     return out;
+  },
+
+  /**
+   * Saved or exported settings with the channels of an older version removed.
+   * @param {object} source @returns {object}
+   */
+  withoutOldChannels(source) {
+    if (!isPlainObject(source) || (Number(source.version) || 0) >= this.channelsVersion || !('channelIds' in source)) return source;
+    const { channelIds: _old, ...rest } = source;
+    return rest;
   }
 };

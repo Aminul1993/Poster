@@ -3,6 +3,7 @@ and the developer's own .env never reaches the app under test."""
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -18,6 +19,10 @@ if str(ROOT) not in sys.path:
 from tests import fakes  # noqa: E402
 from tests.fakes import FakeUpstream  # noqa: E402
 
+# A throwaway Postgres database (its tables are dropped before every test) runs the queue tests against
+# Postgres; without one, every app gets its own in-memory SQLite queue.
+TEST_DATABASE_URL = os.environ.get("POSTER_TEST_DATABASE_URL", "")
+
 # Every setting Poster reads, so values from a local .env can never leak into a test.
 BASE_ENV: dict[str, str] = {
     "GROQ_ENDPOINT": f"https://{fakes.GROQ_HOST}/openai/v1",
@@ -25,8 +30,13 @@ BASE_ENV: dict[str, str] = {
     "GROQ_MODEL": "",
     "GROQ_MODELS": "",
     "MODEL": "qwen/qwen3.8-27b",
-    "BUFFER_ACCESS_TOKEN": "test-buffer-token",
-    "BUFFER_API_URL": f"https://{fakes.BUFFER_HOST}",
+    "META_ACCESS_TOKEN": fakes.META_TOKEN,
+    "META_GRAPH_URL": f"https://{fakes.META_HOST}",
+    "META_GRAPH_VERSION": "",
+    "META_APP_SECRET": "",
+    "DATABASE_URL": TEST_DATABASE_URL or "sqlite:///:memory:",
+    "POSTGRES_URL": "",
+    "CRON_SECRET": "test-cron-secret",
     "BLOB_READ_WRITE_TOKEN": "",
     "BLOB_STORE_ID": "",
     "VERCEL_BLOB_API_URL": f"https://{fakes.BLOB_API_HOST}/api/blob",
@@ -36,7 +46,7 @@ BASE_ENV: dict[str, str] = {
     "POLLINATIONS_API_KEY": "test-pollinations-key",
     "POLLINATIONS_EDIT_MODEL": "",
     "GROQ_TIMEOUT": "",
-    "BUFFER_TIMEOUT": "",
+    "META_TIMEOUT": "",
     "MEDIA_TIMEOUT": "",
     "POLLINATIONS_TIMEOUT": "",
     "POSTER_MODE": "auto",
@@ -74,6 +84,16 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> FakeUpstream:
     monkeypatch.setattr(requests.Session, "request",
                         lambda session, method, url, **kwargs: upstream.session_request(session, method, url, **kwargs))
     return upstream
+
+
+@pytest.fixture(autouse=True)
+def fresh_database() -> None:
+    if TEST_DATABASE_URL:
+        import psycopg
+
+        from poster.store import postgres_dsn
+        with psycopg.connect(postgres_dsn(TEST_DATABASE_URL), autocommit=True) as connection:
+            connection.execute("DROP TABLE IF EXISTS poster_posts, poster_state, poster_activity")
 
 
 @pytest.fixture(autouse=True)

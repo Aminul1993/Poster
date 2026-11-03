@@ -6,7 +6,7 @@
  */
 import { saveSettings, showToast } from '../app.js';
 import { LANGUAGES, LIMITS, SERVER, STORAGE_KEYS, TIMING } from '../config.js';
-import { POST_FILTERS } from '../services/buffer.js';
+import { POST_FILTERS } from '../services/social.js';
 import { hasContent, isReady, needsTime } from '../store.js';
 import { $, formatDuration, icon, pluralize } from '../util.js';
 import { BulkEditView } from './bulk.js';
@@ -38,11 +38,11 @@ export class UIController {
     this.log = new LogView(this);
     this.settingsView = new SettingsView(this);
     this.orchestrator = new Orchestrator(this);
-    this.health = { groq: null, buffer: null };
+    this.health = { groq: null, social: null };
     this.lastStorageToast = 0;
     this.opTicker = null;
     this.lastOp = null;
-    /** @type {{count: number, more: boolean}|null} upcoming posts in Buffer, as last loaded */
+    /** @type {{count: number, more: boolean}|null} upcoming posts in the queue, as last loaded */
     this.upcomingKpi = null;
     this.prefs = defaultPrefs();
   }
@@ -76,6 +76,7 @@ export class UIController {
     this.renderAll();
     this.showStartupBanners();
     this.feed.load();
+    this.app.activity.load();
   }
 
   /* ----------------------------------------------- delegates used by views */
@@ -123,6 +124,7 @@ export class UIController {
     $(`input[name="image-source"][value="${this.prefs.imageSource}"]`).checked = true;
     byId('imggen-aspect').value = this.prefs.imageAspect;
     byId('log-filter').value = this.prefs.logFilter;
+    this.app.activity.filter = this.prefs.logFilter;
     byId('planner').open = this.prefs.plannerOpen;
     this.operations.showInterval(this.prefs.planInterval || this.settings.intervalMinutes);
     this.gallery.setView(this.prefs.galleryView);
@@ -161,14 +163,14 @@ export class UIController {
       pill.dataset.state = state.state;
       byId(`${id}-detail`).textContent = state.detail;
       pill.title = state.title;
-      pill.setAttribute('aria-label', `${id === 'pill-groq' ? 'Groq' : 'Buffer'}: ${state.detail}. ${state.title}`);
+      pill.setAttribute('aria-label', `${id === 'pill-groq' ? 'Groq' : 'Facebook & Instagram'}: ${state.detail}. ${state.title}`);
     };
     setPill('pill-groq', this.groqState());
-    setPill('pill-buffer', this.bufferState());
+    setPill('pill-social', this.socialState());
     byId('pill-network').hidden = navigator.onLine !== false;
     // In Demo the badge already says it; the service labels would only repeat "Demo" twice more.
     byId('pill-groq').hidden = demo;
-    byId('pill-buffer').hidden = demo;
+    byId('pill-social').hidden = demo;
     byId('ai-sub').textContent = `${s.model}${demo ? ' (simulated)' : ''} · ${s.tone.charAt(0).toUpperCase()}${s.tone.slice(1)} tone · ${LANGUAGES[s.language] || 'English'}`;
   }
 
@@ -184,27 +186,29 @@ export class UIController {
   }
 
   /** @returns {{state: string, detail: string, title: string}} */
-  bufferState() {
+  socialState() {
     const s = this.settings;
     if (s.mode === 'demo') return { state: 'demo', detail: 'Demo', title: `Simulated scheduling to ${pluralize(s.channelIds.demo.length, 'demo channel')}.` };
-    if (this.health.buffer?.state === 'error') return { state: 'error', detail: 'Error', title: this.health.buffer.message };
-    if (!SERVER.buffer.configured) return { state: 'warn', detail: 'No token', title: `Server: ${SERVER.buffer.problem}` };
+    if (this.health.social?.state === 'error') return { state: 'error', detail: 'Error', title: this.health.social.message };
+    if (!SERVER.social.configured) {
+      return { state: 'warn', detail: SERVER.social.database?.configured === false ? 'No database' : 'No token', title: `Server: ${SERVER.social.problem}` };
+    }
     const selected = s.channelIds.live.length;
-    const connection = this.app.liveBuffer.getConnection();
-    if (!connection && !selected) return { state: 'warn', detail: 'Not connected', title: 'Open Settings → Buffer and connect to load channels.' };
-    if (!selected) return { state: 'warn', detail: 'No channels', title: 'Choose at least one channel in Settings → Buffer.' };
-    return { state: 'ok', detail: pluralize(selected, 'channel'), title: connection ? `Connected as ${connection.account?.email || 'Buffer user'}.` : 'Channels selected (connection not verified in this browser).' };
+    const connection = this.app.liveSocial.getConnection();
+    if (!connection && !selected) return { state: 'warn', detail: 'Not connected', title: 'Open Settings → Facebook & Instagram and connect to load channels.' };
+    if (!selected) return { state: 'warn', detail: 'No channels', title: 'Choose at least one channel in Settings → Facebook & Instagram.' };
+    return { state: 'ok', detail: pluralize(selected, 'channel'), title: connection ? `Connected as ${connection.account?.name || 'the Meta system user'}.` : 'Channels selected (connection not verified in this browser).' };
   }
 
-  /** The batch line: images, captions, posts waiting for a time, posts ready, and what Buffer holds. */
+  /** The batch line: images, captions, posts waiting for a time, posts ready, and what the queue holds. */
   renderKpis() {
     const items = this.store.all();
     const generated = items.filter(hasContent).length;
     const ready = items.filter((i) => isReady(i, this.settings)).length;
     const waiting = items.filter((i) => needsTime(i, this.settings)).length;
-    // Upcoming posts in Buffer, counted whenever the posts list includes them ("+" while more pages exist).
+    // Upcoming posts in the queue, counted whenever the posts list includes them ("+" while more pages exist).
     if (this.feed.loaded && this.feed.filter !== 'published') {
-      // The owner counts posts (images); Buffer counts one per channel, given in brackets.
+      // The owner counts posts (images); the queue holds one per channel, given in brackets.
       const upcoming = this.feed.posts.filter((p) => POST_FILTERS.upcoming.includes(p.status));
       this.upcomingKpi = { count: groupPosts(upcoming).length, copies: upcoming.length, more: Boolean(this.feed.next) };
     }
@@ -218,8 +222,8 @@ export class UIController {
     byId('kpi-removed').textContent = String(removed);
     byId('kpi-removed-stat').hidden = !removed;
     const copies = this.upcomingKpi && this.upcomingKpi.copies !== this.upcomingKpi.count ? ` (${pluralize(this.upcomingKpi.copies, 'channel post')})` : '';
-    byId('kpi-scheduled-label').textContent = this.settings.mode === 'demo' ? `upcoming in Demo mode, not in Buffer${copies}` : `upcoming in Buffer${copies}`;
-    byId('kpi-scheduled-label').title = 'Buffer keeps one post per channel; Poster counts one per image.';
+    byId('kpi-scheduled-label').textContent = this.settings.mode === 'demo' ? `upcoming in Demo mode${copies}` : `upcoming${copies}`;
+    byId('kpi-scheduled-label').title = 'The queue keeps one post per channel; Poster counts one per image.';
     byId('kpi-scheduled').textContent = this.upcomingKpi ? `${this.upcomingKpi.count}${this.upcomingKpi.more ? '+' : ''}` : '—';
     byId('capacity-bar').style.width = `${(items.length / LIMITS.maxImages) * 100}%`;
     byId('capacity-label').textContent = `${items.length} of ${LIMITS.maxImages} slots used`;
@@ -278,7 +282,7 @@ export class UIController {
         event.preventDefault();
         event.returnValue = '';
       }
-      this.notifier.persistLog.flush();
+      this.app.activity.persist.flush();
       this.store.persistDrafts.flush();
     });
   }
@@ -349,7 +353,7 @@ export class UIController {
       this.onOperationComplete(event.detail);
     });
     this.feed.addEventListener('change', () => { this.posts.render(); this.renderKpis(); });
-    this.notifier.addEventListener('log', () => this.log.queueRender());
+    this.app.activity.addEventListener('change', () => this.log.queueRender());
     this.app.storage.addEventListener('storage-error', (event) => this.onStorageError(event.detail));
     this.app.storage.addEventListener('storage-warning', (event) => showToast(event.detail.message, 'warning'));
   }
@@ -365,10 +369,10 @@ export class UIController {
     }
     if (op.kind === 'schedule' && op.succeeded) byId('planner').open = false;
     this.renderAll();
-    // Show the new posts as Buffer has them: one reload per scheduling run.
+    // Show the new posts as the queue has them: one reload per scheduling run.
     if (op.kind === 'schedule' && op.succeeded) this.feed.load();
     const isGen = op.kind === 'generate';
-    const service = isGen ? 'groq' : 'buffer';
+    const service = isGen ? 'groq' : 'social';
     const live = this.settings.mode === 'live';
     const stats = `${op.succeeded} succeeded · ${op.failed} failed · ${op.skipped} skipped · ${op.cancelled} not processed · ${op.retries} retries · ${formatDuration(op.finishedAt - op.startedAt)}`;
     if (live && op.succeeded) this.health[service] = { state: 'ok' };
@@ -390,7 +394,7 @@ export class UIController {
       this.notifier.log(op.succeeded ? 'warn' : 'error', isGen ? 'ai' : 'schedule', `${op.label} finished with errors.`, stats);
     } else {
       const verb = isGen ? 'Generated content for' : 'Scheduled';
-      const where = !isGen && op.demo ? ' in Demo mode (not in Buffer)' : '';
+      const where = !isGen && op.demo ? ' in Demo mode (nothing is published)' : '';
       const title = isGen ? 'Content ready' : op.demo ? 'Scheduled in Demo mode' : 'Posts scheduled';
       // The progress panel already says this when it is on screen; a toast would only cover the page.
       if (!this.operations.statusInView()) showToast(`${verb} ${pluralize(op.succeeded, noun)}${where}${op.skipped ? ` (${op.skipped} skipped)` : ''}${op.retries ? ` after ${pluralize(op.retries, 'retry', 'retries')}` : ''}.`, 'success', { title });
@@ -420,7 +424,7 @@ export class UIController {
   /** Banner for errors that need user action (auth, configuration, network). */
   showServiceErrorBanner(error) {
     const service = error.service || 'Service';
-    const section = service === 'Groq' ? 'settings-groq' : service === 'Media host' ? 'settings-media' : 'settings-buffer';
+    const section = service === 'Groq' ? 'settings-groq' : service === 'Media host' ? 'settings-media' : 'settings-social';
     const actions = [{ label: 'Open settings', onClick: () => this.openSettings(section) }];
     if (this.settings.mode === 'live') actions.push({ label: 'Use Demo mode', onClick: () => this.setMode('demo'), primary: true });
     this.notifier.banner(`service-${service.toLowerCase().replace(/\W+/g, '-')}`, {
@@ -465,8 +469,8 @@ export class UIController {
         type: 'info',
         title: 'You are in Demo mode',
         message: ready
-          ? 'AI captions and Buffer scheduling are simulated. The server is configured, so you can switch to Live mode whenever you are ready.'
-          : 'AI captions and Buffer scheduling are simulated, so you can try everything safely. To go live, add GROQ_API_KEY and BUFFER_ACCESS_TOKEN to the .env file next to app.py and restart Poster.',
+          ? 'AI captions and publishing are simulated. The server is configured, so you can switch to Live mode whenever you are ready.'
+          : 'AI captions and publishing are simulated, so you can try everything safely. To go live, add GROQ_API_KEY and META_ACCESS_TOKEN to the .env file next to app.py and restart Poster.',
         actions: ready
           ? [{ label: 'Switch to Live mode', onClick: () => this.setMode('live') }]
           : [{ label: 'Open settings', onClick: () => this.openSettings() }]
@@ -510,8 +514,8 @@ export class UIController {
       this.openSettings(undefined, { title: 'Could not switch mode', message: Object.values(result.errors)[0] });
       return;
     }
-    for (const id of ['service-groq', 'service-buffer', 'service-media-host']) this.notifier.clearBanner(id);
-    showToast(mode === 'demo' ? 'Demo mode: AI and scheduling are simulated.' : 'Live mode: requests go to Groq and Buffer.', 'info', { title: `Switched to ${mode === 'demo' ? 'Demo' : 'Live'} mode` });
+    for (const id of ['service-groq', 'service-meta', 'service-database', 'service-media-host']) this.notifier.clearBanner(id);
+    showToast(mode === 'demo' ? 'Demo mode: AI and publishing are simulated.' : 'Live mode: requests go to Groq, and posts to Facebook and Instagram.', 'info', { title: `Switched to ${mode === 'demo' ? 'Demo' : 'Live'} mode` });
   }
 
   /**
@@ -520,13 +524,13 @@ export class UIController {
    */
   confirmLive(settings) {
     const live = { ...settings, mode: 'live' };
-    const channels = this.app.liveBuffer.selectedChannelIds(live).map((id) => this.app.liveBuffer.channelName(id, live));
+    const channels = this.app.liveSocial.selectedChannelIds(live).map((id) => this.app.liveSocial.channelName(id, live));
     const rehearsed = this.store.all().filter((i) => i.result?.mode === 'demo').length;
     return this.confirm({
       title: 'Switch to Live mode?',
       message: [
-        `Captions will come from ${settings.model} on Groq, and scheduling creates real posts in Buffer on ${channels.length ? channels.join(', ') : 'the channels you choose in Settings → Buffer'}.`,
-        rehearsed ? `${pluralize(rehearsed, 'post')} scheduled in Demo mode ${rehearsed === 1 ? 'is' : 'are'} not in Buffer, so ${rehearsed === 1 ? 'it' : 'they'} can be scheduled for real.` : ''
+        `Captions will come from ${settings.model} on Groq, and scheduled posts are published for real on ${channels.length ? channels.join(', ') : 'the channels you choose in Settings → Facebook & Instagram'}.`,
+        rehearsed ? `${pluralize(rehearsed, 'post')} scheduled in Demo mode ${rehearsed === 1 ? 'was' : 'were'} never queued, so ${rehearsed === 1 ? 'it' : 'they'} can be scheduled for real.` : ''
       ].filter(Boolean).join('\n\n'),
       confirmLabel: 'Switch to Live',
       symbol: 'zap',

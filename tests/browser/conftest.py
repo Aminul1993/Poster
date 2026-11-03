@@ -29,14 +29,22 @@ def browser_context_args(browser_context_args: dict[str, Any]) -> dict[str, Any]
 
 
 @pytest.fixture
-def serve(make_app: Callable[..., Any]) -> Iterator[Callable[..., str]]:
+def served() -> list[Any]:
+    """The Flask apps ``serve`` started, in order: tests read the post queue through them."""
+    return []
+
+
+@pytest.fixture
+def serve(make_app: Callable[..., Any], served: list[Any]) -> Iterator[Callable[..., str]]:
     """Starts Poster on a free local port and returns its URL."""
     servers: list[Any] = []
 
     def start(**env: str) -> str:
-        server = make_server("127.0.0.1", 0, make_app(**env), threaded=True)
+        app = make_app(**env)
+        server = make_server("127.0.0.1", 0, app, threaded=True)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         servers.append(server)
+        served.append(app)
         return f"http://127.0.0.1:{server.server_port}"
 
     yield start
@@ -76,6 +84,11 @@ def live(serve: Callable[..., str], page: Page, problems: list[str], fake: FakeU
     page.goto(serve(**BLOB_ENV))
     expect(page.locator("#mode-badge-label")).to_have_text("Live mode")
     return page
+
+
+def queued(app: Any) -> list[dict[str, Any]]:
+    """Every post in the app's queue, soonest first."""
+    return list(app.extensions["poster"].social.store.page(None, "asc", 0, 100))
 
 
 def local_input(days: float = 2, hour: int = 10) -> str:

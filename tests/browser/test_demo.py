@@ -78,12 +78,12 @@ def test_upload_generate_plan_schedule_edit_delete(demo: Page) -> None:
     expect(page.locator("#gallery .thumb-status", has_text="Scheduled")).to_have_count(3)
     expect(page.locator("#kpi-scheduled")).to_have_text("3")
     expect(page.locator("#kpi-scheduled-label")).to_contain_text("6 channel posts")
-    expect(page.locator("#op-current")).to_contain_text("3 posts queued in Demo mode (not in Buffer)")
+    expect(page.locator("#op-current")).to_contain_text("3 posts queued in Demo mode (nothing is published)")
     expect(page.locator("#op-view")).to_be_visible()
     expect(page.locator("#op-view")).to_be_focused()
     # Each row names the image it came from.
     expect(page.locator("#sched-list .sched-source", has_text="beach.jpg")).to_have_count(1)
-    # A post already in Buffer is read-only in the editor until "Edit in Buffer" (read-only, not disabled).
+    # A scheduled post is read-only in the editor until "Edit post" (read-only, not disabled).
     expect(page.locator("#ed-description")).not_to_be_editable()
     expect(page.locator("#editor")).to_have_class(re.compile("is-locked"))
     expect(page.locator("#planner")).not_to_have_attribute("open", "")
@@ -97,21 +97,21 @@ def test_upload_generate_plan_schedule_edit_delete(demo: Page) -> None:
     expect(page.locator("#ed-description")).to_be_focused()
     expect(page.locator("#ed-description")).to_be_editable()
     page.fill("#ed-description", "Edited text for the first post")
-    page.click("#ed-buffer-save")
-    toast(page, "Saved in Demo mode (not in Buffer) on 2 channels.")
-    # The batch mirrors Buffer: the image's card now shows the edited text.
+    page.click("#ed-social-save")
+    toast(page, "Saved in Demo mode on 2 channels.")
+    # The batch mirrors the queue: the image's card now shows the edited text.
     expect(page.locator("#gallery .thumb-caption", has_text="Edited text for the first post")).to_have_count(1)
     expect(page.locator("#sched-list .sched-text", has_text="Edited text for the first post")).to_have_count(1)
     assert page.evaluate("document.querySelector('#sched-list > li:nth-child(2)') === window.secondRow"), "unchanged rows are kept"
 
     page.locator("#sched-list [data-action=delete-post]").first.click()
     confirm(page, "Delete post (2 channels)")
-    toast(page, "The post was deleted in Demo mode (not in Buffer).")
+    toast(page, "The post was deleted in Demo mode.")
     expect(page.locator("#sched-list > li")).to_have_count(2)
     # The keyboard stays in the list, on the row now in the deleted one's place.
     expect(page.locator("#sched-list > li").first.locator("[data-action=edit]")).to_be_focused()
     # A post deleted on purpose waits out of "All ready" until it gets a new time, and the batch line counts it.
-    expect(page.locator("#gallery .thumb-status", has_text="Removed from Buffer")).to_have_count(1)
+    expect(page.locator("#gallery .thumb-status", has_text="Removed from the queue")).to_have_count(1)
     expect(page.locator("#kpi-removed")).to_have_text("1")
     expect(page.locator("#sched-all")).to_be_disabled()
 
@@ -203,13 +203,13 @@ def test_scheduled_post_is_edited_in_place(demo: Page) -> None:
     page.click("#ed-result-edit")
     expect(page.locator("#ed-description")).to_be_editable()
     expect(page.locator("#ed-description")).to_be_focused()
-    # Only the words and the time live in Buffer; the category stays as scheduled.
+    # Only the words and the time can change once scheduled; the category stays as scheduled.
     expect(page.locator("#ed-category")).not_to_be_editable()
     page.fill("#ed-description", "Morning coffee, edited in place")
-    # Until it is saved, everything else still shows the post as Buffer has it.
+    # Until it is saved, everything else still shows the post as the queue has it.
     expect(page.locator("#gallery .thumb-caption", has_text="edited in place")).to_have_count(0)
-    page.click("#ed-buffer-save")
-    toast(page, "Saved in Demo mode (not in Buffer) on 2 channels.")
+    page.click("#ed-social-save")
+    toast(page, "Saved in Demo mode on 2 channels.")
     expect(page.locator("#ed-description")).not_to_be_editable()
     expect(page.locator("#ed-result-edit")).to_be_focused()
     expect(page.locator("#sched-list .sched-text", has_text="Morning coffee, edited in place")).to_have_count(1)
@@ -217,7 +217,7 @@ def test_scheduled_post_is_edited_in_place(demo: Page) -> None:
 
     page.click("#ed-result-edit")
     page.fill("#ed-description", "A change I do not want")
-    page.click("#ed-buffer-cancel")
+    page.click("#ed-social-cancel")
     expect(page.locator("#ed-description")).to_have_value("Morning coffee, edited in place")
 
     # Deleted in Scheduled posts, the post says how to put it back, and the draft kept the edit.

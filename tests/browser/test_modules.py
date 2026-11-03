@@ -93,61 +93,69 @@ def test_gateway_timeout_is_final(js: Any) -> None:
 def test_server_errors_carry_uncertainty(js: Any) -> None:
     error = js("""
       const { ApiService } = await m('api');
-      const e = ApiService.errorFromResponse(502, { error: { message: 'lost', kind: 'network', uncertain: true } }, 'Buffer');
+      const e = ApiService.errorFromResponse(502, { error: { message: 'lost', kind: 'network', uncertain: true } }, 'Meta');
       return { kind: e.kind, uncertain: e.uncertain, fromServer: e.fromServer };
     """)
     assert error == {"kind": "network", "uncertain": True, "fromServer": True}
 
 
-RECONCILE = """
+RESEND = """
   const { SchedulerService } = await m('scheduler');
   const { ApiError } = await m('errors');
   const dueAt = new Date(Date.now() + 864e5);
   const post = { text: 'Hello #world', channelIds: ['ch1', 'ch2'], dueAt, mediaUrl: null };
-  const existing = [
-    { postId: 'p1', channelId: 'ch1', text: 'Hello #world', dueAt: dueAt.toISOString(), status: 'scheduled' },
-    { postId: 'p0', channelId: 'ch2', text: 'Something else', dueAt: dueAt.toISOString(), status: 'scheduled' }
-  ];
   const notifier = { log() {} };
   const scheduler = Object.assign(Object.create(SchedulerService.prototype), { notifier });
-  const buffer = {
-    listCalls: 0,
-    async schedulePost() { return arg.mode(ApiError); },
-    async listPosts() { this.listCalls += 1; return { posts: existing, next: null }; }
+  const answers = arg;
+  const social = {
+    keys: [],
+    async schedulePost(sent) {
+      this.keys.push(sent.requestKey);
+      const answer = answers[this.keys.length - 1];
+      if (answer.error) throw new ApiError(answer.error, answer.options);
+      return { posts: [{ channelId: 'ch1', postId: 'p1' }, { channelId: 'ch2', postId: 'p2' }], failures: [] };
+    }
   };
 """
 
 
-def test_lost_answer_is_reconciled(js: Any) -> None:
-    result = js(RECONCILE.replace("arg.mode(ApiError)", "(() => { throw new ApiError('lost', { kind: 'timeout' }); })()") + """
-      const out = await scheduler.createPosts(buffer, post, {});
-      return { posts: out.posts.map((p) => p.postId), failures: out.failures.map((f) => f.channelId), lists: buffer.listCalls };
-    """)
-    assert result == {"posts": ["p1"], "failures": ["ch2"], "lists": 1}
+def test_a_lost_answer_is_sent_again_with_the_same_key(js: Any) -> None:
+    result = js(RESEND + """
+      const out = await scheduler.createPosts(social, post, {});
+      return { posts: out.posts.map((p) => p.postId), sent: social.keys.length, sameKey: social.keys[0] === social.keys[1], key: social.keys[0] };
+    """, [{"error": "lost", "options": {"kind": "timeout"}}, {}])
+    assert result["posts"] == ["p1", "p2"] and result["sent"] == 2 and result["sameKey"] is True
+    assert result["key"].startswith("req_")
 
 
-def test_uncertain_partial_failure_is_reconciled(js: Any) -> None:
-    partial = "({ posts: [{ channelId: 'ch2', postId: 'p2' }], failures: [{ channelId: 'ch1', message: 'lost', uncertain: true }] })"
-    result = js(RECONCILE.replace("arg.mode(ApiError)", partial) + """
-      const out = await scheduler.createPosts(buffer, post, {});
-      return { posts: out.posts.map((p) => p.postId), failures: out.failures.length };
-    """)
-    assert result == {"posts": ["p2", "p1"], "failures": 0}
+def test_an_uncertain_server_error_is_sent_again(js: Any) -> None:
+    result = js(RESEND + """
+      const out = await scheduler.createPosts(social, post, {});
+      return { posts: out.posts.length, sent: social.keys.length };
+    """, [{"error": "gateway", "options": {"kind": "server", "fromServer": True, "uncertain": True}}, {}])
+    assert result == {"posts": 2, "sent": 2}
 
 
-def test_certain_failures_are_not_looked_up(js: Any) -> None:
-    result = js(RECONCILE.replace("arg.mode(ApiError)", "(() => { throw new ApiError('bad', { kind: 'validation', fromServer: true }); })()") + """
-      try { await scheduler.createPosts(buffer, post, {}); return 'no error'; } catch (e) { return [e.message, buffer.listCalls]; }
-    """)
-    assert result == ["bad", 0]
+def test_certain_failures_are_not_sent_again(js: Any) -> None:
+    result = js(RESEND + """
+      try { await scheduler.createPosts(social, post, {}); return 'no error'; } catch (e) { return [e.message, social.keys.length]; }
+    """, [{"error": "bad", "options": {"kind": "validation", "fromServer": True}}, {}])
+    assert result == ["bad", 1]
+
+
+def test_a_second_lost_answer_stands(js: Any) -> None:
+    result = js(RESEND + """
+      try { await scheduler.createPosts(social, post, {}); return 'no error'; } catch (e) { return [e.message, social.keys.length]; }
+    """, [{"error": "lost", "options": {"kind": "network"}}, {"error": "lost again", "options": {"kind": "network"}}])
+    assert result == ["lost again", 2]
 
 
 def test_quick_filter_changes_wait_for_the_load_in_flight(js: Any) -> None:
     result = js("""
-      const { BufferPostsFeed } = await m('feed');
+      const { PostsFeed } = await m('feed');
       const calls = [];
-      const buffer = { isDemo: true, listPosts: ({ filter }) => new Promise((resolve) => calls.push({ filter, resolve })) };
-      const feed = new BufferPostsFeed({ notifier: { log() {} }, store: {}, getBuffer: () => buffer });
+      const social = { isDemo: true, listPosts: ({ filter }) => new Promise((resolve) => calls.push({ filter, resolve })) };
+      const feed = new PostsFeed({ notifier: { log() {} }, store: {}, getSocial: () => social });
       const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
       feed.load();
       feed.setFilter('upcoming');
@@ -163,24 +171,21 @@ def test_quick_filter_changes_wait_for_the_load_in_flight(js: Any) -> None:
     assert result == {"whileFirstRuns": 1, "requested": ["all", "published"], "posts": ["new"], "loading": False}
 
 
-def test_reconciliation_reads_pages_until_the_publish_time(js: Any) -> None:
+def test_instagram_limits(js: Any) -> None:
     result = js("""
-      const { SchedulerService } = await m('scheduler');
-      const day = 864e5;
-      const dueAt = new Date(Date.now() + 10 * day);
-      const at = (days) => new Date(dueAt.getTime() + days * day).toISOString();
-      const pages = [
-        { posts: [{ postId: 'a', channelId: 'ch1', text: 'Other', dueAt: at(-5) }], next: { org1: '1' } },
-        { posts: [{ postId: 'b', channelId: 'ch1', text: 'Hello', dueAt: dueAt.toISOString(), status: 'scheduled' }], next: { org1: '2' } },
-        { posts: [{ postId: 'c', channelId: 'ch2', text: 'Hello', dueAt: at(2) }], next: { org1: '3' } },
-        { posts: [{ postId: 'never', channelId: 'ch1', text: 'Hello', dueAt: dueAt.toISOString() }], next: null }
+      const { instagramProblem } = await m('services/social');
+      const tags = Array.from({ length: 31 }, (_, i) => `#tag${i}`).join(' ');
+      return [
+        instagramProblem('Hello #world', true),
+        instagramProblem('Hello', false),
+        instagramProblem('x'.repeat(2201), true),
+        instagramProblem('😀'.repeat(2200), true),
+        instagramProblem(`Hello ${tags}`, true),
+        instagramProblem('#সমুদ্র #সমুদ্র', true)
       ];
-      const requested = [];
-      const buffer = { async listPosts({ after }) { requested.push(after); return pages[requested.length - 1]; } };
-      const found = await Object.create(SchedulerService.prototype).findCreatedPosts(buffer, { text: 'Hello', dueAt }, ['ch1', 'ch2']);
-      return { found: found.map((p) => p.postId), pages: requested.length };
     """)
-    assert result == {"found": ["b"], "pages": 3}
+    assert result == [None, "Instagram posts need an image.", "Instagram captions are limited to 2,200 characters.", None,
+                      "Instagram allows at most 30 hashtags per post.", None]
 
 
 def test_server_config_is_parsed_once(js: Any) -> None:

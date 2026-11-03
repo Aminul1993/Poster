@@ -11,13 +11,15 @@ from urllib.parse import urlparse
 
 from flask import request
 
+from poster.activity import stamp
 from poster.config import API, LANGUAGES, LIMITS, TONES, is_local_host
-from poster.errors import ServiceError
+from poster.errors import ServiceError, truncate
 from poster.imaging import sniff_image
 from poster.services.groq import GenerationOptions
 
 _MODEL_RE = re.compile(r"^[\w.\-/:]{1,100}$")
-_ID_RE = re.compile(r"^[\w.\-:]{1,100}$")  # Buffer channel, post and organization IDs
+_ID_RE = re.compile(r"^[\w.\-:]{1,100}$")  # channel, post and log entry IDs, and request keys
+_CATEGORY_RE = re.compile(r"^[a-z]{1,20}$")
 
 
 def json_body() -> dict[str, Any]:
@@ -122,9 +124,10 @@ def parse_media_url(value: Any) -> str | None:
         raise ServiceError('"mediaUrl" must be a URL.', kind="validation")
     url = urlparse(value.strip())
     if url.scheme != "https" or not url.netloc:
-        raise ServiceError("The image URL must start with https:// so Buffer can fetch it.", kind="validation")
+        raise ServiceError("The image URL must start with https:// so Facebook and Instagram can fetch it.", kind="validation")
     if is_local_host(url.hostname or ""):
-        raise ServiceError("Buffer cannot reach local addresses. Use a publicly hosted image URL.", kind="validation")
+        raise ServiceError("Facebook and Instagram cannot reach local addresses. Use a publicly hosted image URL.",
+                           kind="validation")
     return value.strip()
 
 
@@ -137,7 +140,7 @@ def parse_post_text(value: Any) -> str:
 
 
 def _id_list(value: Any, *, empty: str, too_many: str, invalid: str) -> list[str]:
-    """A non-empty, de-duplicated list of at most max_channels Buffer IDs."""
+    """A non-empty, de-duplicated list of at most max_channels IDs."""
     if not isinstance(value, list) or not value:
         raise ServiceError(empty, kind="validation")
     if len(value) > LIMITS["max_channels"]:
@@ -148,38 +151,84 @@ def _id_list(value: Any, *, empty: str, too_many: str, invalid: str) -> list[str
 
 
 def parse_post_ids(value: Any) -> list[str]:
-    return _id_list(value, empty='"postIds" must list at least one Buffer post ID.',
+    return _id_list(value, empty='"postIds" must list at least one post ID.',
                     too_many=f"At most {LIMITS['max_channels']} posts per request.",
                     invalid="Post IDs contain only letters, numbers and . - _ : characters.")
 
 
 def parse_channel_ids(value: Any) -> list[str]:
-    return _id_list(value, empty="Choose at least one Buffer channel.",
+    return _id_list(value, empty="Choose at least one channel.",
                     too_many=f"At most {LIMITS['max_channels']} channels per post.",
                     invalid="Channel IDs contain only letters, numbers and . - _ : characters.")
 
 
-def parse_organization_ids(value: Any) -> list[str]:
-    """Organization IDs the browser knows from connecting; empty means the server looks them up."""
-    if value in (None, []):
-        return []
-    if not isinstance(value, list) or len(value) > 10 or not all(isinstance(v, str) and _ID_RE.fullmatch(v) for v in value):
-        raise ServiceError('"organizationIds" must be a short list of Buffer organization IDs.', kind="validation")
-    return list(dict.fromkeys(value))
+def parse_request_key(value: Any) -> str | None:
+    """The browser's ID for one schedule request: sent again, the same posts are returned, not added twice."""
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or not _ID_RE.fullmatch(value):
+        raise ServiceError('"requestKey" contains only letters, numbers and . - _ : characters.', kind="validation")
+    return value
 
 
-def parse_cursors(value: Any) -> dict[str, str] | None:
-    """The previous page's "next": a cursor per organization, or None for the first page."""
+def parse_cursor(value: Any) -> int | None:
+    """The previous page's "next", or None for the first page."""
     if value is None:
         return None
-    if not isinstance(value, dict) or not value or len(value) > 10 or not all(
-            isinstance(k, str) and _ID_RE.fullmatch(k) and isinstance(v, str) and 0 < len(v) <= 500 for k, v in value.items()):
+    if not isinstance(value, str) or not value.isdigit() or len(value) > 9:
         raise ServiceError('"after" must be the "next" value of the previous page.', kind="validation")
-    return value
+    return int(value)
 
 
 def parse_post_filter(value: Any) -> str:
     status_filter = value or "all"
-    if status_filter not in API["buffer"]["post_filters"]:
-        raise ServiceError(f'"filter" must be one of: {", ".join(API["buffer"]["post_filters"])}.', kind="validation")
+    if status_filter not in API["social"]["post_filters"]:
+        raise ServiceError(f'"filter" must be one of: {", ".join(API["social"]["post_filters"])}.', kind="validation")
     return str(status_filter)
+
+
+def parse_activity_filter(value: Any) -> str:
+    name = value or "all"
+    if name not in API["activity"]["filters"]:
+        raise ServiceError(f'"filter" must be one of: {", ".join(API["activity"]["filters"])}.', kind="validation")
+    return str(name)
+
+
+def parse_activity_entries(value: Any) -> list[dict[str, Any]]:
+    """Activity log entries the dashboard recorded, as stored. Long text is shortened, and a time in the
+    future (a device clock running fast) becomes now, so the entry cannot stay on top of the log."""
+    rules = API["activity"]
+    if not isinstance(value, list) or not value:
+        raise ServiceError('"entries" must list at least one log entry.', kind="validation")
+    if len(value) > rules["max_batch"]:
+        raise ServiceError(f"At most {rules['max_batch']} log entries per request.", kind="validation")
+    now = datetime.now(UTC)
+    entries = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ServiceError("Each log entry must be a JSON object.", kind="validation")
+        entry_id, level, category, message, details = (item.get(key) for key in ("id", "level", "category", "message", "details"))
+        if not isinstance(entry_id, str) or not _ID_RE.fullmatch(entry_id):
+            raise ServiceError("Log entry IDs contain only letters, numbers and . - _ : characters.", kind="validation")
+        if level not in rules["levels"]:
+            raise ServiceError(f'Log entry "level" must be one of: {", ".join(rules["levels"])}.', kind="validation")
+        if not isinstance(category, str) or not _CATEGORY_RE.fullmatch(category):
+            raise ServiceError('Log entry "category" must be a short lowercase word.', kind="validation")
+        if not isinstance(message, str) or not message.strip():
+            raise ServiceError("A log entry has no message.", kind="validation")
+        if details is not None and not isinstance(details, str):
+            raise ServiceError('Log entry "details" must be text.', kind="validation")
+        entries.append({"id": entry_id, "ts": stamp(min(_entry_time(item.get("ts")), now)), "level": level, "category": category,
+                        "message": truncate(message, rules["max_message_chars"]),
+                        "details": truncate(details, rules["max_details_chars"]) if details else None})
+    return entries
+
+
+def _entry_time(value: Any) -> datetime:
+    try:
+        when = datetime.fromisoformat(value.replace("Z", "+00:00")) if isinstance(value, str) else None
+    except ValueError:
+        when = None
+    if when is None or when.tzinfo is None:
+        raise ServiceError('Log entry "ts" must be an ISO 8601 timestamp with a timezone.', kind="validation")
+    return when

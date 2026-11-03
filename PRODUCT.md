@@ -8,7 +8,7 @@ web
 
 ## Users
 
-One owner who posts to their own social accounts for their own brand or business. They sit down with a batch of photos, or an idea for images they don't have yet, and want to leave with a run of captioned, hashtagged posts scheduled in Buffer. They run Poster themselves, either locally or on their own Vercel project behind a password, so the person using the dashboard is also the person who configured the server.
+One owner who posts to their own social accounts for their own brand or business. They sit down with a batch of photos, or an idea for images they don't have yet, and want to leave with a run of captioned, hashtagged posts scheduled on their Facebook Pages and Instagram accounts. They run Poster themselves, either locally or on their own Vercel project behind a password, so the person using the dashboard is also the person who configured the server.
 
 The code is MIT-licensed on GitHub, but other self-hosters are not a confirmed audience.
 
@@ -19,27 +19,28 @@ Poster turns a set of images into scheduled social posts. It does this in one pa
 1. Add up to 10 images. Each can be uploaded, generated from a description, or made by AI-editing a photo.
 2. A Groq vision model writes each image's post: a caption, an alternative caption, hashtags, a category and an estimated engagement score.
 3. The owner reviews and edits the posts, then sets publish times one at a time or with the planner (a first post time, then a fixed interval).
-4. Poster schedules the posts through Buffer. They can then be watched, edited and deleted until they are published.
+4. Poster queues the posts and publishes each one to Facebook and Instagram through Meta's Graph API when it falls due. They can be watched, edited and deleted until they are published.
 
-Success means a whole batch goes from images to correctly scheduled Buffer posts in one sitting. No post is lost or duplicated, and the owner doesn't have to rewrite the AI's work post by post.
+Success means a whole batch goes from images to correctly scheduled Facebook and Instagram posts in one sitting. No post is lost or duplicated, and the owner doesn't have to rewrite the AI's work post by post.
 
 ## Positioning
 
-Poster is a self-hosted batch publisher. A set of photos, or images generated on demand, goes in. Captioned, hashtagged, scheduled posts come out. The model is one the owner chooses, every credential stays on the owner's server, and the only subscription is the owner's existing Buffer plan. Buffer's own composer works one post at a time, with Buffer's AI and Buffer's storage.
+Poster is a self-hosted batch publisher. A set of photos, or images generated on demand, goes in. Captioned, hashtagged, scheduled posts come out. The model is one the owner chooses, every credential stays on the owner's server, and posts go straight to Meta from the owner's own app, with no scheduling service in between. Meta's own composers work one post at a time.
 
 ## Operating Context
 
 - **Where it runs:** locally with `python app.py` at `127.0.0.1:5000`, or on the owner's Vercel project. On Vercel, `POSTER_PASSWORD` is required (HTTP Basic auth, any user name).
-- **Services:** Groq (captions, through its OpenAI-compatible API), Buffer (scheduling, one account, several channels), Pollinations (image generation and editing, optional), and Vercel Blob or another media host (public image URLs for Buffer, optional).
+- **Services:** Groq (captions, through its OpenAI-compatible API), Meta's Graph API (publishing to the Facebook Pages a system user token manages and the Instagram accounts linked to them), a Postgres database (the post queue; Supabase or Neon on Vercel, SQLite locally), Pollinations (image generation and editing, optional), and Vercel Blob or another media host (public image URLs for Meta, optional).
+- **Publisher:** Instagram's API cannot schedule, so Poster publishes queued posts itself when they fall due. On Vercel an outside scheduler (cron-job.org on the Hobby plan) calls `/api/publish/due` every minute with `CRON_SECRET`; `python app.py` publishes by itself while it runs.
 - **Demo mode:** without credentials, Poster starts in Demo mode. AI, image generation and scheduling are simulated. The header always shows whether Demo or Live is active.
 - **Workflow and UI names:**
   - **Add images**: Upload, Generate with AI or Edit with AI.
   - **Image gallery**: select, reorder, remove (with Undo), and Edit selected (add or remove hashtags and set the category on every selected post).
   - **AI content & scheduling**: generate or schedule this image, the selected images, or all of them; the Schedule planner; the post editor.
-  - **Scheduled posts**: read from Buffer, filtered by All, Upcoming or Published.
+  - **Scheduled posts**: read from Poster's queue, filtered by All, Upcoming or Published, with when the publisher last ran.
   - **Activity log**.
-  - **Settings**: a side drawer with Mode, Groq, Buffer, Media hosting, Scheduling, Content rules, and Import/export/reset.
-- **Storage:** preferences, theme, drafts and the activity log live in the browser's localStorage. API keys and endpoints never leave the server and are never exported.
+  - **Settings**: a side drawer with Mode, Groq, Facebook & Instagram, Media hosting, Scheduling, Content rules, and Import/export/reset.
+- **Storage:** preferences, theme and drafts live in the browser's localStorage. Scheduled posts and the activity log are kept in the server's database (entries wait in localStorage until they are saved, and stay there when the server has no database). API keys and endpoints never leave the server and are never exported.
 
 ## Capabilities and Constraints
 
@@ -53,27 +54,28 @@ Poster is a self-hosted batch publisher. A set of photos, or images generated on
 - The caption language is a batch setting (English, Bengali, Bengali + English, Hindi, Hindi + English, Tamil or Tamil + English) that a post can override in the editor. It asks the model to write in that language; Poster does not check what language comes back.
 - The engagement score (1–100) is the model's estimate. It is not measured performance and must never be shown as analytics.
 
-**Buffer and hosting limits**
-- Buffer attaches images only from public URLs: from Vercel Blob, a media host, or a URL pasted for each post.
-- Buffer allows about 100 requests per 15 minutes on the free plan, so the Scheduled posts list never refreshes on its own.
-- Scheduled posts can be edited (text and publish time) or deleted until Buffer marks them sending or sent.
+**Facebook, Instagram and hosting limits**
+- Meta fetches images only from public URLs (Vercel Blob, a media host, or a URL pasted for each post), and only when the post is published, so images must stay reachable until then.
+- Instagram needs an image on every post, takes JPEG only (Poster serves its own images as JPEG for it), an aspect ratio between 4:5 and 1.91:1, captions up to 2,200 characters and at most 30 hashtags, and at most 100 published posts per account per 24 hours. Facebook posts can be text only.
+- Scheduled posts can be edited (text and publish time) or deleted until the publisher marks them sending or sent. A failed post can be edited to put it back in the queue.
+- Posts go out only while the publisher is called. A post goes out within a minute or two of its time while the scheduler runs.
 - On Vercel, request bodies are capped at 4.5 MB and functions at 300 s. Images over 4 MB are re-encoded in the browser before upload.
 
 **Reliability**
 - Server calls retry within a time budget.
-- Buffer post creation is never retried in a way that could duplicate a post. A lost reply is checked against Buffer before a failure is reported.
+- No post is created twice. A schedule request sent again returns the posts it already queued. Each post is claimed in the database before it is published, so overlapping publisher runs never publish one twice, and when a publish's answer is lost, Meta is checked for the post before it is tried again.
 
 **Front-end stack**
 - There is no build step and no npm. The dashboard is a single Flask/Jinja page (`templates/index.html`) with plain ES modules (`static/js/`) and one stylesheet (`static/css/poster.css`).
 - The Content Security Policy allows only same-origin scripts (with a nonce) and same-origin or inline styles, and connects only to its own server. Fonts, scripts and stylesheets must ship with the app; nothing loads from third-party origins.
 - Light and dark themes exist. The theme follows the system until the owner picks one.
-- The browser talks only to the Poster server, never directly to Groq, Buffer or Pollinations.
+- The browser talks only to the Poster server, never directly to Groq, Meta or Pollinations.
 
 ## Brand Commitments
 
-- **Name:** Poster. Current tagline: "AI captions · Buffer scheduling".
+- **Name:** Poster. Current tagline: "AI captions · Facebook & Instagram publishing".
 - **Assets:** none beyond the send-arrow mark used for the favicon and header. There is no logo file or brand guide.
-- **Voice (observed in current copy, not separately confirmed):** plain and precise sentence case that says what will happen and why, for example "Buffer has no upload endpoint: images are attached from public URLs."
+- **Voice (observed in current copy, not separately confirmed):** plain and precise sentence case that says what will happen and why, for example "Instagram posts need an image."
 
 ## Evidence on Hand
 
@@ -84,9 +86,9 @@ Poster is a self-hosted batch publisher. A set of photos, or images generated on
 ## Product Principles
 
 1. **The batch is the unit of work.** Actions on all or selected images are the main path. Single-post editing is for review and correction, not the default way to work.
-2. **AI drafts, the owner decides.** Nothing reaches Buffer without an explicit schedule action, and every generated field stays editable until the post is published.
+2. **AI drafts, the owner decides.** Nothing reaches Facebook or Instagram without an explicit schedule action, and every generated field stays editable until the post is published.
 3. **Your model, your keys, your server.** Credentials stay on the server and the browser talks only to Poster. New features must not add third-party calls from the browser.
-4. **Show the true state.** Always make clear whether Demo or Live is active, what Buffer actually holds, and what failed and why. Never imply a post was scheduled, or a score was measured, when it wasn't.
+4. **Show the true state.** Always make clear whether Demo or Live is active, what the queue actually holds, whether the publisher is running, and what failed and why. Never imply a post was scheduled or published, or a score was measured, when it wasn't.
 5. **South Asian scripts are normal content.** Captions and hashtags in Bengali, Hindi, Tamil and other South Asian languages are everyday input, not edge cases.
 
 ## Accessibility & Inclusion

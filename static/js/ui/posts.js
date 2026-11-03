@@ -1,8 +1,8 @@
 /** The Scheduled posts card and the Edit scheduled post dialog. */
 import { showToast } from '../app.js';
 import { LIMITS } from '../config.js';
-import { BufferPostsFeed } from '../feed.js';
-import { serviceMeta } from '../services/buffer.js';
+import { PostsFeed } from '../feed.js';
+import { instagramProblem, serviceMeta } from '../services/social.js';
 import { countedResult } from '../store.js';
 import { TimeZoneUtil } from '../time.js';
 import { applyScriptLang, charCount, el, icon, pluralize, relativeTime, scriptRuns, splitPostText, truncate } from '../util.js';
@@ -10,15 +10,27 @@ import { byId, colorDot, setFieldError } from './dom.js';
 import { View } from './view.js';
 
 const STATUS_CHIPS = Object.freeze({
-  scheduled: ['Scheduled', 'success'], needs_approval: ['Needs approval', 'warning'], sending: ['Publishing', 'info'],
-  sent: ['Published', 'neutral'], error: ['Failed', 'danger'], draft: ['Draft', 'neutral']
+  scheduled: ['Scheduled', 'success'], sending: ['Publishing', 'info'], sent: ['Published', 'neutral'], error: ['Failed', 'danger']
 });
 
+/** A scheduled post this long past its time is waiting for the publisher. */
+const OVERDUE_MS = 5 * 60000;
+/** The publisher runs every minute; this long without a run means it is not being called. */
+const PUBLISHER_STALE_MS = 10 * 60000;
+
 /**
- * Buffer keeps one post per channel; the owner thinks in images. Copies that share their text and publish
+ * @param {import('../services/social.js').SocialPost} post @param {number} [now]
+ * @returns {boolean} whether a post still waits in the queue well after its publish time
+ */
+export function isOverdue(post, now = Date.now()) {
+  return post.status === 'scheduled' && Boolean(post.dueAt) && Date.parse(post.dueAt) < now - OVERDUE_MS;
+}
+
+/**
+ * The queue keeps one post per channel; the owner thinks in images. Copies that share their text and publish
  * time (to the minute) were scheduled together, so they are one post here. Order follows the feed.
- * @param {import('../services/buffer.js').BufferPost[]} posts
- * @returns {Array<{key: string, posts: import('../services/buffer.js').BufferPost[]}>}
+ * @param {import('../services/social.js').SocialPost[]} posts
+ * @returns {Array<{key: string, posts: import('../services/social.js').SocialPost[]}>}
  */
 export function groupPosts(posts) {
   const groups = new Map();
@@ -34,15 +46,15 @@ export function groupPosts(posts) {
 export class PostsView extends View {
   constructor(ui) {
     super(ui);
-    /** @type {{postIds: string[], text: string, dueLocal: string, zone: string, saving: boolean, toX: boolean}|null} the post being edited */
+    /** @type {{postIds: string[], text: string, dueLocal: string, zone: string, saving: boolean, toInstagram: boolean}|null} the post being edited */
     this.postEdit = null;
     /** @type {Map<string, {key: string, node: HTMLElement}>} list rows by post, rebuilt only when they change */
     this.rows = new Map();
-    /** @type {Set<string>} Buffer post IDs the last scheduling run created, highlighted after "View in Scheduled posts" */
+    /** @type {Set<string>} post IDs the last scheduling run created, highlighted after "View in Scheduled posts" */
     this.highlight = new Set();
   }
 
-  /** The Scheduled posts card: posts as last read from Buffer, one row per post with its channel copies inside. */
+  /** The Scheduled posts card: posts as last read from the queue, one row per post with its channel copies inside. */
   render() {
     const feed = this.feed;
     const groups = groupPosts(feed.posts);
@@ -55,22 +67,23 @@ export class PostsView extends View {
     list.hidden = !groups.length;
     byId('sched-empty').hidden = groups.length > 0;
     if (!groups.length) {
-      const demo = this.app.getBuffer().isDemo;
+      const demo = this.app.getSocial().isDemo;
       const emptyTitles = demo
         ? { all: 'No Demo posts yet', upcoming: 'Nothing scheduled in Demo mode', published: 'Nothing published yet' }
-        : { all: 'No posts in Buffer', upcoming: 'Nothing scheduled in Buffer', published: 'Nothing published yet' };
+        : { all: 'No posts yet', upcoming: 'Nothing scheduled', published: 'Nothing published yet' };
       const pending = feed.loading || (!feed.loaded && !feed.error);
-      byId('sched-empty-title').textContent = pending ? (this.app.getBuffer().isDemo ? 'Loading Demo posts…' : 'Loading posts from Buffer…') : feed.error ? 'Could not load posts from Buffer' : emptyTitles[feed.filter];
+      byId('sched-empty-title').textContent = pending ? (this.app.getSocial().isDemo ? 'Loading Demo posts…' : 'Loading scheduled posts…') : feed.error ? 'Could not load the scheduled posts' : emptyTitles[feed.filter];
       byId('sched-empty-text').textContent = pending ? '' : feed.error
         ? [feed.error.message, feed.error.hint].filter(Boolean).join(' ')
         : demo ? 'Posts you schedule in Demo mode appear here. They are simulated and kept in this tab only.'
-          : 'Posts scheduled here or in Buffer appear in this list, read directly from Buffer. Until they are published, you can edit or delete them.';
+          : 'Posts you schedule wait here in Poster\'s queue, and Poster publishes each one to Facebook or Instagram at its time. Until then, you can edit or delete them.';
     }
     const footer = byId('sched-footer');
     footer.hidden = !feed.loaded && !groups.length;
     byId('sched-source').textContent = feed.error && groups.length
       ? `Could not load more: ${feed.error.message}`
-      : feed.loaded ? `${feed.loaded.demo ? 'Simulated Demo posts, kept in this tab only' : 'Read from Buffer'} · ${TimeZoneUtil.formatTime(new Date(feed.loaded.at), undefined)}` : '';
+      : feed.loaded ? [feed.loaded.demo ? 'Simulated Demo posts, kept in this tab only' : 'Read from the queue', TimeZoneUtil.formatTime(new Date(feed.loaded.at), undefined), this.publisherLine()].filter(Boolean).join(' · ') : '';
+    this.renderPublisherAlert();
     const more = byId('sched-more');
     more.hidden = !feed.next;
     more.disabled = Boolean(feed.loading);
@@ -94,10 +107,41 @@ export class PostsView extends View {
     this.rows = rows;
   }
 
-  /** @param {import('../services/buffer.js').BufferPost} post @returns {[string, string]} the status chip's label and tone */
+  /** @returns {string} when the server's publisher last ran, for the footer (empty in Demo mode, which has none) */
+  publisherLine() {
+    if (!this.feed.loaded || this.feed.loaded.demo || !this.feed.publisher) return '';
+    const last = this.feed.publisher.lastRunAt;
+    return last ? `Publisher last ran ${relativeTime(new Date(last))}` : 'The publisher has not run yet';
+  }
+
+  /**
+   * Says so plainly when posts are past their time and the publisher is not running: nothing goes out
+   * until something calls /api/publish/due. Demo mode has no publisher, so it never shows there.
+   */
+  renderPublisherAlert() {
+    const feed = this.feed;
+    const alert = byId('sched-publisher-alert');
+    const now = Date.now();
+    const last = feed.publisher?.lastRunAt ? Date.parse(feed.publisher.lastRunAt) : null;
+    const stale = last === null || now - last > PUBLISHER_STALE_MS;
+    const overdue = feed.loaded && !feed.loaded.demo && feed.publisher ? feed.posts.filter((p) => isOverdue(p, now)) : [];
+    alert.hidden = !(stale && overdue.length);
+    if (alert.hidden) return;
+    byId('sched-publisher-title').textContent = `${pluralize(overdue.length, 'post')} ${overdue.length === 1 ? 'is' : 'are'} past ${overdue.length === 1 ? 'its' : 'their'} publish time`;
+    byId('sched-publisher-text').textContent = `${last === null ? 'The publisher has never run' : `The publisher last ran ${relativeTime(new Date(last))}`}, so nothing is being published. Posts go out only when a scheduler calls /api/publish/due every minute with the CRON_SECRET (see "The publisher" in the README).`;
+  }
+
+  /** @param {import('../services/social.js').SocialPost} post @returns {[string, string]} the status chip's label and tone */
   statusChip(post) {
-    const [label, tone] = STATUS_CHIPS[post.status] || [post.status || 'Unknown', 'neutral'];
-    return this.feed.loaded?.demo && post.status === 'scheduled' ? ['Scheduled · Demo', tone] : [label, tone];
+    if (this.feed.loaded?.demo && post.status === 'scheduled') return ['Scheduled · Demo', STATUS_CHIPS.scheduled[1]];
+    if (isOverdue(post)) return ['Waiting to publish', 'warning'];
+    return STATUS_CHIPS[post.status] || [post.status || 'Unknown', 'neutral'];
+  }
+
+  /** @param {import('../services/social.js').SocialPost} post @returns {string|null} what went wrong, and what can be done */
+  static errorText(post) {
+    if (!post.error) return null;
+    return post.status === 'error' ? `${post.error} Edit the post to try again, or delete it.` : post.error;
   }
 
   /** Everything a posts-list row shows, as plain data. */
@@ -111,7 +155,7 @@ export class PostsView extends View {
       const [label, tone] = this.statusChip(post);
       return {
         postId: post.postId, color: meta.color, service: meta.label, name: post.channelName || meta.label, label, tone,
-        error: post.error, externalLink: post.externalLink, busy: this.feed.busy.has(post.postId), changeable: BufferPostsFeed.canChange(post)
+        error: PostsView.errorText(post), externalLink: post.externalLink, busy: this.feed.busy.has(post.postId), changeable: PostsFeed.canChange(post)
       };
     });
     const [label, tone] = this.statusChip(first);
@@ -165,7 +209,7 @@ export class PostsView extends View {
     ]);
   }
 
-  /** @param {string} postId @returns {import('../services/buffer.js').BufferPost[]} the post's copies on every channel */
+  /** @param {string} postId @returns {import('../services/social.js').SocialPost[]} the post's copies on every channel */
   groupOf(postId) {
     return groupPosts(this.feed.posts).find((g) => g.posts.some((p) => p.postId === postId))?.posts || [];
   }
@@ -209,7 +253,7 @@ export class PostsView extends View {
   /**
    * One editor per post: a post from this batch opens in the post editor, with the same caption and hashtag
    * fields it was written in; a post Poster did not schedule from this gallery opens in the dialog.
-   * @param {import('../services/buffer.js').BufferPost[]} copies
+   * @param {import('../services/social.js').SocialPost[]} copies
    */
   edit(copies) {
     const owner = this.ownerOf(copies);
@@ -230,28 +274,29 @@ export class PostsView extends View {
     byId('post-due-hint').textContent = check.valid ? `${TimeZoneUtil.format(check.date, zone)} · ${relativeTime(check.date)}` : '';
   }
 
-  /** @returns {string} where the change happens, said plainly in Demo mode */
-  get place() {
-    return this.app.getBuffer().isDemo ? 'Demo mode (not in Buffer)' : 'Buffer';
+  /** @returns {boolean} whether the change happens in Demo mode, where nothing is published */
+  get demo() {
+    return this.app.getSocial().isDemo;
   }
 
   /**
-   * Opens the editor for a post as it was last read from Buffer; a change applies to every channel copy
-   * that can still change. The server checks again that each is not published before changing it.
-   * @param {import('../services/buffer.js').BufferPost[]} copies
+   * Opens the editor for a post as it was last read from the queue; a change applies to every channel copy
+   * that can still change. The server checks again that each is not published before changing it. A failed
+   * post goes back in the queue.
+   * @param {import('../services/social.js').SocialPost[]} copies
    */
   openDialog(copies) {
-    const editable = copies.filter((p) => BufferPostsFeed.canChange(p) && !this.feed.busy.has(p.postId));
+    const editable = copies.filter((p) => PostsFeed.canChange(p) && !this.feed.busy.has(p.postId));
     if (byId('post-dialog').open || !editable.length) return;
     const post = editable[0];
     const zone = this.settings.timezone;
     const dueLocal = post.dueAt ? TimeZoneUtil.toLocalInput(new Date(post.dueAt), zone) : '';
     this.postEdit = {
       postIds: editable.map((p) => p.postId), text: post.text, dueLocal, zone, saving: false,
-      toX: editable.some((p) => serviceMeta(p.service).label === 'X')
+      toInstagram: editable.some((p) => p.service === 'instagram')
     };
     const channels = editable.map((p) => `${p.channelName || serviceMeta(p.service).label} (${serviceMeta(p.service).label})`).join(' and ');
-    const demo = this.app.getBuffer().isDemo ? 'Demo mode, not in Buffer. ' : '';
+    const demo = this.demo ? 'Demo mode, nothing is published. ' : '';
     byId('post-dialog-sub').textContent = `${demo}On ${channels}${editable.length > 1 ? '; changes apply to every copy' : ''}. If it is published before you save, it is left as published.`;
     byId('post-text').value = post.text;
     byId('post-due').value = dueLocal;
@@ -270,9 +315,9 @@ export class PostsView extends View {
     const text = byId('post-text').value;
     const length = charCount(text);
     const counter = byId('post-text-count');
-    const overX = length > 280 && this.postEdit?.toX;
-    counter.textContent = `${length} characters${overX ? ' · over X’s 280 limit' : ''}`;
-    counter.classList.toggle('is-over', Boolean(overX));
+    const instagram = this.postEdit?.toInstagram ? instagramProblem(text, true) : null;
+    counter.textContent = `${length} characters${instagram ? ` · ${instagram}` : ''}`;
+    counter.classList.toggle('is-over', Boolean(instagram));
     applyScriptLang(byId('post-text'), text);
   }
 
@@ -323,7 +368,7 @@ export class PostsView extends View {
     }
     if (!Object.keys(changes).length) {
       byId('post-dialog').close();
-      showToast(this.place === 'Buffer' ? 'Nothing changed, so Buffer was not updated.' : 'Nothing changed.', 'info');
+      showToast(this.demo ? 'Nothing changed.' : 'Nothing changed, so the scheduled post was not updated.', 'info');
       return;
     }
     this.setSaving(true);
@@ -345,22 +390,22 @@ export class PostsView extends View {
       return;
     }
     byId('post-dialog').close();
-    showToast(`The post was updated in ${this.place}.`, 'success');
+    showToast(this.demo ? 'The post was updated in Demo mode.' : 'The scheduled post was updated.', 'success');
   }
 
   /**
    * Deletes a post's copies (all of them, or one channel's) after one confirmation that names which.
-   * @param {import('../services/buffer.js').BufferPost[]} copies @param {boolean} whole the whole post, or one copy
+   * @param {import('../services/social.js').SocialPost[]} copies @param {boolean} whole the whole post, or one copy
    */
   async deletePosts(copies, whole) {
-    const targets = copies.filter((p) => BufferPostsFeed.canChange(p) && !this.feed.busy.has(p.postId));
+    const targets = copies.filter((p) => PostsFeed.canChange(p) && !this.feed.busy.has(p.postId));
     if (!targets.length) return;
     const where = targets.map((p) => `${p.channelName || serviceMeta(p.service).label} (${serviceMeta(p.service).label})`).join(' and ');
     const others = whole ? [] : this.groupOf(targets[0].postId).filter((p) => !targets.includes(p));
     const rowIndex = [...byId('sched-list').children].findIndex((li) => li.contains(document.activeElement));
     const { caption } = splitPostText(targets[0].text);
     const ok = await this.ui.confirm({
-      title: !whole ? `Delete the ${serviceMeta(targets[0].service).label} copy?` : this.place === 'Buffer' ? 'Delete this post from Buffer?' : 'Delete this Demo post?',
+      title: !whole ? `Delete the ${serviceMeta(targets[0].service).label} copy?` : this.demo ? 'Delete this Demo post?' : 'Delete this scheduled post?',
       message: `"${truncate(caption.replace(/\s+/g, ' '), 80)}" on ${where} will be deleted and will not be published. This cannot be undone.`,
       confirmLabel: !whole ? `Delete ${serviceMeta(targets[0].service).label} copy` : targets.length > 1 ? `Delete post (${pluralize(targets.length, 'channel')})` : 'Delete post',
       danger: true
@@ -377,8 +422,8 @@ export class PostsView extends View {
     if (failed.length) showToast(failed[0], 'error', { title: failed.length < targets.length ? 'Some copies were not deleted' : 'Could not delete the post' });
     else if (!whole) {
       const kept = others.map((p) => serviceMeta(p.service).label).join(' and ');
-      showToast(`${serviceMeta(targets[0].service).label} copy deleted${kept ? `; ${kept} ${others.length === 1 ? 'copy' : 'copies'} still scheduled` : ''}${this.place === 'Buffer' ? '' : ' (Demo mode, not in Buffer)'}.`, 'success');
-    } else showToast(this.place === 'Buffer' ? 'The post was deleted from Buffer.' : 'The post was deleted in Demo mode (not in Buffer).', 'success');
+      showToast(`${serviceMeta(targets[0].service).label} copy deleted${kept ? `; ${kept} ${others.length === 1 ? 'copy' : 'copies'} still scheduled` : ''}${this.demo ? ' (Demo mode)' : ''}.`, 'success');
+    } else showToast(this.demo ? 'The post was deleted in Demo mode.' : 'The post was deleted from the queue.', 'success');
     // Keep the keyboard in the list: the row now in the deleted one's place, or the heading when none is left.
     if (rowIndex !== -1) {
       const rows = byId('sched-list').children;

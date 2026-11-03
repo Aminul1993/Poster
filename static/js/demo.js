@@ -1,10 +1,10 @@
-/** Demo mode: simulated AI, image generation and Buffer, with no network. */
+/** Demo mode: simulated AI, image generation and Facebook/Instagram publishing, with no network. */
 import { SERVER } from './config.js';
 import { ApiError, sleep } from './errors.js';
 import { canvasToBlob, decodeImage, drawScaled, hashString } from './image.js';
 import { SettingsModel } from './settings.js';
 import { clamp, truncate, uid } from './util.js';
-import { BufferService, POST_FILTERS, normalizePost, normalizePostResults, sortPosts } from './services/buffer.js';
+import { SocialService, POST_FILTERS, instagramProblem, normalizePost, normalizePostResults, sortPosts } from './services/social.js';
 import { ImageGenService, generatedImageFile } from './services/imagegen.js';
 import { GroqService } from './services/groq.js';
 
@@ -243,11 +243,11 @@ export class DemoImageGenService extends ImageGenService {
   }
 }
 
-/** Demo-mode BufferService: sample channels, simulated latency, fake post IDs. */
-export class DemoBufferService extends BufferService {
+/** Demo-mode SocialService: sample channels, simulated latency, fake post IDs, and no publisher. */
+export class DemoSocialService extends SocialService {
   constructor(deps) {
     super(deps);
-    /** Simulated Buffer posts, in memory only (gone when the tab closes). */
+    /** Simulated queued posts, in memory only (gone when the tab closes). */
     this.posts = [];
   }
 
@@ -255,7 +255,7 @@ export class DemoBufferService extends BufferService {
 
   getConnection() {
     return {
-      account: { id: 'demo-account', email: 'demo@poster.app', organizations: [{ id: 'demo-org', name: 'Demo workspace' }] },
+      account: { id: 'demo-account', name: 'Demo system user' },
       channels: SettingsModel.demoChannels.map((c) => ({ ...c })),
       connectedAt: new Date().toISOString(),
       tokenId: ''
@@ -270,12 +270,12 @@ export class DemoBufferService extends BufferService {
 
   assertConfigured() { /* Demo mode needs no credentials */ }
 
-  async validateBufferToken({ signal } = {}) {
+  async validateToken({ signal } = {}) {
     await sleep(300, signal);
     return this.getConnection().account;
   }
 
-  async connectToBuffer({ signal } = {}) {
+  async connectAccounts({ signal } = {}) {
     await sleep(500, signal);
     const { account, channels } = this.getConnection();
     return { account, channels };
@@ -285,7 +285,7 @@ export class DemoBufferService extends BufferService {
     const manual = String(item.mediaUrl || '').trim();
     if (manual) {
       const error = this.validation.validateMediaUrl(manual);
-      if (error) throw new ApiError(`"${item.name}": ${error}`, { kind: 'validation', service: 'Buffer' });
+      if (error) throw new ApiError(`"${item.name}": ${error}`, { kind: 'validation', service: 'Meta' });
       return { url: manual, thumbnailUrl: null };
     }
     if (item.uploadedUrl) return { url: item.uploadedUrl, thumbnailUrl: null };
@@ -295,26 +295,42 @@ export class DemoBufferService extends BufferService {
 
   async schedulePost(post) {
     if (!Array.isArray(post.channelIds) || !post.channelIds.length) {
-      throw new ApiError('No demo channels selected. Choose at least one in Settings → Buffer.', { kind: 'config', service: 'Buffer' });
+      throw new ApiError('No demo channels selected. Choose at least one in Settings → Facebook & Instagram.', { kind: 'config', service: 'Meta' });
     }
     if (!(post.dueAt instanceof Date) || post.dueAt.getTime() <= Date.now()) {
-      throw new ApiError('The publish time must be a valid future date.', { kind: 'validation', service: 'Buffer' });
+      throw new ApiError('The publish time must be a valid future date.', { kind: 'validation', service: 'Meta' });
     }
     const posts = [];
+    const failures = [];
     for (const channelId of post.channelIds) {
       await sleep(220 + (hashString(channelId + post.text) % 300));
+      const channel = this.channels().find((c) => c.id === channelId);
+      // As the server does: a post Instagram would refuse still goes to the other channels.
+      const problem = channel?.service === 'instagram' ? instagramProblem(post.text, Boolean(post.mediaUrl)) : null;
+      if (problem) {
+        failures.push({ channelId, message: problem, uncertain: false });
+        continue;
+      }
+      // Sent again with the same request key, the posts already queued for it come back.
+      const queued = post.requestKey && this.posts.find((p) => p.requestKey === post.requestKey && p.channelId === channelId);
+      if (queued) {
+        posts.push({ channelId, postId: queued.postId, dueAt: queued.dueAt, status: 'scheduled' });
+        continue;
+      }
       const created = { channelId, postId: uid('demo').replace('_', '-'), dueAt: post.dueAt.toISOString(), status: 'scheduled' };
       posts.push(created);
-      const channel = this.channels().find((c) => c.id === channelId);
       this.posts.push({
         ...created, text: post.text, createdAt: new Date().toISOString(), channelName: channel?.name || channelId,
-        service: channel?.service || '', thumbnail: post.thumbnailUrl || null
+        service: channel?.service || '', thumbnail: post.thumbnailUrl || null, requestKey: post.requestKey || null
       });
     }
-    return { posts, failures: [] };
+    if (!posts.length) {
+      throw new ApiError(`The post was not scheduled. ${failures.map((f) => `${this.channelName(f.channelId)}: ${f.message}`).join(' · ')}`, { kind: 'client', service: 'Meta' });
+    }
+    return { posts, failures };
   }
 
-  /** Demo posts count as published once their publish time has passed. */
+  /** Demo posts count as published once their publish time has passed: Demo mode has no publisher to wait for. */
   #current() {
     const now = Date.now();
     return this.posts.map((p) => {
@@ -326,7 +342,7 @@ export class DemoBufferService extends BufferService {
   async listPosts({ filter }) {
     await sleep(250);
     const statuses = POST_FILTERS[filter];
-    return { posts: sortPosts(this.#current().filter((p) => !statuses || statuses.includes(p.status)), filter), next: null };
+    return { posts: sortPosts(this.#current().filter((p) => !statuses || statuses.includes(p.status)), filter), next: null, publisher: null };
   }
 
   async editPosts(postIds, { text, dueAt }) {

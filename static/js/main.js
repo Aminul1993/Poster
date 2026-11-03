@@ -1,28 +1,30 @@
 /**
  * Poster — AI social media publishing (browser side of the Flask app).
  *
- * The Flask server holds the credentials and talks to Groq, Buffer and the
- * media host. This code only calls the server's /api/* routes, so no API key
+ * The Flask server holds the credentials, keeps the queue of scheduled posts
+ * and talks to Groq, Meta (Facebook and Instagram) and the media host. This code only calls the server's /api/* routes, so no API key
  * ever reaches the browser and CORS rules of those services do not apply.
  *
  * Modules (plain ES2020+, no dependencies):
  *   config, util, errors, time, settings  configuration and helpers
  *   storage, notify, validation, api       localStorage, notifications, checks, fetch
- *   services/groq, imagegen, buffer      the Poster server's /api routes
+ *   activity                               the activity log, kept in the server's database
+ *   services/groq, imagegen, social      the Poster server's /api routes
  *   demo                                   simulated services for Demo mode
  *   store, scheduler, feed                 gallery state, bulk runs, the posts list
  *   ui/controller and ui/*                 one view per dashboard card
  *   app                                    the container and the public API
  */
 import * as api from './app.js';
+import { ActivityLog } from './activity.js';
 import { app, loadSettings, showToast } from './app.js';
 import { APP_VERSION } from './config.js';
 import { ApiService } from './api.js';
-import { DemoBufferService, DemoImageGenService, DemoGroqService } from './demo.js';
-import { BufferPostsFeed } from './feed.js';
+import { DemoSocialService, DemoImageGenService, DemoGroqService } from './demo.js';
+import { PostsFeed } from './feed.js';
 import { NotificationService } from './notify.js';
 import { SchedulerService } from './scheduler.js';
-import { BufferService } from './services/buffer.js';
+import { SocialService } from './services/social.js';
 import { ImageGenService } from './services/imagegen.js';
 import { GroqService } from './services/groq.js';
 import { StorageService } from './storage.js';
@@ -33,23 +35,24 @@ import { ValidationService } from './validation.js';
 /** The public API, as it was before modules: callable from the browser console. */
 const PUBLIC_API = [
   'generateContentForImage', 'generateForSelectedImages', 'generateForAllImages', 'scheduleSinglePost', 'scheduleSelectedPosts',
-  'scheduleAllPosts', 'cancelScheduledOperation', 'validateImage', 'validateSettings', 'connectToBuffer', 'validateBufferToken',
+  'scheduleAllPosts', 'cancelScheduledOperation', 'validateImage', 'validateSettings', 'connectAccounts', 'validateToken',
   'uploadMedia', 'schedulePost', 'saveSettings', 'loadSettings', 'exportConfig', 'importConfig', 'showToast'
 ];
 
 function bootstrap() {
   app.storage = new StorageService('poster');
-  app.notifier = new NotificationService(app.storage);
+  app.api = new ApiService();
+  app.activity = new ActivityLog({ api: app.api, storage: app.storage });
+  app.notifier = new NotificationService(app.activity);
   app.validation = new ValidationService(() => app.settings);
   app.settings = loadSettings();
-  app.api = new ApiService();
   const deps = { api: app.api, validation: app.validation, notifier: app.notifier, storage: app.storage, getSettings: () => app.settings };
   app.liveGroq = new GroqService(deps);
   app.demoGroq = new DemoGroqService(deps);
   app.liveImageGen = new ImageGenService(deps);
   app.demoImageGen = new DemoImageGenService(deps);
-  app.liveBuffer = new BufferService(deps);
-  app.demoBuffer = new DemoBufferService(deps);
+  app.liveSocial = new SocialService(deps);
+  app.demoSocial = new DemoSocialService(deps);
   app.store = new ImageStore({ storage: app.storage });
   app.scheduler = new SchedulerService({
     storage: app.storage,
@@ -58,9 +61,9 @@ function bootstrap() {
     store: app.store,
     getSettings: () => app.settings,
     getGroq: () => app.getGroq(),
-    getBuffer: () => app.getBuffer()
+    getSocial: () => app.getSocial()
   });
-  app.feed = new BufferPostsFeed({ notifier: app.notifier, store: app.store, getBuffer: () => app.getBuffer() });
+  app.feed = new PostsFeed({ notifier: app.notifier, store: app.store, getSocial: () => app.getSocial() });
   app.ui = new UIController(app);
   app.ui.init();
   app.notifier.log('info', 'system', `Poster ${APP_VERSION} started in ${app.settings.mode === 'demo' ? 'Demo' : 'Live'} mode using ${app.settingsSource === 'storage' ? 'saved settings' : 'the server defaults'}.`);

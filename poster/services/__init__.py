@@ -1,4 +1,4 @@
-"""Clients for the upstream services: Groq, Buffer, the media host and Pollinations."""
+"""Clients for the upstream services: Groq, Meta (Facebook and Instagram), the media host and Pollinations."""
 
 from __future__ import annotations
 

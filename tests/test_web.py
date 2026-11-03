@@ -1,5 +1,5 @@
 """Server behaviour added with the poster package: shared rules, model allowlist, request IDs,
-versioned assets, the time budget and uncertain scheduling failures."""
+versioned assets and the time budget."""
 
 from __future__ import annotations
 
@@ -8,13 +8,12 @@ import re
 from typing import Any
 
 import pytest
-import requests
 
 from poster.config import LANGUAGES, LIMITS, TONES
 from poster.content import FALLBACK_TAGS
 from tests.conftest import BLOB_ENV, post
 from tests.fakes import image_bytes
-from tests.test_routes import b64, future, generate_body, page_config, schedule_body, upload
+from tests.test_routes import b64, generate_body, page_config, schedule_body, upload
 
 
 class TestSharedRules:
@@ -26,7 +25,9 @@ class TestSharedRules:
         assert rules["hashtags"]["fallback"] == list(FALLBACK_TAGS) and "would" in rules["hashtags"]["stopWords"]
         assert rules["maxTextChars"] == LIMITS["max_text_chars"]
         assert rules["caption"] == {"minLow": 1, "minHigh": 500, "maxLow": 20, "maxHigh": 10000, "defaultMin": 10, "defaultMax": 2200}
-        assert rules["postFilters"]["upcoming"] == ["scheduled", "needs_approval", "sending"]
+        assert rules["postFilters"]["upcoming"] == ["scheduled", "sending"]
+        assert rules["publishedStatuses"] == ["sending", "sent"]
+        assert rules["instagram"] == {"maxCaptionChars": 2200, "maxHashtags": 30}
         assert rules["retry"]["delaysMs"] == [1000, 2000, 4000]
 
 
@@ -57,9 +58,10 @@ class TestObservability:
 
     def test_api_requests_and_upstream_calls_are_logged(self, client: Any, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.INFO, logger="poster"):
-            post(client, "/api/buffer/validate", {}, headers={"X-Request-Id": "req-1"})
-        assert re.search(r"Buffer POST api\.buffer\.test -> 200 in \d+\.\d\ds", caplog.text)
-        assert re.search(r"POST /api/buffer/validate -> 200 in \d+\.\d\ds \[req-1\]", caplog.text)
+            post(client, "/api/social/validate", {}, headers={"X-Request-Id": "req-1"})
+        assert re.search(r"Meta GET graph\.meta\.test -> 200 in \d+\.\d\ds", caplog.text)
+        assert re.search(r"POST /api/social/validate -> 200 in \d+\.\d\ds \[req-1\]", caplog.text)
+        assert "test-meta-token" not in caplog.text
 
     def test_file_names_cannot_forge_log_lines(self, client: Any, fake: Any, caplog: pytest.LogCaptureFixture) -> None:
         fake.fail("groq.chat", 503)
@@ -111,48 +113,18 @@ class TestTimeBudget:
     def test_browser_timeouts_follow_the_budget(self, make_app: Any) -> None:
         config = make_app(VERCEL="1").test_client().get("/api/config").get_json()
         assert config["groq"]["requestTimeout"] == 295
-        assert config["buffer"]["requestTimeout"] == 30 * 4 + 7 + 10
+        assert config["social"]["requestTimeout"] == 30 * 4 + 7 + 10
         assert config["limits"]["maxUploadBytes"] == 4 * 1024 * 1024
 
 
-class TestUncertainScheduling:
-    def test_a_lost_answer_is_uncertain(self, client: Any, fake: Any) -> None:
-        fake.fail("buffer.PosterCreatePost", exc=requests.ReadTimeout("lost"), after=True)
-        data = post(client, "/api/buffer/schedule", schedule_body()).get_json()
-        assert [p["channelId"] for p in data["posts"]] == ["ch2"]
-        assert data["failures"][0]["channelId"] == "ch1" and data["failures"][0]["uncertain"] is True
-        assert len(fake.buffer.posts) == 2  # Buffer did create it
-
-    def test_a_refusal_is_certain(self, client: Any, fake: Any) -> None:
-        fake.fail("buffer.PosterCreatePost", 400)
-        failure = post(client, "/api/buffer/schedule", schedule_body()).get_json()["failures"][0]
-        assert failure["uncertain"] is False
-
-    def test_every_channel_lost_raises_an_uncertain_error(self, client: Any, fake: Any) -> None:
-        fake.fail("buffer.PosterCreatePost", 502, times=2)
-        error = post(client, "/api/buffer/schedule", schedule_body()).get_json()["error"]
-        assert error["kind"] == "client" and error["uncertain"] is True
-
-    def test_lost_connection_on_the_first_channel(self, client: Any, fake: Any) -> None:
-        fake.fail("buffer.PosterCreatePost", exc=requests.ConnectionError("reset"), after=True)
-        error = post(client, "/api/buffer/schedule", schedule_body()).get_json()["error"]
-        assert error["kind"] == "network" and error["uncertain"] is True
-
-    def test_validation_failures_are_never_uncertain(self, client: Any) -> None:
-        error = post(client, "/api/buffer/schedule", schedule_body(text="")).get_json()["error"]
-        assert error["uncertain"] is False
+def test_validation_failures_are_never_uncertain(client: Any) -> None:
+    error = post(client, "/api/social/schedule", schedule_body(text="")).get_json()["error"]
+    assert error["uncertain"] is False
 
 
 def test_data_url_with_whitespace(client: Any) -> None:
     body = generate_body(image="data:image/jpeg;base64,\n" + b64(image_bytes()))
     assert post(client, "/api/groq/generate", body).status_code == 200
-
-
-def test_due_at_in_another_timezone(client: Any, fake: Any) -> None:
-    due = future(1).replace("Z", "+05:30")
-    post(client, "/api/buffer/schedule", schedule_body(dueAt=due, channelIds=["ch1"]))
-    created = fake.calls[0].json["variables"]["input"]["dueAt"]
-    assert created.endswith("Z") and created != due
 
 
 def test_blob_store_id_from_token(make_app: Any) -> None:

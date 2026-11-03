@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import io
 import json
 import re
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
@@ -19,7 +21,7 @@ import pytest
 from PIL import Image
 
 from tests.conftest import API_HEADERS, BLOB_ENV, CLOUDINARY_ENV, post
-from tests.fakes import BLOB_PUBLIC_HOST, image_bytes
+from tests.fakes import BLOB_PUBLIC_HOST, META_TOKEN, image_bytes
 
 
 def future(days: float = 1) -> str:
@@ -55,8 +57,9 @@ class TestPage:
         html = client.get("/").get_data(as_text=True)
         config = page_config(html)
         assert config["mode"] == "live"
-        assert config["groq"]["configured"] and config["buffer"]["configured"]
-        for secret in ("test-groq-key", "test-buffer-token", "test-pollinations-key"):
+        assert config["groq"]["configured"] and config["social"]["configured"]
+        assert config["social"]["database"]["configured"] is True and config["social"]["database"]["problem"] is None
+        for secret in ("test-groq-key", META_TOKEN, "test-pollinations-key", "test-cron-secret"):
             assert secret not in html
 
     def test_security_headers(self, client: Any) -> None:
@@ -71,10 +74,11 @@ class TestPage:
     def test_health_and_config(self, client: Any) -> None:
         health = client.get("/api/health").get_json()
         assert health["status"] == "ok"
-        assert health["groq"] and health["buffer"] and health["imageGen"] and not health["media"]
+        assert health["groq"] and health["social"] and health["database"] and health["imageGen"] and not health["media"]
         config = client.get("/api/config").get_json()
-        assert set(config) >= {"version", "mode", "groq", "buffer", "media", "imageGen", "limits"}
-        assert config["buffer"]["tokenId"] == hashlib.sha256(b"test-buffer-token").hexdigest()[:12]
+        assert set(config) >= {"version", "mode", "groq", "social", "media", "imageGen", "limits"}
+        assert config["social"]["tokenId"] == hashlib.sha256(META_TOKEN.encode()).hexdigest()[:12]
+        assert config["social"]["cronSecretSet"] is True and config["social"]["version"] == "v23.0"
         assert config["groq"]["requestTimeout"] == (120 * 4 + 7) * 2 + 15
 
     @pytest.mark.parametrize(("env", "mode"), [({"POSTER_MODE": "demo"}, "demo"), ({"GROQ_API_KEY": ""}, "demo"),
@@ -85,20 +89,20 @@ class TestPage:
 
 class TestGuard:
     def test_post_without_header_is_refused(self, client: Any, fake: Any) -> None:
-        response = client.post("/api/buffer/validate", json={})
+        response = client.post("/api/social/validate", json={})
         assert response.status_code == 403
         assert response.get_json()["error"]["message"] == "Missing X-Poster-Request header."
         assert not fake.calls
 
     def test_cross_origin_post_is_refused(self, client: Any) -> None:
-        response = post(client, "/api/buffer/validate", {}, headers={"Origin": "https://evil.test"})
+        response = post(client, "/api/social/validate", {}, headers={"Origin": "https://evil.test"})
         assert response.status_code == 403
 
     def test_same_origin_post_is_accepted(self, client: Any) -> None:
-        assert post(client, "/api/buffer/validate", {}, headers={"Origin": "http://localhost"}).status_code == 200
+        assert post(client, "/api/social/validate", {}, headers={"Origin": "http://localhost"}).status_code == 200
 
     def test_non_json_body(self, client: Any) -> None:
-        response = client.post("/api/buffer/schedule", data="x", headers=API_HEADERS)
+        response = client.post("/api/social/schedule", data="x", headers=API_HEADERS)
         assert response.status_code == 400
         assert response.get_json()["error"]["kind"] == "validation"
 
@@ -119,8 +123,8 @@ class TestErrors:
         assert response.get_json()["error"]["kind"] == "validation"
 
     def test_unexpected_error_is_hidden(self, client: Any, fake: Any) -> None:
-        fake.fail("buffer.PosterAccount", exc=RuntimeError("secret internals"))
-        response = post(client, "/api/buffer/validate", {})
+        fake.fail("meta.me", exc=RuntimeError("secret internals"))
+        response = post(client, "/api/social/validate", {})
         assert response.status_code == 500
         assert response.get_json() == {"error": {"message": "Unexpected server error. Check the server log.", "kind": "server"}}
 
@@ -341,166 +345,244 @@ class TestImageEdit:
 
 
 # =============================================================================
-# Buffer
+# Facebook and Instagram: account, scheduling and the queue
 # =============================================================================
 
-class TestBufferAccount:
+def queue(client: Any) -> list[dict[str, Any]]:
+    """Every post in the app's queue, soonest first."""
+    return list(client.application.extensions["poster"].social.store.page(None, "asc", 0, 1000))
+
+
+def add_post(client: Any, text: str, days: float, *, status: str = "scheduled", channel: str = "pg1",
+             media: str | None = "https://img.example.com/x.jpg", **fields: Any) -> str:
+    """Puts a post straight into the app's queue and returns its ID."""
+    instagram = channel == "ig1"
+    row = {"id": uuid.uuid4().hex, "request_key": uuid.uuid4().hex, "channel_id": channel,
+           "service": "instagram" if instagram else "facebook", "channel_name": "Poster Studio IG" if instagram else "Poster Studio",
+           "text": text, "media_url": media, "due_at": future(days), "status": status, "created_at": "2026-01-01T00:00:00Z",
+           **fields}
+    return str(client.application.extensions["poster"].social.store.insert([row])[0]["id"])
+
+
+class TestMetaAccount:
     def test_validate(self, client: Any) -> None:
-        account = post(client, "/api/buffer/validate", {}).get_json()["account"]
-        assert account == {"id": "acc1", "email": "owner@example.test", "organizations": [{"id": "org1", "name": "Org One"}]}
+        account = post(client, "/api/social/validate", {}).get_json()["account"]
+        assert account == {"id": "su1", "name": "Poster System User"}
 
-    def test_connect_lists_channels(self, client: Any, fake: Any) -> None:
-        data = post(client, "/api/buffer/connect", {}).get_json()
-        assert [c["id"] for c in data["channels"]] == ["ch1", "ch2", "ch3"]
-        first = data["channels"][0]
-        assert first["name"] == "Poster Studio" and first["handle"] == "poster.studio" and first["usable"] is True
-        assert data["channels"][2]["usable"] is False and data["channels"][2]["isDisconnected"] is True
-        assert data["tokenId"] == hashlib.sha256(b"test-buffer-token").hexdigest()[:12]
-        assert fake.calls[0].kwargs["headers"]["Authorization"] == "Bearer test-buffer-token"
+    def test_connect_lists_pages_and_their_instagram_accounts(self, client: Any, fake: Any) -> None:
+        data = post(client, "/api/social/connect", {}).get_json()
+        assert [(c["id"], c["service"], c["usable"]) for c in data["channels"]] == [
+            ("pg1", "facebook", True), ("ig1", "instagram", True), ("pg2", "facebook", False)]
+        instagram = data["channels"][1]
+        assert instagram["handle"] == "poster.studio" and instagram["pageId"] == "pg1" and instagram["problem"] is None
+        assert "full control" in data["channels"][2]["problem"]
+        assert data["tokenId"] == hashlib.sha256(META_TOKEN.encode()).hexdigest()[:12]
+        assert "page-token" not in json.dumps(data)  # Page tokens never leave the server
+        assert fake.calls[1].kwargs["params"]["access_token"] == META_TOKEN
 
-    def test_graphql_auth_error(self, client: Any, fake: Any) -> None:
-        fake.fail("buffer.PosterAccount", 200, {"errors": [{"message": "bad token", "extensions": {"code": "UNAUTHENTICATED"}}]})
-        error = post(client, "/api/buffer/validate", {}).get_json()["error"]
-        assert error["kind"] == "auth" and error["status"] == 401
+    def test_expired_token(self, client: Any, fake: Any) -> None:
+        fake.fail("meta.me", 400, {"error": {"message": "Session has expired", "type": "OAuthException", "code": 190,
+                                             "error_subcode": 463}})
+        error = post(client, "/api/social/validate", {}).get_json()["error"]
+        assert error["kind"] == "auth" and error["status"] == 401 and "subcode 463" in error["details"]
+        assert "META_ACCESS_TOKEN" in error["hint"]
 
-    def test_graphql_rate_limit_is_retried(self, client: Any, fake: Any) -> None:
-        fake.fail("buffer.PosterAccount", 200, {"errors": [{"message": "slow down", "extensions": {"code": "RATE_LIMIT_EXCEEDED"}}]})
-        assert len(post(client, "/api/buffer/validate", {}).get_json()["retries"]) == 1
+    def test_missing_permission(self, client: Any, fake: Any) -> None:
+        fake.fail("meta.accounts", 403, {"error": {"message": "(#10) Permission denied", "code": 10}})
+        error = post(client, "/api/social/connect", {}).get_json()["error"]
+        assert error["kind"] == "auth" and error["status"] == 403 and "pages_manage_posts" in error["hint"]
+
+    def test_rate_limit_is_retried(self, client: Any, fake: Any) -> None:
+        fake.fail("meta.me", 400, {"error": {"message": "Application request limit reached", "code": 4}})
+        assert len(post(client, "/api/social/validate", {}).get_json()["retries"]) == 1
+
+    def test_appsecret_proof(self, make_app: Any, fake: Any) -> None:
+        post(make_app(META_APP_SECRET="s3cret").test_client(), "/api/social/validate", {})
+        expected = hmac.new(b"s3cret", META_TOKEN.encode(), hashlib.sha256).hexdigest()
+        assert fake.calls[0].kwargs["params"]["appsecret_proof"] == expected
+
+    def test_no_pages(self, client: Any, fake: Any) -> None:
+        fake.meta.pages = []
+        error = post(client, "/api/social/connect", {}).get_json()["error"]
+        assert "manages no Facebook Pages" in error["message"]
 
     def test_not_configured(self, make_app: Any) -> None:
-        response = post(make_app(BUFFER_ACCESS_TOKEN="").test_client(), "/api/buffer/connect", {})
+        response = post(make_app(META_ACCESS_TOKEN="").test_client(), "/api/social/connect", {})
         assert response.status_code == 503 and response.get_json()["error"]["kind"] == "config"
 
 
 def schedule_body(**overrides: Any) -> dict[str, Any]:
-    return {"text": "Hello world #test", "channelIds": ["ch1", "ch2"], "dueAt": future(), "mediaUrl": None, **overrides}
+    return {"text": "Hello world #test", "channelIds": ["pg1", "ig1"], "dueAt": future(),
+            "mediaUrl": "https://cdn.example.com/a.jpg", "requestKey": "req-1", **overrides}
 
 
-class TestBufferSchedule:
-    def test_one_post_per_channel(self, client: Any, fake: Any) -> None:
-        body = schedule_body(mediaUrl="https://cdn.example.com/a.jpg")
-        data = post(client, "/api/buffer/schedule", body).get_json()
-        assert [p["channelId"] for p in data["posts"]] == ["ch1", "ch2"] and data["failures"] == []
-        assert all(p["status"] == "scheduled" and p["postId"] for p in data["posts"])
-        created = fake.calls[0].json["variables"]["input"]
-        assert created["mode"] == "customScheduled" and created["schedulingType"] == "automatic"
-        assert created["assets"] == [{"image": {"url": "https://cdn.example.com/a.jpg"}}]
-        assert created["dueAt"] == body["dueAt"]
+class TestSchedule:
+    def test_queues_one_post_per_channel(self, client: Any, fake: Any) -> None:
+        body = schedule_body()
+        data = post(client, "/api/social/schedule", body).get_json()
+        assert [p["channelId"] for p in data["posts"]] == ["pg1", "ig1"] and data["failures"] == []
+        assert all(p["status"] == "scheduled" and p["dueAt"] == body["dueAt"] for p in data["posts"])
+        # Nothing is published until the post falls due.
+        assert fake.ops() == ["meta.accounts"] and fake.meta.all_posts() == []
+        assert {(row["service"], row["channel_name"]) for row in queue(client)} == {
+            ("facebook", "Poster Studio"), ("instagram", "Poster Studio IG")}
 
-    def test_partial_failure(self, client: Any, fake: Any) -> None:
-        data = post(client, "/api/buffer/schedule", schedule_body(channelIds=["ch1", "chX"])).get_json()
-        assert len(data["posts"]) == 1
-        assert data["failures"] == [{"channelId": "chX", "message": "Unknown channel", "uncertain": False}]
+    def test_the_same_request_is_never_queued_twice(self, client: Any) -> None:
+        first = post(client, "/api/social/schedule", schedule_body()).get_json()["posts"]
+        again = post(client, "/api/social/schedule", schedule_body()).get_json()["posts"]
+        assert again == first and len(queue(client)) == 2
+        post(client, "/api/social/schedule", schedule_body(requestKey="req-2"))
+        assert len(queue(client)) == 4
+
+    def test_channels_that_cannot_take_the_post(self, client: Any) -> None:
+        data = post(client, "/api/social/schedule", schedule_body(channelIds=["pg1", "ig1", "pg2", "gone"], mediaUrl=None)).get_json()
+        assert [p["channelId"] for p in data["posts"]] == ["pg1"]
+        messages = {f["channelId"]: f["message"] for f in data["failures"]}
+        assert messages["ig1"] == "Instagram posts need an image."
+        assert "full control" in messages["pg2"] and "Reconnect" in messages["gone"]
+        assert not any(f["uncertain"] for f in data["failures"])
+
+    @pytest.mark.parametrize(("text", "message"), [("x" * 2201, "2,200 characters"),
+                                                   (" ".join(f"#tag{i}" for i in range(31)), "30 hashtags")])
+    def test_instagram_limits(self, client: Any, text: str, message: str) -> None:
+        data = post(client, "/api/social/schedule", schedule_body(text=text)).get_json()
+        assert [p["channelId"] for p in data["posts"]] == ["pg1"] and message in data["failures"][0]["message"]
 
     def test_every_channel_failing(self, client: Any) -> None:
-        response = post(client, "/api/buffer/schedule", schedule_body(channelIds=["chX"]))
+        response = post(client, "/api/social/schedule", schedule_body(channelIds=["ig1"], mediaUrl=None))
         assert response.status_code == 502
-        assert response.get_json()["error"]["message"] == "Buffer did not schedule the post. chX: Unknown channel"
+        assert response.get_json()["error"]["message"] == "The post was not scheduled. Poster Studio IG: Instagram posts need an image."
+        assert queue(client) == []
 
-    def test_server_error_is_never_retried(self, client: Any, fake: Any) -> None:
-        fake.fail("buffer.PosterCreatePost", 500)
-        data = post(client, "/api/buffer/schedule", schedule_body()).get_json()
-        assert len(data["posts"]) == 1 and data["failures"][0]["channelId"] == "ch1"
-        assert fake.ops("buffer.PosterCreatePost") == ["buffer.PosterCreatePost"] * 2
+    def test_instagram_gets_a_jpeg(self, blob_client: Any) -> None:
+        served = "https://poster.test/api/media/image/sea-0a1b2c3d4e5f.png"
+        post(blob_client, "/api/social/schedule", schedule_body(mediaUrl=served))
+        urls = {row["service"]: row["media_url"] for row in queue(blob_client)}
+        assert urls == {"facebook": served, "instagram": served.replace(".png", ".jpg")}
 
-    def test_rate_limit_is_retried(self, client: Any, fake: Any) -> None:
-        fake.fail("buffer.PosterCreatePost", 429)
-        data = post(client, "/api/buffer/schedule", schedule_body(channelIds=["ch1"])).get_json()
-        assert len(data["posts"]) == 1 and len(data["retries"]) == 1
-
-    def test_auth_failure_stops_the_run(self, client: Any, fake: Any) -> None:
-        fake.fail("buffer.PosterCreatePost", 401)
-        response = post(client, "/api/buffer/schedule", schedule_body())
+    def test_a_bad_token_queues_nothing(self, client: Any, fake: Any) -> None:
+        fake.fail("meta.accounts", 400, {"error": {"message": "Error validating access token", "code": 190}})
+        response = post(client, "/api/social/schedule", schedule_body())
         assert response.status_code == 502 and response.get_json()["error"]["kind"] == "auth"
-        assert not fake.buffer.posts
+        assert queue(client) == []
+
+    def test_due_at_in_another_timezone(self, client: Any) -> None:
+        due = future(1).replace("Z", "+05:30")
+        post(client, "/api/social/schedule", schedule_body(dueAt=due, channelIds=["pg1"]))
+        stored = queue(client)[0]["due_at"]
+        assert stored.endswith("Z") and stored != due
 
     @pytest.mark.parametrize("overrides", [
         {"text": "  "}, {"text": "x" * 10_001}, {"channelIds": []}, {"channelIds": ["a b"]}, {"channelIds": [f"c{i}" for i in range(26)]},
         {"dueAt": "2020-01-01T00:00:00Z"}, {"dueAt": "2030-01-01T00:00:00"}, {"dueAt": "tomorrow"}, {"dueAt": future(800)},
         {"mediaUrl": "http://cdn.example.com/a.jpg"}, {"mediaUrl": "https://localhost/a.jpg"}, {"mediaUrl": 5},
+        {"requestKey": "bad key"}, {"requestKey": 7},
     ])
     def test_validation(self, client: Any, fake: Any, overrides: dict[str, Any]) -> None:
-        response = post(client, "/api/buffer/schedule", schedule_body(**overrides))
+        response = post(client, "/api/social/schedule", schedule_body(**overrides))
         assert response.status_code == 400
         assert not fake.calls
 
 
 @pytest.fixture
-def seeded(fake: Any) -> dict[str, str]:
-    """Three upcoming posts and one published post on ch1."""
+def seeded(client: Any) -> dict[str, str]:
+    """Two scheduled posts, one being published, one published and one that failed."""
     ids = {}
-    for name, days, status in (("later", 3, "scheduled"), ("soon", 1, "scheduled"), ("middle", 2, "needs_approval"),
-                               ("done", -1, "sent")):
-        ids[name] = fake.buffer.add_post("ch1", f"{name} post", future(days), status=status,
-                                         image="https://img.example.com/x.jpg")["id"]
+    for name, days, status in (("later", 3, "scheduled"), ("soon", 1, "scheduled"), ("middle", 2, "sending"),
+                               ("done", -1, "sent"), ("failed", -2, "error")):
+        extra: dict[str, Any] = {}
+        if status == "sent":
+            extra = {"permalink": "https://www.facebook.com/pg1_9", "sent_at": future(-1)}
+        if status == "error":
+            extra = {"error": "Meta could not publish the Facebook post: Invalid image", "attempts": 1}
+        ids[name] = add_post(client, f"{name} post", days, status=status, **extra)
     return ids
 
 
-class TestBufferPosts:
-    def test_upcoming_soonest_first(self, client: Any, seeded: dict[str, str]) -> None:
-        data = post(client, "/api/buffer/posts", {"filter": "upcoming", "organizationIds": ["org1"]}).get_json()
+class TestPosts:
+    def test_upcoming_soonest_first(self, client: Any, fake: Any, seeded: dict[str, str]) -> None:
+        data = post(client, "/api/social/posts", {"filter": "upcoming"}).get_json()
         assert [p["text"] for p in data["posts"]] == ["soon post", "middle post", "later post"]
         assert data["next"] is None
-        first = data["posts"][0]
-        assert first["channelName"] == "Poster Studio" and first["service"] == "instagram" and first["published"] is False
+        first, middle = data["posts"][0], data["posts"][1]
+        assert first["channelName"] == "Poster Studio" and first["service"] == "facebook" and first["published"] is False
         assert first["thumbnail"] == "https://img.example.com/x.jpg"
+        assert middle["status"] == "sending" and middle["published"] is True
+        assert not fake.calls  # the list comes from the queue, not from Meta
 
     def test_published(self, client: Any, seeded: dict[str, str]) -> None:
-        posts = post(client, "/api/buffer/posts", {"filter": "published", "organizationIds": ["org1"]}).get_json()["posts"]
+        posts = post(client, "/api/social/posts", {"filter": "published"}).get_json()["posts"]
         assert [p["text"] for p in posts] == ["done post"]
-        assert posts[0]["published"] is True and posts[0]["externalLink"].startswith("https://social.test/")
+        assert posts[0]["published"] is True and posts[0]["externalLink"] == "https://www.facebook.com/pg1_9"
 
-    def test_all_newest_first_and_org_lookup(self, client: Any, fake: Any, seeded: dict[str, str]) -> None:
-        posts = post(client, "/api/buffer/posts", {}).get_json()["posts"]
-        assert [p["text"] for p in posts] == ["later post", "middle post", "soon post", "done post"]
-        assert fake.ops()[0] == "buffer.PosterAccount"
+    def test_all_newest_first_with_failures(self, client: Any, seeded: dict[str, str]) -> None:
+        posts = post(client, "/api/social/posts", {}).get_json()["posts"]
+        assert [p["text"] for p in posts] == ["later post", "middle post", "soon post", "done post", "failed post"]
+        failed = posts[-1]
+        assert failed["status"] == "error" and failed["published"] is False and "Invalid image" in failed["error"]
 
-    def test_pagination(self, client: Any, fake: Any) -> None:
+    def test_pagination(self, client: Any) -> None:
         for i in range(35):
-            fake.buffer.add_post("ch1", f"post {i:02d}", future(1 + i / 100))
-        first = post(client, "/api/buffer/posts", {"filter": "upcoming", "organizationIds": ["org1"]}).get_json()
-        assert len(first["posts"]) == 30 and first["next"] == {"org1": "30"}
-        second = post(client, "/api/buffer/posts", {"filter": "upcoming", "organizationIds": ["org1"],
-                                                    "after": first["next"]}).get_json()
-        assert len(second["posts"]) == 5 and second["next"] is None
+            add_post(client, f"post {i:02d}", 1 + i / 100)
+        first = post(client, "/api/social/posts", {"filter": "upcoming"}).get_json()
+        assert len(first["posts"]) == 30 and first["next"] == "30"
+        second = post(client, "/api/social/posts", {"filter": "upcoming", "after": first["next"]}).get_json()
+        assert [p["text"] for p in second["posts"]] == [f"post {i}" for i in range(30, 35)] and second["next"] is None
 
-    def test_stored_thumbnails_replace_served_images(self, blob_client: Any, fake: Any) -> None:
-        fake.buffer.add_post("ch1", "mine", future(), image="https://poster.test/api/media/image/sea-0a1b2c3d4e5f.jpg")
-        posts = post(blob_client, "/api/buffer/posts", {"filter": "all", "organizationIds": ["org1"]}).get_json()["posts"]
+    def test_stored_thumbnails_replace_served_images(self, blob_client: Any) -> None:
+        add_post(blob_client, "mine", 1, media="https://poster.test/api/media/image/sea-0a1b2c3d4e5f.jpg")
+        posts = post(blob_client, "/api/social/posts", {"filter": "all"}).get_json()["posts"]
         assert posts[0]["thumbnail"] == f"https://{BLOB_PUBLIC_HOST}/poster/sea-0a1b2c3d4e5f.thumb.avif"
 
-    @pytest.mark.parametrize("body", [{"filter": "drafts"}, {"after": {"org1": ""}}, {"after": []},
-                                      {"organizationIds": "org1"}])
+    def test_reports_when_the_publisher_last_ran(self, client: Any) -> None:
+        assert post(client, "/api/social/posts", {}).get_json()["publisher"] == {"lastRunAt": None}
+        client.get("/api/publish/due", headers={"Authorization": "Bearer test-cron-secret"})
+        last_run = post(client, "/api/social/posts", {}).get_json()["publisher"]["lastRunAt"]
+        assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", last_run)
+
+    @pytest.mark.parametrize("body", [{"filter": "drafts"}, {"after": {"org1": "30"}}, {"after": "abc"}, {"after": 30}])
     def test_validation(self, client: Any, body: dict[str, Any]) -> None:
-        assert post(client, "/api/buffer/posts", body).status_code == 400
+        assert post(client, "/api/social/posts", body).status_code == 400
 
 
-class TestBufferEditDelete:
+class TestEditDelete:
     def test_edit_text_and_time(self, client: Any, fake: Any, seeded: dict[str, str]) -> None:
         due = future(5)
-        data = post(client, "/api/buffer/posts/edit", {"postIds": [seeded["soon"]], "text": "new text", "dueAt": due}).get_json()
-        assert data["failures"] == [] and data["posts"][0]["text"] == "new text"
-        edit = next(c for c in fake.calls if c.op == "buffer.PosterEditPost").json["variables"]["input"]
-        assert edit == {"id": seeded["soon"], "text": "new text", "dueAt": due, "mode": "customScheduled"}
-        assert fake.ops() == ["buffer.PosterPostStatus", "buffer.PosterEditPost"]
+        data = post(client, "/api/social/posts/edit", {"postIds": [seeded["soon"]], "text": "new text", "dueAt": due}).get_json()
+        assert data["failures"] == []
+        assert data["posts"][0]["text"] == "new text" and data["posts"][0]["dueAt"] == due
+        assert not fake.calls
+
+    def test_editing_a_failed_post_puts_it_back_in_the_queue(self, client: Any, seeded: dict[str, str]) -> None:
+        edited = post(client, "/api/social/posts/edit", {"postIds": [seeded["failed"]], "dueAt": future(1)}).get_json()["posts"][0]
+        assert edited["status"] == "scheduled" and edited["error"] is None and edited["attempts"] == 0
 
     def test_edit_refuses_published_and_reports_missing(self, client: Any, seeded: dict[str, str]) -> None:
-        data = post(client, "/api/buffer/posts/edit", {"postIds": [seeded["done"], "gone1"], "text": "x"}).get_json()
+        body = {"postIds": [seeded["done"], seeded["middle"], "gone1"], "text": "x"}
+        data = post(client, "/api/social/posts/edit", body).get_json()
         assert data["posts"] == []
-        assert [(f["postId"], f["reason"]) for f in data["failures"]] == [(seeded["done"], "published"), ("gone1", "missing")]
+        assert [(f["postId"], f["reason"]) for f in data["failures"]] == [
+            (seeded["done"], "published"), (seeded["middle"], "published"), ("gone1", "missing")]
+        assert "being published right now" in data["failures"][1]["message"]
+
+    def test_edit_keeps_instagram_limits(self, client: Any) -> None:
+        post_id = add_post(client, "short", 1, channel="ig1")
+        failure = post(client, "/api/social/posts/edit", {"postIds": [post_id], "text": "x" * 2201}).get_json()["failures"][0]
+        assert failure["reason"] == "error" and "2,200 characters" in failure["message"]
 
     def test_edit_needs_a_change(self, client: Any, seeded: dict[str, str]) -> None:
-        assert post(client, "/api/buffer/posts/edit", {"postIds": [seeded["soon"]]}).status_code == 400
+        assert post(client, "/api/social/posts/edit", {"postIds": [seeded["soon"]]}).status_code == 400
 
-    def test_delete(self, client: Any, fake: Any, seeded: dict[str, str]) -> None:
-        data = post(client, "/api/buffer/posts/delete", {"postIds": [seeded["soon"], "gone1", seeded["done"]]}).get_json()
-        assert data["deleted"] == [seeded["soon"], "gone1"]
-        assert data["failures"][0]["reason"] == "published"
-        assert seeded["soon"] not in fake.buffer.posts
+    def test_delete(self, client: Any, seeded: dict[str, str]) -> None:
+        body = {"postIds": [seeded["soon"], "gone1", seeded["done"], seeded["failed"]]}
+        data = post(client, "/api/social/posts/delete", body).get_json()
+        assert data["deleted"] == [seeded["soon"], "gone1", seeded["failed"]]
+        assert [(f["postId"], f["reason"]) for f in data["failures"]] == [(seeded["done"], "published")]
+        assert {row["id"] for row in queue(client)} == {seeded["later"], seeded["middle"], seeded["done"]}
 
     @pytest.mark.parametrize("ids", [[], "post1", ["bad id"], [f"p{i}" for i in range(26)]])
     def test_post_id_validation(self, client: Any, ids: Any) -> None:
-        assert post(client, "/api/buffer/posts/delete", {"postIds": ids}).status_code == 400
+        assert post(client, "/api/social/posts/delete", {"postIds": ids}).status_code == 400
 
 
 # =============================================================================

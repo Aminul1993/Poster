@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#f5f6f8">
-<meta name="description" content="Poster — generate social media captions and hashtags with AI and schedule posts through Buffer.">
+<meta name="description" content="Poster — generate social media captions and hashtags with AI and publish them to Facebook and Instagram on schedule.">
 <title>Poster — AI Social Publishing</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M23 9 14.5 17.5M23 9l-5.5 15-3-6.5L8 14.5z' fill='none' stroke='white' stroke-width='2' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
 <!-- Non-secret server configuration (credentials never leave the server). -->
@@ -84,7 +84,7 @@
     <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-send"/></svg></span>
     <div class="brand-text">
       <h1 class="brand-name">Poster</h1>
-      <span class="brand-tag">AI captions · Buffer scheduling</span>
+      <span class="brand-tag">AI captions · Facebook &amp; Instagram publishing</span>
     </div>
   </div>
   <div class="header-status" aria-label="Service status">
@@ -94,8 +94,8 @@
     <span class="pill" id="pill-groq" data-state="demo" role="status">
       <span class="dot" aria-hidden="true"></span><span class="pill-label">Groq</span><span class="pill-detail" id="pill-groq-detail">Demo</span>
     </span>
-    <span class="pill" id="pill-buffer" data-state="demo" role="status">
-      <span class="dot" aria-hidden="true"></span><span class="pill-label">Buffer</span><span class="pill-detail" id="pill-buffer-detail">Demo</span>
+    <span class="pill" id="pill-social" data-state="demo" role="status">
+      <span class="dot" aria-hidden="true"></span><span class="pill-label">Facebook &amp; Instagram</span><span class="pill-detail" id="pill-social-detail">Demo</span>
     </span>
     <span class="pill" id="pill-network" data-state="error" role="status" hidden>
       <svg class="icon" style="width:14px;height:14px"><use href="#i-wifi-off"/></svg><span>Offline</span>
@@ -123,9 +123,9 @@
     <p class="batch-stat"><strong id="kpi-images">0 / 10</strong> images</p>
     <p class="batch-stat"><strong id="kpi-generated">0</strong> with captions</p>
     <p class="batch-stat" id="kpi-needs-time-stat"><strong id="kpi-needs-time">0</strong> <span id="kpi-needs-time-label">need a publish time</span></p>
-    <p class="batch-stat" id="kpi-removed-stat" hidden><strong id="kpi-removed">0</strong> removed from Buffer</p>
+    <p class="batch-stat" id="kpi-removed-stat" hidden><strong id="kpi-removed">0</strong> removed from the queue</p>
     <p class="batch-stat"><strong id="kpi-ready">0</strong> ready to schedule</p>
-    <p class="batch-stat"><strong id="kpi-scheduled">—</strong> <span id="kpi-scheduled-label">upcoming in Buffer (all channels)</span></p>
+    <p class="batch-stat"><strong id="kpi-scheduled">—</strong> <span id="kpi-scheduled-label">upcoming</span></p>
   </section>
 
   <div class="workspace">
@@ -250,7 +250,7 @@
         <div class="empty" id="gallery-empty">
           <div class="empty-icon"><svg class="icon"><use href="#i-images"/></svg></div>
           <p class="empty-title">No images yet</p>
-          <p>Upload or generate up to 10 images. Poster writes captions and hashtags for each one, then schedules them through Buffer.</p>
+          <p>Upload or generate up to 10 images. Poster writes captions and hashtags for each one, then publishes them to Facebook and Instagram at the times you pick.</p>
         </div>
       </section>
     </div>
@@ -388,10 +388,10 @@
             <div class="inline-alert is-success" id="ed-result" hidden>
               <svg class="icon"><use href="#i-calendar-check"/></svg>
               <div><strong id="ed-result-title"></strong><div class="sub" id="ed-result-text"></div>
-                <button type="button" class="btn btn-sm result-edit" id="ed-result-edit" hidden><svg class="icon"><use href="#i-edit"/></svg><span id="ed-result-edit-label">Edit in Buffer</span></button>
+                <button type="button" class="btn btn-sm result-edit" id="ed-result-edit" hidden><svg class="icon"><use href="#i-edit"/></svg><span id="ed-result-edit-label">Edit scheduled post</span></button>
                 <span class="row-actions result-actions">
-                  <button type="button" class="btn btn-sm" id="ed-buffer-save" hidden><svg class="icon"><use href="#i-check"/></svg><span id="ed-buffer-save-label">Save to Buffer</span></button>
-                  <button type="button" class="btn btn-ghost btn-sm" id="ed-buffer-cancel" hidden>Cancel</button>
+                  <button type="button" class="btn btn-sm" id="ed-social-save" hidden><svg class="icon"><use href="#i-check"/></svg><span id="ed-social-save-label">Save changes</span></button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="ed-social-cancel" hidden>Cancel</button>
                 </span></div>
             </div>
 
@@ -407,7 +407,7 @@
             <section class="editor-group" aria-labelledby="ed-group-words">
               <h4 class="editor-group-title" id="ed-group-words">Caption and hashtags</h4>
               <div class="field">
-                <div class="label"><label for="ed-description">Caption <span class="lock-note"><svg class="icon"><use href="#i-lock"/></svg><span class="lock-text">In Buffer</span></span></label><span class="counter" id="ed-description-count">0</span></div>
+                <div class="label"><label for="ed-description">Caption <span class="lock-note"><svg class="icon"><use href="#i-lock"/></svg><span class="lock-text">Scheduled</span></span></label><span class="counter" id="ed-description-count">0</span></div>
                 <textarea class="textarea" id="ed-description" rows="4" placeholder="Generate with AI or write your own caption…" aria-describedby="ed-description-error ed-count-hint"></textarea>
                 <p class="error-text" id="ed-description-error" hidden></p>
                 <p class="hint" id="ed-count-hint" hidden>Joined letters count by their parts: ক্ষ counts as 3 toward the limit.</p>
@@ -415,7 +415,7 @@
 
               <div class="field">
                 <div class="label">
-                  <label for="ed-alt">Alternative caption <span class="lock-note"><svg class="icon"><use href="#i-lock"/></svg><span class="lock-text">In Buffer</span></span></label>
+                  <label for="ed-alt">Alternative caption <span class="lock-note"><svg class="icon"><use href="#i-lock"/></svg><span class="lock-text">Scheduled</span></span></label>
                   <span class="label-actions">
                     <button type="button" class="btn btn-ghost btn-xs" id="ed-swap" title="Swap caption and alternative"><svg class="icon"><use href="#i-swap"/></svg>Swap</button>
                     <span class="counter" id="ed-alt-count">0</span>
@@ -434,7 +434,7 @@
               </fieldset>
 
               <div class="field">
-                <div class="label"><label for="ed-tag-input">Hashtags <span class="lock-note"><svg class="icon"><use href="#i-lock"/></svg><span class="lock-text">In Buffer</span></span></label><span class="counter" id="ed-tags-count">0 / 15</span></div>
+                <div class="label"><label for="ed-tag-input">Hashtags <span class="lock-note"><svg class="icon"><use href="#i-lock"/></svg><span class="lock-text">Scheduled</span></span></label><span class="counter" id="ed-tags-count">0 / 15</span></div>
                 <div class="tag-editor" id="ed-tags">
                   <input class="tag-input" id="ed-tag-input" type="text" autocomplete="off" spellcheck="false" placeholder="Add a hashtag" aria-describedby="ed-tags-hint ed-tags-error">
                 </div>
@@ -452,7 +452,7 @@
               <h4 class="editor-group-title" id="ed-group-when">When and where</h4>
               <div class="field-row">
                 <div class="field">
-                  <div class="label"><label for="ed-schedule">Publish at <span class="lock-note"><svg class="icon"><use href="#i-lock"/></svg><span class="lock-text">In Buffer</span></span></label><span class="hint" id="ed-tz-label"></span></div>
+                  <div class="label"><label for="ed-schedule">Publish at <span class="lock-note"><svg class="icon"><use href="#i-lock"/></svg><span class="lock-text">Scheduled</span></span></label><span class="hint" id="ed-tz-label"></span></div>
                   <input type="datetime-local" class="input" id="ed-schedule" aria-describedby="ed-schedule-hint ed-schedule-error">
                   <p class="hint" id="ed-schedule-hint"></p>
                   <p class="error-text" id="ed-schedule-error" hidden></p>
@@ -460,13 +460,13 @@
                 <div class="field">
                   <label class="label" for="ed-media-url"><span>Public image URL <span class="optional">optional</span> <span class="lock-note is-kept"><svg class="icon"><use href="#i-lock"/></svg>As scheduled</span></span></label>
                   <input type="url" class="input" id="ed-media-url" placeholder="https://cdn.example.com/photo.jpg" inputmode="url" autocomplete="off" aria-describedby="ed-media-hint ed-media-error">
-                  <p class="hint" id="ed-media-hint">Buffer attaches images from public URLs. Leave empty to use the media host from Settings.</p>
+                  <p class="hint" id="ed-media-hint">Facebook and Instagram fetch images from public URLs. Leave empty to use the media host from Settings.</p>
                   <p class="error-text" id="ed-media-error" hidden></p>
                 </div>
               </div>
 
               <div class="field">
-                <div class="label"><span>Buffer channels <span class="lock-note is-kept"><svg class="icon"><use href="#i-lock"/></svg>As scheduled</span></span><button type="button" class="btn btn-ghost btn-xs" id="ed-channels-edit">Change</button></div>
+                <div class="label"><span>Channels <span class="lock-note is-kept"><svg class="icon"><use href="#i-lock"/></svg>As scheduled</span></span><button type="button" class="btn btn-ghost btn-xs" id="ed-channels-edit">Change</button></div>
                 <div class="channel-chips" id="ed-channels"></div>
               </div>
 
@@ -519,7 +519,11 @@
           <button type="button" class="btn btn-ghost btn-sm" id="sched-refresh"><svg class="icon"><use href="#i-refresh"/></svg>Refresh</button>
         </div>
       </div>
-      <ul class="list-reset scroll-area" id="sched-list" aria-label="Posts in Buffer" hidden></ul>
+      <div class="inline-alert is-warning sched-publisher-alert" id="sched-publisher-alert" role="status" hidden>
+        <svg class="icon"><use href="#i-alert-circle"/></svg>
+        <div><strong id="sched-publisher-title"></strong><div class="sub" id="sched-publisher-text"></div></div>
+      </div>
+      <ul class="list-reset scroll-area" id="sched-list" aria-label="Scheduled and published posts" hidden></ul>
       <div class="empty" id="sched-empty">
         <div class="empty-icon"><svg class="icon"><use href="#i-calendar"/></svg></div>
         <p class="empty-title" id="sched-empty-title">No posts yet</p>
@@ -544,6 +548,7 @@
             <option value="success">Successes</option>
             <option value="user">User actions</option>
           </select>
+          <button type="button" class="btn btn-ghost btn-sm" id="log-refresh" hidden><svg class="icon"><use href="#i-refresh"/></svg>Refresh</button>
           <button type="button" class="btn btn-ghost btn-sm" id="clear-log" disabled><svg class="icon"><use href="#i-trash"/></svg>Clear</button>
         </div>
       </div>
@@ -552,6 +557,10 @@
         <div class="empty-icon"><svg class="icon"><use href="#i-activity"/></svg></div>
         <p class="empty-title" id="log-empty-title">No activity yet</p>
         <p id="log-empty-text">Uploads, generations, schedules, retries and errors are recorded here with timestamps.</p>
+      </div>
+      <div class="log-footer" id="log-footer" hidden>
+        <span id="log-source"></span>
+        <button type="button" class="btn btn-sm" id="log-more" hidden>Load more</button>
       </div>
     </section>
   </div>
@@ -632,14 +641,14 @@
         <div class="test-result" id="groq-test-result" role="status" hidden></div>
       </section>
 
-      <section class="settings-section" id="settings-buffer" aria-labelledby="set-buffer-title">
-        <h3 id="set-buffer-title"><svg class="icon"><use href="#i-layers"/></svg>Buffer · scheduling</h3>
-        <p class="section-desc">The server connects to Buffer with your personal access token. Connect to load your channels, then choose where posts go.</p>
-        <dl class="server-info" id="buffer-server-info" aria-label="Buffer server configuration"></dl>
+      <section class="settings-section" id="settings-social" aria-labelledby="set-social-title">
+        <h3 id="set-social-title"><svg class="icon"><use href="#i-layers"/></svg>Facebook &amp; Instagram · publishing</h3>
+        <p class="section-desc">The server connects to Meta with a system user access token. Connect to load your Facebook Pages and their linked Instagram accounts, then choose where posts go. Scheduled posts wait in the server's queue, and its publisher posts each one at its time.</p>
+        <dl class="server-info" id="social-server-info" aria-label="Facebook and Instagram server configuration"></dl>
         <div class="row-actions">
-          <button type="button" class="btn btn-sm" id="connect-buffer"><svg class="icon"><use href="#i-link"/></svg><span id="connect-buffer-label">Connect &amp; load channels</span></button>
+          <button type="button" class="btn btn-sm" id="connect-social"><svg class="icon"><use href="#i-link"/></svg><span id="connect-social-label">Connect &amp; load channels</span></button>
         </div>
-        <div class="test-result" id="buffer-test-result" role="status" hidden></div>
+        <div class="test-result" id="social-test-result" role="status" hidden></div>
         <div class="field">
           <div class="label"><span id="channel-list-label">Channels</span><span class="counter" id="channel-count"></span></div>
           <div class="channel-list" id="channel-list" role="group" aria-labelledby="channel-list-label"></div>
@@ -648,7 +657,7 @@
 
       <section class="settings-section" id="settings-media" aria-labelledby="set-media-title">
         <h3 id="set-media-title"><svg class="icon"><use href="#i-image"/></svg>Media hosting</h3>
-        <p class="section-desc">Buffer has no upload endpoint: images are attached from public URLs. When a media host is configured on the server (Vercel Blob, or for example a Cloudinary unsigned preset), Poster uploads each image there and uses the returned URL. You can also paste a public URL for each image in the editor.</p>
+        <p class="section-desc">Facebook and Instagram fetch post images from public URLs, when each post is published. When a media host is configured on the server (Vercel Blob, or for example a Cloudinary unsigned preset), Poster uploads each image there and uses the returned URL. You can also paste a public URL for each image in the editor.</p>
         <dl class="server-info" id="media-server-info" aria-label="Media host server configuration"></dl>
         <label class="checkbox"><input type="checkbox" id="set-require-media"><span>Require an image on every post (fail instead of posting text only)</span></label>
       </section>
@@ -690,7 +699,7 @@
 
       <section class="settings-section" aria-labelledby="set-data-title">
         <h3 id="set-data-title"><svg class="icon"><use href="#i-database"/></svg>Import, export &amp; reset</h3>
-        <p class="section-desc">Your preferences, theme, drafts, schedules and the activity log are stored in this browser's localStorage. API keys and endpoints live only on the server and are never exported.</p>
+        <p class="section-desc">Your preferences, theme and drafts are stored in this browser's localStorage. Scheduled posts and the activity log are kept in the server's database. API keys and endpoints live only on the server and are never exported.</p>
         <div class="data-actions">
           <button type="button" class="btn btn-sm" id="export-config"><svg class="icon"><use href="#i-download"/></svg>Export JSON</button>
           <button type="button" class="btn btn-sm" id="import-config"><svg class="icon"><use href="#i-upload"/></svg>Import JSON</button>
