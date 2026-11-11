@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import Browser, Page, Route, expect
 
@@ -168,6 +169,49 @@ def test_image_generation_and_connection_test(live: Page, fake: FakeUpstream) ->
     page.click("#test-groq")
     expect(page.locator("#groq-test-result")).to_contain_text("Connected to groq.test. 2 models available")
     expect(page.locator("#pill-groq-detail")).to_have_text("Connected")
+
+
+def test_several_images_are_separate_requests(live: Page, fake: FakeUpstream) -> None:
+    page = live
+    page.click('label:has(input[name="image-source"][value="generate"])')
+    page.fill("#imggen-prompt", "A lighthouse in a storm")
+    page.select_option("#imggen-number", "2")
+    fake.generated_images.extend([image_bytes("PNG", (96, 96), (10, 60, 120)), image_bytes("PNG", (96, 96), (120, 60, 10))])
+    page.click("#imggen-button")
+    expect(page.locator("#gallery .thumb-name")).to_have_text(["ai-a-lighthouse-in-a-storm-1.png", "ai-a-lighthouse-in-a-storm-2.png"])
+    calls = [c for c in fake.calls if c.op == "pollinations"]
+    seeds = {parse_qs(urlparse(c.url).query)["seed"][0] for c in calls}
+    assert len(calls) == 2 and len(seeds) == 2
+
+    # A failure stops the run and says how far it got; the image already made stays.
+    fake.generated_images.extend([image_bytes("PNG", (96, 96), (60, 160, 60)), 400])
+    page.select_option("#imggen-number", "3")
+    page.click("#imggen-button")
+    expect(page.locator("#imggen-error")).to_contain_text("Made 1 of 3 images.")
+    expect(page.locator("#gallery .thumb-card")).to_have_count(3)
+
+
+def test_several_edited_copies_are_separate_requests(live: Page, fake: FakeUpstream) -> None:
+    page = live
+    page.click('label:has(input[name="image-source"][value="edit"])')
+    page.set_input_files("#imgedit-input", files=[{"name": "pier.png", "mimeType": "image/png",
+                                                    "buffer": image_bytes("PNG", (300, 200), (90, 40, 160))}])
+    page.fill("#imgedit-prompt", "Add a red sailing boat")
+    page.select_option("#imgedit-number", "2")
+    fake.edited_images.extend([image_bytes("PNG", (64, 48), (10, 60, 120)), image_bytes("PNG", (64, 48), (120, 60, 10))])
+    page.click("#imgedit-button")
+    expect(page.locator("#gallery .thumb-name")).to_have_text(["ai-edit-add-a-red-sailing-boat-1.png", "ai-edit-add-a-red-sailing-boat-2.png"])
+    calls = [c for c in fake.calls if c.op == "pollinations.edit"]
+    assert len(calls) == 2 and calls[0].json["seed"] != calls[1].json["seed"]
+    assert {c.json["prompt"] for c in calls} == {"Add a red sailing boat"}
+
+    # A failure stops the run and says how far it got; the copy already made stays.
+    fake.edited_images.extend([image_bytes("PNG", (64, 48), (60, 160, 60)), 400])
+    page.select_option("#imgedit-number", "3")
+    page.click("#imgedit-button")
+    expect(page.locator("#imgedit-error")).to_contain_text("Made 1 of 3 images.")
+    expect(page.locator("#gallery .thumb-card")).to_have_count(3)
+    assert len([c for c in fake.calls if c.op == "pollinations.edit"]) == 4
 
 
 def test_image_edit(live: Page, fake: FakeUpstream) -> None:

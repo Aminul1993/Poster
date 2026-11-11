@@ -304,6 +304,46 @@ def test_generated_image_joins_the_gallery(demo: Page) -> None:
     expect(page.locator("#gallery .thumb-name")).to_have_text(["ai-a-cosy-coffee-shop-at-sunrise.jpg"])
 
 
+def test_several_images_from_one_description(demo: Page) -> None:
+    page = demo
+    page.click('label:has(input[name="image-source"][value="generate"])')
+    page.fill("#imggen-prompt", "A red fox in the snow")
+    expect(page.locator("#imggen-button-label")).to_have_text("Generate image")
+    page.select_option("#imggen-number", "3")
+    expect(page.locator("#imggen-button-label")).to_have_text("Generate 3 images")
+    page.click("#imggen-button")
+    expect(page.locator("#imggen-button-label")).to_have_text("Generating 1 of 3…")
+    expect(page.locator("#imggen-number")).to_be_disabled()
+    # Each image joins the gallery as soon as it is ready, numbered; the first opens in the editor.
+    expect(page.locator("#gallery .thumb-name")).to_have_text(
+        ["ai-a-red-fox-in-the-snow-1.jpg", "ai-a-red-fox-in-the-snow-2.jpg", "ai-a-red-fox-in-the-snow-3.jpg"])
+    toast(page, "3 images added.")
+    expect(page.locator("#toast-region .toast", has_text="1 image added")).to_have_count(0)
+    expect(page.locator("#ed-name")).to_have_text("ai-a-red-fox-in-the-snow-1.jpg")
+    expect(page.locator("#imggen-button-label")).to_have_text("Generate 3 images")
+
+    # Only as many as the gallery has room for: 7 more here.
+    expect(page.locator('#imggen-number option[value="7"]')).to_be_enabled()
+    expect(page.locator('#imggen-number option[value="8"]')).to_be_disabled()
+    page.select_option("#imggen-number", "7")
+    add_images(page, *[(f"photo{i}.jpg", jpeg((20 * i, 90, 140))) for i in range(5)])
+    expect(page.locator("#gallery .thumb-card")).to_have_count(8)
+    expect(page.locator("#imggen-number")).to_have_value("2")
+    expect(page.locator("#imggen-button-label")).to_have_text("Generate 2 images")
+    expect(page.locator("#imggen-status")).to_have_text("The gallery has room for 2 more images, so 2 are made.")
+
+    # Cancel stops the run; the images already made stay.
+    page.click("#imggen-button")
+    expect(page.locator("#gallery .thumb-card")).to_have_count(9)
+    page.click("#imggen-cancel")
+    expect(page.locator("#imggen-cancel")).to_be_hidden()
+    assert page.locator("#gallery .thumb-card").count() in (9, 10)
+
+    # The chosen number is remembered (the gallery itself is not kept across a reload).
+    page.reload()
+    expect(page.locator("#imggen-number")).to_have_value("7")
+
+
 def test_edited_image_joins_the_gallery(demo: Page) -> None:
     page = demo
     page.click('label:has(input[name="image-source"][value="edit"])')
@@ -335,6 +375,36 @@ def test_edited_image_joins_the_gallery(demo: Page) -> None:
     expect(page.locator("#imgedit-dropzone")).to_be_visible()
     page.reload()
     expect(page.locator("#source-edit")).to_be_visible()
+
+
+def test_several_edited_copies_of_one_photo(demo: Page) -> None:
+    page = demo
+    page.click('label:has(input[name="image-source"][value="edit"])')
+    page.set_input_files("#imgedit-input", files=[{"name": "harbour.jpg", "mimeType": "image/jpeg", "buffer": jpeg((40, 90, 160))}])
+    page.fill("#imgedit-prompt", "Make it a watercolour painting")
+    expect(page.locator("#imgedit-button-label")).to_have_text("Generate updated image")
+    page.select_option("#imgedit-number", "3")
+    expect(page.locator("#imgedit-button-label")).to_have_text("Generate 3 updated images")
+    page.press("#imgedit-prompt", "Control+Enter")
+    expect(page.locator("#imgedit-button-label")).to_have_text("Generating 1 of 3…")
+    expect(page.locator("#imgedit-number")).to_be_disabled()
+    expect(page.locator("#gallery .thumb-name")).to_have_text(
+        [f"ai-edit-make-it-a-watercolour-painting-{n}.jpg" for n in (1, 2, 3)])
+    toast(page, "3 images added.")
+    expect(page.locator("#ed-name")).to_have_text("ai-edit-make-it-a-watercolour-painting-1.jpg")
+    # The photo stays ready for another run, and the Generate panel keeps its own number.
+    expect(page.locator("#imgedit-source-name")).to_have_text("harbour.jpg")
+    expect(page.locator("#imgedit-button-label")).to_have_text("Generate 3 updated images")
+    page.click('label:has(input[name="image-source"][value="generate"])')
+    expect(page.locator("#imggen-number")).to_have_value("1")
+
+    # Only as many as the gallery has room for; the chosen number is remembered.
+    page.click('label:has(input[name="image-source"][value="edit"])')
+    expect(page.locator('#imgedit-number option[value="7"]')).to_be_enabled()
+    expect(page.locator('#imgedit-number option[value="8"]')).to_be_disabled()
+    page.select_option("#imgedit-number", "7")
+    page.reload()
+    expect(page.locator("#imgedit-number")).to_have_value("7")
 
 
 def test_settings_save_export_import(demo: Page, tmp_path: Path) -> None:

@@ -14,8 +14,10 @@ export class UploadView extends View {
     this.uploading = false;
     /** @type {Promise<void>} settles when the batch being checked is done */
     this.idle = Promise.resolve();
-    /** @type {AbortController|null} set while an image is being generated */
+    /** @type {AbortController|null} set while images are being generated */
     this.imageGenController = null;
+    /** @type {{done: number, total: number}|null} how far a run of generated images has got */
+    this.imageGenProgress = null;
     /** Whether the owner reopened the card after it folded away for review. */
     this.expanded = false;
   }
@@ -105,9 +107,10 @@ export class UploadView extends View {
   /**
    * Validates and adds files to the gallery, reporting every rejection.
    * @param {File[]} files
+   * @param {{quiet?: boolean}} [options] quiet: no "added" toast (a batch of generated images says it once at the end)
    * @returns {Promise<object[]>} the items that were added
    */
-  async handleFiles(files) {
+  async handleFiles(files, { quiet = false } = {}) {
     if (!files.length) return [];
     if (this.uploading) {
       showToast('Still processing the previous files. Try again in a moment.', 'warning');
@@ -150,7 +153,7 @@ export class UploadView extends View {
       const restored = accepted.filter((i) => i.restored);
       this.notifier.log('success', 'upload', `Added ${pluralize(accepted.length, 'image')} to the gallery.`, accepted.map((i) => `${i.name} (${formatBytes(i.size)})`).join(', '));
       if (restored.length) this.notifier.log('info', 'upload', `Restored saved content for ${pluralize(restored.length, 'image')}.`, restored.map((i) => i.name).join(', '));
-      showToast(`${pluralize(accepted.length, 'image')} added${restored.length ? ` · saved content restored for ${restored.length}` : ''}.`, 'success');
+      if (!quiet) showToast(`${pluralize(accepted.length, 'image')} added${restored.length ? ` · saved content restored for ${restored.length}` : ''}.`, 'success');
     }
     this.showUploadErrors(errors, files.length);
     if (errors.length) {
@@ -197,20 +200,77 @@ export class UploadView extends View {
       this.ui.prefs.imageAspect = event.target.value;
       this.ui.saveUiPrefs();
     });
+    byId('imggen-number').addEventListener('change', (event) => {
+      this.ui.prefs.imageCount = Number(event.target.value) || 1;
+      this.ui.saveUiPrefs();
+      this.renderGenerator();
+    });
     byId('imggen-button').addEventListener('click', () => this.generateImage());
     byId('imggen-cancel').addEventListener('click', () => this.imageGenController?.abort());
   }
 
   /**
    * Adds an image made with AI to the gallery, like an upload, and selects it.
-   * @param {File} file @returns {Promise<object|undefined>} the gallery item, unless it was rejected
+   * @param {File} file
+   * @param {{select?: boolean, quiet?: boolean}} [options] select: open it in the editor; quiet: no "added" toast
+   * @returns {Promise<object|undefined>} the gallery item, unless it was rejected
    */
-  async addGeneratedImage(file) {
+  async addGeneratedImage(file, { select = true, quiet = false } = {}) {
     // handleFiles() takes one batch at a time; wait for an upload that is still being checked.
     while (this.uploading) await this.idle;
-    const [item] = await this.handleFiles([file]);
-    if (item) this.store.setActive(item.id);
+    const [item] = await this.handleFiles([file], { quiet });
+    if (item && select) this.store.setActive(item.id);
     return item;
+  }
+
+  /**
+   * @param {number} chosen the number of images the owner picked
+   * @returns {number} how many a run makes: the chosen number, but no more than the gallery has room for
+   */
+  batchSize(chosen) {
+    return Math.max(1, Math.min(chosen, LIMITS.maxImages - this.store.count));
+  }
+
+  /**
+   * A "Number of images" select: numbers the gallery has no room for cannot be chosen, and the chosen number
+   * comes back once there is room. Locked while a run is going.
+   * @param {HTMLSelectElement} select @param {number} chosen @param {boolean} running
+   */
+  renderBatchSelect(select, chosen, running) {
+    const room = Math.max(1, LIMITS.maxImages - this.store.count);
+    for (const option of select.options) option.disabled = Number(option.value) > room;
+    if (!running) select.value = String(this.batchSize(chosen));
+    select.disabled = running;
+  }
+
+  /**
+   * Makes `progress.total` images one after another and adds each to the gallery, like an upload, as soon as it
+   * is ready; the first opens in the editor. Stops when the gallery is full; a failure or Cancel (an abort
+   * error from `make`) ends the run too, with the images made so far kept and counted in `progress.added`.
+   * @param {{done: number, total: number, added: number}} progress updated as the run goes
+   * @param {(number: number) => Promise<File>} make makes one image; `number` is its place in a batch (0 alone)
+   * @param {() => void} onProgress called before each image
+   */
+  async addImageBatch(progress, make, onProgress) {
+    const batch = progress.total > 1;
+    for (let index = 0; index < progress.total && this.store.count < LIMITS.maxImages; index += 1) {
+      progress.done = index;
+      onProgress();
+      const started = Date.now();
+      const file = await make(batch ? index + 1 : 0);
+      this.notifier.log('success', 'image', `Generated "${file.name}" (${formatBytes(file.size)}) in ${formatDuration(Date.now() - started)}.`);
+      // The first image of a batch opens in the editor; the rest join the gallery behind it.
+      if (await this.addGeneratedImage(file, { select: index === 0, quiet: batch })) progress.added += 1;
+    }
+    if (batch && progress.added) showToast(`${pluralize(progress.added, 'image')} added.`, 'success');
+  }
+
+  /**
+   * How a run ended early, for its error message and the log: "Made 2 of 4 images. " once a batch has some.
+   * @param {{total: number, added: number}} progress @returns {string}
+   */
+  static madeSoFar(progress) {
+    return progress.total > 1 && progress.added ? `Made ${progress.added} of ${progress.total} images. ` : '';
   }
 
   /** Upload / Generate / Edit panels, plus the generator's counter, button and status line. */
@@ -235,19 +295,27 @@ export class UploadView extends View {
     counter.textContent = `${length} / ${LIMITS.maxPromptChars}`;
     counter.classList.toggle('is-over', length > LIMITS.maxPromptChars);
 
+    this.renderBatchSelect(byId('imggen-number'), this.ui.prefs.imageCount, generating);
+    const count = this.batchSize(this.ui.prefs.imageCount);
+    const progress = this.imageGenProgress;
+
     const button = byId('imggen-button');
     button.disabled = generating || full || !service.available;
     button.classList.toggle('is-loading', generating);
-    byId('imggen-button-label').textContent = generating ? 'Generating…' : 'Generate image';
+    byId('imggen-button-label').textContent = generating
+      ? (progress && progress.total > 1 ? `Generating ${progress.done + 1} of ${progress.total}…` : 'Generating…')
+      : count > 1 ? `Generate ${count} images` : 'Generate image';
     byId('imggen-cancel').hidden = !generating;
 
     const status = byId('imggen-status');
     status.classList.toggle('is-warning', !generating && (full || !service.available));
-    if (generating) status.textContent = 'Creating your image. This usually takes 5–30 seconds.';
+    if (generating && progress && progress.total > 1) status.textContent = `Creating image ${progress.done + 1} of ${progress.total}. Each usually takes 5–30 seconds and joins the gallery when it is ready.`;
+    else if (generating) status.textContent = 'Creating your image. This usually takes 5–30 seconds.';
     else if (!service.available) status.textContent = `Image generation is not set up on the server: ${SERVER.imageGen.problem} Get a free key at enter.pollinations.ai, add it to the .env file next to app.py and restart Poster.`;
     else if (full) status.textContent = `The gallery is full (${LIMITS.maxImages} images). Remove an image to generate another.`;
-    else if (demo) status.textContent = 'Demo mode draws a placeholder instead of calling the image AI.';
-    else status.textContent = 'Images are created by Pollinations and added to the gallery like uploads. Each run makes a new image.';
+    else if (this.ui.prefs.imageCount > count) status.textContent = `The gallery has room for ${pluralize(count, 'more image')}, so ${count === 1 ? 'one is' : `${count} are`} made.`;
+    else if (demo) status.textContent = `Demo mode draws ${count > 1 ? 'placeholders' : 'a placeholder'} instead of calling the image AI.`;
+    else status.textContent = `Images are created by Pollinations and added to the gallery like uploads. Each one is different${count > 1 ? ', from the same description' : ''}.`;
     this.renderCollapse();
   }
 
@@ -259,7 +327,10 @@ export class UploadView extends View {
     byId('imggen-prompt').setAttribute('aria-invalid', String(Boolean(message) && invalid));
   }
 
-  /** Generates an image from the description and adds it to the gallery, like an upload. */
+  /**
+   * Generates the chosen number of images from the description, one after another, and adds each to the
+   * gallery like an upload as soon as it is ready. Cancel or a failure stops the run; the images made so far stay.
+   */
   async generateImage() {
     if (this.imageGenController) return;
     const input = byId('imggen-prompt');
@@ -278,28 +349,32 @@ export class UploadView extends View {
     }
 
     const service = this.app.getImageGen();
+    const aspect = byId('imggen-aspect').value;
+    const progress = { done: 0, total: this.batchSize(this.ui.prefs.imageCount), added: 0 };
     const controller = new AbortController();
     this.imageGenController = controller;
+    this.imageGenProgress = progress;
     this.renderGenerator();
-    const started = Date.now();
-    this.notifier.log('info', 'image', `Generating an image${service.isDemo ? ' (demo)' : ''}: "${truncate(prompt, 80)}"`);
+    this.notifier.log('info', 'image', `Generating ${progress.total > 1 ? `${progress.total} images` : 'an image'}${service.isDemo ? ' (demo)' : ''}: "${truncate(prompt, 80)}"`);
     try {
-      const file = await service.generateImage(prompt, byId('imggen-aspect').value, {
+      await this.addImageBatch(progress, (number) => service.generateImage(prompt, aspect, {
         signal: controller.signal,
+        number,
         onRetry: ({ attempt, maxRetries, delayMs, error }) => this.notifier.log('warn', 'retry', `Image generation: retry ${attempt}/${maxRetries} in ${delayMs / 1000}s (${error.message})`)
-      });
-      this.notifier.log('success', 'image', `Generated "${file.name}" (${formatBytes(file.size)}) in ${formatDuration(Date.now() - started)}.`);
-      await this.addGeneratedImage(file);
+      }), () => this.renderGenerator());
     } catch (error) {
+      const made = UploadView.madeSoFar(progress);
       if (isCancelled(error)) {
-        this.notifier.log('info', 'image', 'Image generation cancelled.');
+        this.notifier.log('info', 'image', `Image generation cancelled.${made ? ` ${made.trim()}` : ''}`);
+        if (progress.added) showToast(`${pluralize(progress.added, 'image')} added before you cancelled.`, 'info');
       } else {
-        this.showGeneratorError(error.hint ? `${error.message} ${error.hint}` : error.message);
-        this.notifier.log('error', 'image', `Image generation failed: ${error.message}`, error.hint || '');
-        showToast(error.message, 'error', { title: 'Image not generated' });
+        this.showGeneratorError(`${made}${error.message}${error.hint ? ` ${error.hint}` : ''}`);
+        this.notifier.log('error', 'image', `Image generation failed: ${made}${error.message}`, error.hint || '');
+        showToast(`${made}${error.message}`, 'error', { title: made ? 'Not every image was generated' : 'Image not generated' });
       }
     } finally {
       this.imageGenController = null;
+      this.imageGenProgress = null;
       this.renderGenerator();
     }
   }

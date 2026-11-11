@@ -199,6 +199,11 @@ class FakeUpstream:
         self.groq_models = ["qwen/qwen3.8-27b", "qwen/qwen3-32b"]
         self.blobs: dict[str, bytes] = {}
         self.generated_image = image_bytes("PNG", (96, 96), (200, 80, 40))
+        # Answers to the next generation calls, in order: an image, or an HTTP status to fail with. Once they run
+        # out, every call gets generated_image.
+        self.generated_images: deque[bytes | int] = deque()
+        # The same for image edits; edited_image once they run out.
+        self.edited_images: deque[bytes | int] = deque()
         self.edited_image = image_bytes("PNG", (64, 48), (240, 120, 180))
         self._failures: list[tuple[str, Callable[[Call], requests.Response]]] = []
 
@@ -284,10 +289,16 @@ class FakeUpstream:
         if call.op == "media.upload":
             return response(200, {"secure_url": "https://res.media.test/poster/uploaded.jpg"}, url=call.url)
         if call.op == "pollinations":
-            return response(200, content=self.generated_image, headers={"Content-Type": "image/png"}, url=call.url)
+            image = self.generated_images.popleft() if self.generated_images else self.generated_image
+            if isinstance(image, int):
+                return response(image, {"error": f"scripted {image}"}, url=call.url)
+            return response(200, content=image, headers={"Content-Type": "image/png"}, url=call.url)
         if call.op == "pollinations.edit":
+            edited = self.edited_images.popleft() if self.edited_images else self.edited_image
+            if isinstance(edited, int):
+                return response(edited, {"error": f"scripted {edited}"}, url=call.url)
             usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
                      "input_tokens_details": {"text_tokens": 0, "image_tokens": 0}}
-            return response(200, {"created": 1, "data": [{"b64_json": base64.b64encode(self.edited_image).decode()}],
+            return response(200, {"created": 1, "data": [{"b64_json": base64.b64encode(edited).decode()}],
                                   "usage": usage}, url=call.url)
         raise requests.ConnectionError(f"FakeUpstream has no route for {call.url}")

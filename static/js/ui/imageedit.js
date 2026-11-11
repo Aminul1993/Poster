@@ -1,10 +1,14 @@
-/** The Add images card's Edit with AI panel: a photo and a description of a change in, an updated copy in the gallery out. */
+/**
+ * The Add images card's Edit with AI panel: a photo and a description of a change in, one or more updated copies
+ * in the gallery out.
+ */
 import { showToast } from '../app.js';
 import { LIMITS, SERVER } from '../config.js';
 import { isCancelled } from '../errors.js';
 import { decodeImage, drawScaled } from '../image.js';
-import { el, formatBytes, formatDuration, truncate } from '../util.js';
+import { el, formatBytes, pluralize, truncate } from '../util.js';
 import { byId, hasFiles } from './dom.js';
+import { UploadView } from './upload.js';
 import { View } from './view.js';
 
 export class ImageEditView extends View {
@@ -12,8 +16,10 @@ export class ImageEditView extends View {
     super(ui);
     /** @type {File|null} the photo to change; it is never changed itself, nor added to the gallery */
     this.source = null;
-    /** @type {AbortController|null} set while an updated image is being generated */
+    /** @type {AbortController|null} set while updated images are being generated */
     this.controller = null;
+    /** @type {{done: number, total: number, added: number}|null} how far a run of updated copies has got */
+    this.progress = null;
     this.dragDepth = 0;
   }
 
@@ -80,6 +86,11 @@ export class ImageEditView extends View {
         this.editImage();
       }
     });
+    byId('imgedit-number').addEventListener('change', (event) => {
+      this.ui.prefs.editCount = Number(event.target.value) || 1;
+      this.ui.saveUiPrefs();
+      this.render();
+    });
     byId('imgedit-button').addEventListener('click', () => this.editImage());
     byId('imgedit-cancel').addEventListener('click', () => this.controller?.abort());
   }
@@ -138,19 +149,29 @@ export class ImageEditView extends View {
     counter.textContent = `${length} / ${LIMITS.maxPromptChars}`;
     counter.classList.toggle('is-over', length > LIMITS.maxPromptChars);
 
+    const upload = this.ui.upload;
+    upload.renderBatchSelect(byId('imgedit-number'), this.ui.prefs.editCount, generating);
+    const count = upload.batchSize(this.ui.prefs.editCount);
+    const progress = this.progress;
+    const batch = progress && progress.total > 1;
+
     const button = byId('imgedit-button');
     button.disabled = generating || full || !service.available;
     button.classList.toggle('is-loading', generating);
-    byId('imgedit-button-label').textContent = generating ? 'Generating…' : 'Generate updated image';
+    byId('imgedit-button-label').textContent = generating
+      ? (batch ? `Generating ${progress.done + 1} of ${progress.total}…` : 'Generating…')
+      : count > 1 ? `Generate ${count} updated images` : 'Generate updated image';
     byId('imgedit-cancel').hidden = !generating;
 
     const status = byId('imgedit-status');
     status.classList.toggle('is-warning', !generating && (full || !service.available));
-    if (generating) status.textContent = 'Changing your image. This usually takes 10–40 seconds.';
+    if (generating && batch) status.textContent = `Changing copy ${progress.done + 1} of ${progress.total}. Each usually takes 10–40 seconds and joins the gallery when it is ready.`;
+    else if (generating) status.textContent = 'Changing your image. This usually takes 10–40 seconds.';
     else if (!service.available) status.textContent = `Image editing is not set up on the server: ${SERVER.imageGen.problem} Get a free key at enter.pollinations.ai, add it to the .env file next to app.py and restart Poster.`;
     else if (full) status.textContent = `The gallery is full (${LIMITS.maxImages} images). Remove an image to add an edited one.`;
+    else if (this.ui.prefs.editCount > count) status.textContent = `The gallery has room for ${pluralize(count, 'more image')}, so ${count === 1 ? 'one is' : `${count} are`} made.`;
     else if (demo) status.textContent = 'Demo mode tints the photo and writes your description on it instead of calling the image AI.';
-    else status.textContent = `Pollinations (${SERVER.imageGen.editModel || 'kontext'}) makes an updated copy and adds it to the gallery; your photo stays as it is. Each run makes a new image.`;
+    else status.textContent = `Pollinations (${SERVER.imageGen.editModel || 'kontext'}) makes ${count > 1 ? `${count} different updated copies` : 'an updated copy'} and adds ${count > 1 ? 'them' : 'it'} to the gallery; your photo stays as it is. Each edit is billed.`;
   }
 
   /** @param {string} message empty hides the error @param {{invalid?: boolean}} [options] invalid marks the description field */
@@ -161,7 +182,10 @@ export class ImageEditView extends View {
     byId('imgedit-prompt').setAttribute('aria-invalid', String(Boolean(message) && invalid));
   }
 
-  /** Makes an updated copy of the photo as described and adds it to the gallery, like an upload. */
+  /**
+   * Makes the chosen number of updated copies of the photo as described, one after another, and adds each to the
+   * gallery like an upload as soon as it is ready. Cancel or a failure stops the run; the copies made so far stay.
+   */
   async editImage() {
     if (this.controller) return;
     const input = byId('imgedit-prompt');
@@ -186,28 +210,32 @@ export class ImageEditView extends View {
 
     const service = this.app.getImageGen();
     const source = this.source;
+    const progress = { done: 0, total: this.ui.upload.batchSize(this.ui.prefs.editCount), added: 0 };
     const controller = new AbortController();
     this.controller = controller;
+    this.progress = progress;
     this.render();
-    const started = Date.now();
-    this.notifier.log('info', 'image', `Editing "${truncate(source.name || 'image', 60)}" with AI${service.isDemo ? ' (demo)' : ''}: "${truncate(prompt, 80)}"`);
+    const copies = progress.total > 1 ? `${progress.total} copies of ` : '';
+    this.notifier.log('info', 'image', `Editing ${copies}"${truncate(source.name || 'image', 60)}" with AI${service.isDemo ? ' (demo)' : ''}: "${truncate(prompt, 80)}"`);
     try {
-      const file = await service.editImage(source, prompt, {
+      await this.ui.upload.addImageBatch(progress, (number) => service.editImage(source, prompt, {
         signal: controller.signal,
+        number,
         onRetry: ({ attempt, maxRetries, delayMs, error }) => this.notifier.log('warn', 'retry', `Image edit: retry ${attempt}/${maxRetries} in ${delayMs / 1000}s (${error.message})`)
-      });
-      this.notifier.log('success', 'image', `Generated "${file.name}" (${formatBytes(file.size)}) from "${truncate(source.name || 'image', 60)}" in ${formatDuration(Date.now() - started)}.`);
-      await this.ui.upload.addGeneratedImage(file);
+      }), () => this.render());
     } catch (error) {
+      const made = UploadView.madeSoFar(progress);
       if (isCancelled(error)) {
-        this.notifier.log('info', 'image', 'Image edit cancelled.');
+        this.notifier.log('info', 'image', `Image edit cancelled.${made ? ` ${made.trim()}` : ''}`);
+        if (progress.added) showToast(`${pluralize(progress.added, 'image')} added before you cancelled.`, 'info');
       } else {
-        this.showError(error.hint ? `${error.message} ${error.hint}` : error.message);
-        this.notifier.log('error', 'image', `Image edit failed: ${error.message}`, error.hint || '');
-        showToast(error.message, 'error', { title: 'Image not edited' });
+        this.showError(`${made}${error.message}${error.hint ? ` ${error.hint}` : ''}`);
+        this.notifier.log('error', 'image', `Image edit failed: ${made}${error.message}`, error.hint || '');
+        showToast(`${made}${error.message}`, 'error', { title: made ? 'Not every image was edited' : 'Image not edited' });
       }
     } finally {
       this.controller = null;
+      this.progress = null;
       this.render();
     }
   }

@@ -123,6 +123,8 @@ export class UIController {
     this.prefs = normalizePrefs(this.app.storage.get(STORAGE_KEYS.ui, {}));
     $(`input[name="image-source"][value="${this.prefs.imageSource}"]`).checked = true;
     byId('imggen-aspect').value = this.prefs.imageAspect;
+    byId('imggen-number').value = String(this.prefs.imageCount);
+    byId('imgedit-number').value = String(this.prefs.editCount);
     byId('log-filter').value = this.prefs.logFilter;
     this.app.activity.filter = this.prefs.logFilter;
     byId('planner').open = this.prefs.plannerOpen;

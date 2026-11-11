@@ -8,9 +8,10 @@ import { encodeScaledJpeg } from '../image.js';
  * joins the gallery like an upload (and Demo captions can use its words).
  * @param {BlobPart} data @param {string} prompt @param {string} mimeType
  * @param {string} [prefix] start of the file name: "ai" for generated images, "ai-edit" for edited ones
+ * @param {number} [number] the image's place in a batch made from one description (0: not in a batch)
  * @returns {File}
  */
-export function generatedImageFile(data, prompt, mimeType, prefix = 'ai') {
+export function generatedImageFile(data, prompt, mimeType, prefix = 'ai', number = 0) {
   const words = prompt.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').match(/[\p{L}\p{M}\p{N}]+/gu) || [];
   let slug = '';
   for (const word of words) {
@@ -18,7 +19,7 @@ export function generatedImageFile(data, prompt, mimeType, prefix = 'ai') {
     slug = slug ? `${slug}-${word}` : word;
   }
   const ext = { 'image/png': 'png', 'image/webp': 'webp' }[mimeType] || 'jpg';
-  return new File([data], `${prefix}-${slug || 'image'}.${ext}`, { type: mimeType, lastModified: Date.now() });
+  return new File([data], `${prefix}-${slug || 'image'}${number ? `-${number}` : ''}.${ext}`, { type: mimeType, lastModified: Date.now() });
 }
 
 /**
@@ -48,35 +49,38 @@ export class ImageGenService {
   }
 
   /**
-   * Generates one image from a description.
+   * Generates one image from a description. Every call makes a different image (the server picks a new seed).
    * @param {string} prompt what the image should show
    * @param {string} aspect square | portrait | landscape | story
-   * @param {{signal?: AbortSignal, onRetry?: Function}} [ctx]
+   * @param {{signal?: AbortSignal, onRetry?: Function, number?: number}} [ctx] number: the image's place in a
+   *   batch, which ends its file name ("ai-…-2.png")
    * @returns {Promise<File>}
    */
-  async generateImage(prompt, aspect, { signal, onRetry } = {}) {
+  async generateImage(prompt, aspect, { signal, onRetry, number = 0 } = {}) {
     this.assertConfigured();
     const data = await this.api.callWithRetry(API_CONFIG.routes.imageGenerate, {
       json: { prompt, aspect }, timeoutMs: API_CONFIG.timeouts.imageGenMs, signal, service: 'Pollinations', onRetry
     });
-    return generatedImageFile(ImageGenService.imageBytes(data), prompt, data.mimeType);
+    return generatedImageFile(ImageGenService.imageBytes(data), prompt, data.mimeType, 'ai', number);
   }
 
   /**
    * Makes an updated copy of a photo, changed as the description says. The
-   * photo itself is not changed; a downscaled JPEG copy is sent.
+   * photo itself is not changed; a downscaled JPEG copy is sent. Every call makes a different copy (the server
+   * picks a new seed).
    * @param {Blob} file the photo to change
    * @param {string} prompt the change, e.g. "make it a watercolour painting"
-   * @param {{signal?: AbortSignal, onRetry?: Function}} [ctx]
+   * @param {{signal?: AbortSignal, onRetry?: Function, number?: number}} [ctx] number: the copy's place in a
+   *   batch, which ends its file name ("ai-edit-…-2.png")
    * @returns {Promise<File>}
    */
-  async editImage(file, prompt, { signal, onRetry } = {}) {
+  async editImage(file, prompt, { signal, onRetry, number = 0 } = {}) {
     this.assertConfigured();
     const image = await encodeScaledJpeg(file, LIMITS.editMaxEdge, 0.9);
     const data = await this.api.callWithRetry(API_CONFIG.routes.imageEdit, {
       json: { prompt, image }, timeoutMs: API_CONFIG.timeouts.imageGenMs, signal, service: 'Pollinations', onRetry
     });
-    return generatedImageFile(ImageGenService.imageBytes(data), prompt, data.mimeType, 'ai-edit');
+    return generatedImageFile(ImageGenService.imageBytes(data), prompt, data.mimeType, 'ai-edit', number);
   }
 
   /**

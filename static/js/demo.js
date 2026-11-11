@@ -157,7 +157,7 @@ export class DemoImageGenService extends ImageGenService {
   get available() { return true; }
 
   /** @returns {Promise<File>} a gradient with the description written on it */
-  async generateImage(prompt, aspect, { signal } = {}) {
+  async generateImage(prompt, aspect, { signal, number = 0 } = {}) {
     await sleep(900 + (hashString(prompt) % 900), signal);
     const [width, height] = SERVER.imageGen.aspects[aspect] || [1024, 1024];
     const canvas = document.createElement('canvas');
@@ -188,11 +188,11 @@ export class DemoImageGenService extends ImageGenService {
     ctx.fillText('Demo image · not AI-generated', width / 2, height - size * 1.4);
     const blob = await canvasToBlob(canvas, 'image/jpeg', 0.9);
     if (!blob) throw new ApiError('The demo image could not be drawn.', { kind: 'client', service: 'Pollinations' });
-    return generatedImageFile(blob, prompt, 'image/jpeg');
+    return generatedImageFile(blob, prompt, 'image/jpeg', 'ai', number);
   }
 
   /** @returns {Promise<File>} the photo in a random colour cast, with the description written on it */
-  async editImage(file, prompt, { signal } = {}) {
+  async editImage(file, prompt, { signal, number = 0 } = {}) {
     await sleep(900 + (hashString(prompt) % 900), signal);
     const source = await decodeImage(file);
     let canvas;
@@ -222,7 +222,7 @@ export class DemoImageGenService extends ImageGenService {
     ctx.fillText('Demo edit · not AI-generated', width / 2, height - size * 0.9);
     const blob = await canvasToBlob(canvas, 'image/jpeg', 0.9);
     if (!blob) throw new ApiError('The demo image could not be drawn.', { kind: 'client', service: 'Pollinations' });
-    return generatedImageFile(blob, prompt, 'image/jpeg', 'ai-edit');
+    return generatedImageFile(blob, prompt, 'image/jpeg', 'ai-edit', number);
   }
 
   /** Splits text into lines that fit `maxWidth` in the context's current font. */

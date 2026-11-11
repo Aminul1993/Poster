@@ -356,6 +356,7 @@ fieldset:disabled .tag, .editor.is-locked .tag { padding-right: 10px; }
 .generator { display: flex; flex-direction: column; gap: 14px; }
 .generator-actions { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
 .generator-actions .field { flex: 0 1 200px; }
+.generator-actions .field-narrow { flex: 0 1 130px; }
 .generator .hint.is-warning { color: var(--warning); }
 .dropzone-compact { flex-direction: row; justify-content: flex-start; gap: 14px; padding: 16px 18px; text-align: left; }
 .dropzone-compact .dropzone-icon { width: 42px; height: 42px; flex: none; }
