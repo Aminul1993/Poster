@@ -197,3 +197,63 @@ def test_public_api_is_on_window(demo: Page) -> None:
     names = demo.evaluate("['generateForAllImages', 'scheduleAllPosts', 'exportConfig', 'showToast'].map((n) => typeof window[n])")
     assert names == ["function"] * 4
     assert json.loads(demo.evaluate("JSON.stringify(window.poster.settings.mode)")) == "demo"
+
+
+# -- Credentials & Integrations ------------------------------------------------------------------------------------
+
+INTEGRATION_FIELDS = [
+    {"key": "api_key", "label": "API key", "kind": "secret", "required": True, "hasValue": False, "default": ""},
+    {"key": "endpoint", "label": "Endpoint", "kind": "url", "required": True, "hasValue": False, "default": ""},
+    {"key": "available_models", "label": "Available models", "kind": "list", "required": False, "hasValue": False, "default": ""},
+    {"key": "api_version", "label": "API version", "kind": "text", "required": True, "hasValue": True, "default": "2024-10-21"},
+]
+
+
+def test_settings_payload_leaves_blank_secrets_out(js: Any) -> None:
+    payload = js("""
+      const { settingsPayload } = await m('services/integrations');
+      return [settingsPayload(arg, { api_key: '  ', endpoint: ' https://x.test ', available_models: 'a, b,,c', api_version: '' }),
+              settingsPayload(arg, { api_key: 'sk-new', endpoint: '', available_models: ['x'], api_version: 'v1' })];
+    """, INTEGRATION_FIELDS)
+    assert payload[0] == {"endpoint": "https://x.test", "available_models": ["a", "b", "c"], "api_version": ""}
+    assert payload[1] == {"api_key": "sk-new", "endpoint": "", "available_models": ["x"], "api_version": "v1"}
+
+
+@pytest.mark.parametrize(("values", "errors"), [
+    ({}, {"api_key": "API key is required.", "endpoint": "Endpoint is required."}),
+    ({"api_key": "sk x", "endpoint": "http://example.com"},
+     {"api_key": "API key contains whitespace.", "endpoint": "Endpoint must be a full https:// address."}),
+    ({"api_key": "sk-1", "endpoint": "http://localhost:8080"}, {}),
+    ({"api_key": "sk-1", "endpoint": "https://example.com/v1"}, {}),
+])
+def test_client_side_settings_checks(js: Any, values: dict[str, str], errors: dict[str, str]) -> None:
+    assert js("const { validateSettings } = await m('services/integrations'); return validateSettings(arg.fields, arg.values);",
+              {"fields": INTEGRATION_FIELDS, "values": values}) == errors
+
+
+def test_a_saved_secret_counts_as_set(js: Any) -> None:
+    fields = [{**INTEGRATION_FIELDS[0], "hasValue": True}]
+    assert js("const { validateSettings } = await m('services/integrations'); return validateSettings(arg, {});", fields) == {}
+
+
+def test_provider_status_badges(js: Any) -> None:
+    result = js("""
+      const { providerStatus } = await m('ui/integrations');
+      return [providerStatus({ configured: false, status: 'connected' }), providerStatus({ configured: true, status: 'connected' }),
+              providerStatus({ configured: true, status: 'error' }), providerStatus({ configured: true, status: 'weird' })];
+    """)
+    assert [s["label"] for s in result] == ["Not configured", "Connected", "Error", "Not tested"]
+
+
+def test_a_model_chosen_for_another_provider_gives_way(js: Any) -> None:
+    result = js("""
+      const { SettingsModel } = await m('settings');
+      const { SERVER } = await m('config');
+      const before = SettingsModel.normalize({ model: 'qwen/qwen3-32b', modelProvider: SERVER.groq.provider });
+      const other = SettingsModel.normalize({ model: 'gpt-4.1', modelProvider: 'openai-not-active' });
+      const form = SettingsModel.normalize({ model: 'typed-model' });
+      return { before: before.model, other: other.model, form: form.model, provider: SERVER.groq.provider, fallback: SERVER.groq.model };
+    """)
+    assert result["before"] == "qwen/qwen3-32b"
+    assert result["other"] == result["fallback"]  # the active provider's default
+    assert result["form"] == "typed-model" and result["provider"] == "groq"

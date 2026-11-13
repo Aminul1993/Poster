@@ -93,6 +93,9 @@ class MetaService(ConfiguredService):
         self.http = http
         self.token = "" if is_placeholder(config.meta_access_token) else config.meta_access_token
         self.app_secret = config.meta_app_secret
+        self.app_id = config.meta_app_id
+        # The Pages Poster may post to (and their Instagram accounts); empty allows every Page the token manages.
+        self.page_ids = frozenset(config.meta_page_ids)
         self.version = config.meta_graph_version
         self.base_url = f"{config.meta_graph_url.rstrip('/')}/{config.meta_graph_version}"
         self.timeout = config.meta_timeout
@@ -158,8 +161,8 @@ class MetaService(ConfiguredService):
         common: dict[str, Any] = {"service": self.service, "details": details}
         if code == 190 or status == 401:
             return ServiceError(f"Meta rejected the access token ({message}).", kind="auth", status=401,
-                                hint="Generate a new token for the system user in Meta Business settings and set "
-                                     "META_ACCESS_TOKEN on the server.", **common)
+                                hint="Generate a new token for the system user in Meta Business settings and save it in "
+                                     "Settings → Credentials & Integrations (or set META_ACCESS_TOKEN).", **common)
         if code in (3, 10) or 200 <= code <= 299 or status == 403:
             return ServiceError(f"Meta denied access while trying to {action}: {message}", kind="auth", status=403,
                                 hint="The token needs pages_show_list, pages_read_engagement, pages_manage_posts, "
@@ -191,8 +194,9 @@ class MetaService(ConfiguredService):
             raise ServiceError("Meta returned unexpected account data.", kind="parse", service=self.service)
         return {"id": str(data["id"]), "name": str(data.get("name") or "")}
 
-    def channels(self, on_retry: RetryCallback) -> list[Channel]:
-        """Every Page the token manages, each followed by the Instagram professional account linked to it."""
+    def channels(self, on_retry: RetryCallback, *, every_page: bool = False) -> list[Channel]:
+        """Every Page the token manages, each followed by the Instagram professional account linked to it. Unless
+        ``every_page`` is set, only the Pages chosen in Credentials & Integrations (all of them when none are)."""
         data = self.call("GET", "me/accounts", params={"fields": API["meta"]["account_fields"],
                                                        "limit": API["meta"]["accounts_limit"]},
                          action="load the Facebook Pages", on_retry=on_retry)
@@ -204,6 +208,8 @@ class MetaService(ConfiguredService):
             if not isinstance(page, dict) or not page.get("id"):
                 continue
             page_id, page_name = str(page["id"]), str(page.get("name") or page["id"])
+            if self.page_ids and page_id not in self.page_ids and not every_page:
+                continue
             token = str(page.get("access_token") or "")
             tasks = page.get("tasks")
             problem = None
@@ -218,11 +224,15 @@ class MetaService(ConfiguredService):
                                         username, page_id, page_name, token, problem))
         return channels
 
-    def connect(self, on_retry: RetryCallback) -> dict[str, Any]:
-        """Validates the token and lists the channels it can post to."""
+    def connect(self, on_retry: RetryCallback, *, every_page: bool = False) -> dict[str, Any]:
+        """Validates the token and lists the channels it can post to (see channels())."""
         account = self.validate_token(on_retry)
-        channels = self.channels(on_retry)
+        channels = self.channels(on_retry, every_page=every_page)
         if not channels:
+            if self.page_ids and not every_page:
+                raise ServiceError("None of the Facebook Pages chosen in Credentials & Integrations is managed by this token.",
+                                   kind="client", service=self.service,
+                                   hint="Choose the Pages again in Settings → Credentials & Integrations.")
             raise ServiceError("This token manages no Facebook Pages, so there are no channels to post to.", kind="client",
                                service=self.service, hint="In Meta Business settings, assign the Page (and its Instagram "
                                                           "account) to the system user, then generate a new token.")

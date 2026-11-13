@@ -1,26 +1,28 @@
 # Poster
 
-Upload images (or generate them from a description, or have AI change an uploaded photo as you describe), generate captions, hashtags, a category and an engagement score with a Groq vision model, then schedule the posts to your Facebook Pages and Instagram accounts. Poster keeps the scheduled posts in its own queue and publishes them through Meta's Graph API when they fall due.
+Upload images (or generate them from a description, or have AI change an uploaded photo as you describe), generate captions, hashtags, a category and an engagement score with a vision model (Groq, OpenAI, Anthropic, Gemini or Azure OpenAI), then schedule the posts to your Facebook Pages and Instagram accounts. Poster keeps the scheduled posts in its own queue and publishes them through Meta's Graph API when they fall due.
 
 ## Layout
 
 - `app.py`: the entry point, for Vercel and for `python app.py`.
-- `poster/`: the Flask server. It holds the credentials and handles every call to Groq, Meta, Pollinations and the optional media host.
-  - `web.py`: routes, security headers, static assets. `auth.py`: the password.
-  - `store.py`: the queue of scheduled posts and the activity log (Postgres, or a SQLite file for local runs). `activity.py`: the activity log.
-  - `services/`: `groq.py`, `meta.py` (Graph API), `social.py` (scheduling and the publisher), `media.py` (Vercel Blob or an upload endpoint) and `imagegen.py` (Pollinations).
+- `poster/`: the Flask server. It holds the credentials and handles every call to the AI providers, Meta and the optional media host.
+  - `web.py`: routes, security headers, static assets. `routes/settings.py`: the Credentials & Integrations API. `context.py`: the services the routes use. `auth.py`: the password and the administrator check.
+  - `store.py`: the queue of scheduled posts, the activity log and the integration settings (Postgres, or a SQLite file for local runs). `activity.py`: the activity log. `crypto.py`: encryption and masking of saved credentials.
+  - `services/`: `settings_service.py` (integration settings: database first, then the environment), `ai/` (the text AI providers, their registry and `TextProviderFactory`), `imaging/` (the image AI providers and `ImageProviderFactory`), `meta.py` (Graph API), `social.py` (scheduling and the publisher) and `media.py` (Vercel Blob or an upload endpoint). `groq.py` and `imagegen.py` keep the older names.
   - `content.py`: model reply to post content. `imaging.py`: thumbnails and AVIF copies.
   - `config.py`: settings, limits and API paths. `retry.py`, `http.py`, `validation.py`.
 - `templates/index.html` and `static/`: the dashboard. Its JavaScript is plain ES modules (`static/js/main.js` and what it imports, with one view per card in `static/js/ui/`), with no build step and no npm. It only talks to the server.
 - `tests/`: the pytest suite. `tests/browser/` drives the real dashboard with Playwright.
-- `tools/check_js.py`: checks the JavaScript modules' imports, without Node.
+- `tools/check_js.py`: checks the JavaScript modules' imports, without Node. `tools/migrate_settings.py`: Credentials & Integrations from the command line (import, key rotation, status).
 
 ## Run
 
 ```bash
 pip install -r requirements.txt
 cp .env.example .env        # Windows: copy .env.example .env
-# edit .env: GROQ_API_KEY, META_ACCESS_TOKEN, optionally POLLINATIONS_API_KEY and BLOB_READ_WRITE_TOKEN
+# edit .env: SETTINGS_ENCRYPTION_KEY (python tools/migrate_settings.py generate-key), then either the credentials
+# (GROQ_API_KEY, META_ACCESS_TOKEN, optionally POLLINATIONS_API_KEY and BLOB_READ_WRITE_TOKEN) or nothing more:
+# you can enter them in Settings → Credentials & Integrations instead
 python app.py               # http://127.0.0.1:5000
 ```
 
@@ -36,18 +38,52 @@ Poster posts with a token from your own Meta app. Since you are the only user, t
 2. At [developers.facebook.com](https://developers.facebook.com/apps), create an app of type **Business** and connect it to your business portfolio.
 3. In [Meta Business settings](https://business.facebook.com/settings), go to **Users → System users** and add a system user (Admin). Under **Assign assets**, give it full control of the Page and of the Instagram account.
 4. Still on the system user, choose **Generate token**, pick the app, choose **Never** expires, and tick `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `instagram_basic`, `instagram_content_publish` and `business_management`.
-5. Put the token in `META_ACCESS_TOKEN`. Optionally put the app secret (App settings → Basic) in `META_APP_SECRET`, so every call carries an `appsecret_proof`.
+5. Save the token in **Settings → Credentials & Integrations → Facebook & Instagram** (or put it in `META_ACCESS_TOKEN`). Optionally add the app secret (App settings → Basic; `META_APP_SECRET`), so every call carries an `appsecret_proof`. **Test connection** lists the Pages the token manages and their Instagram accounts; tick the Pages Poster may use (none ticked allows all of them).
 6. In the dashboard, open **Settings → Facebook & Instagram** and choose **Connect**. Each Page appears with the Instagram account linked to it; tick the ones to post to.
+
+## Credentials & Integrations
+
+**Settings → Credentials & Integrations** manages every outside service from the dashboard, without editing environment variables or redeploying:
+
+| Integration | Providers | Used for |
+|---|---|---|
+| Text AI | Groq, OpenAI, Anthropic, Gemini, Azure OpenAI | Captions, hashtags, category and score |
+| Image AI | Pollinations, OpenAI Images, Stability AI, Flux, Gemini Image | Generate with AI and Edit with AI |
+| Blob storage | Vercel Blob, an upload endpoint (for example Cloudinary) | The public image URLs Meta fetches |
+| Facebook & Instagram | Meta | The token, app secret, Graph API version, and the Pages Poster may use |
+
+Each section shows only the chosen provider's fields, and has **Test connection** (Blob storage: **Validate storage**; Text AI also **Fetch models**; Meta also **Reconnect**, which reloads the dashboard's channels) and **Save**. Saving makes the provider the active one from the next request on: no restart and no reload. A **Health** table shows each integration's provider and status, and each section shows when it was last tested and last connected. Tests never generate or bill anything: they list models, read the account or validate the token. A test of settings that are not saved yet does not change the stored status.
+
+**Encryption.** Saved credentials are stored in the `poster_integration_settings` table as Fernet tokens (AES-128-CBC with HMAC-SHA256) under `SETTINGS_ENCRYPTION_KEY`; nothing is stored in plain text. The browser only ever receives masked secrets (`sk-p****…****1234`). A secret field left blank keeps the current one. Without `SETTINGS_ENCRYPTION_KEY` the page is read-only and Poster uses the environment variables, as it always did.
+
+**Where settings come from**, field by field: what was saved in the dashboard, else the environment variable (`GROQ_API_KEY`, `META_ACCESS_TOKEN`, … and for the newer providers `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `AZURE_OPENAI_*`, `STABILITY_API_KEY`, `BFL_API_KEY`), else the default. `TEXT_AI_PROVIDER` and `IMAGE_AI_PROVIDER` choose the provider when none was saved. The dashboard shows where each value comes from.
+
+**Upgrading.** Existing installations keep working unchanged. Once `SETTINGS_ENCRYPTION_KEY` is set, Poster imports the environment's settings on first use (`GROQ_API_KEY` becomes the active Text AI provider Groq, `POLLINATIONS_API_KEY` the Image AI provider Pollinations, and so on). Imported settings stay *linked to the environment*: a key rotated in the environment still takes effect, until you save that integration in the dashboard. `python tools/migrate_settings.py migrate` does the import ahead of time.
+
+**Access.** Whoever may use the dashboard (`POSTER_PASSWORD`, or a local address) administers it. To separate the two, set `POSTER_ADMIN_PASSWORD`: viewing, changing and testing integrations then also needs it; the drawer asks for it and keeps it in the tab's memory only. Changes also need the same-origin header every dashboard write sends.
+
+**Audit.** Every change and test goes to the activity log (category `settings`), for example *Text AI provider changed from Groq to OpenAI*, *Meta credentials updated*, *Storage validation performed (Vercel Blob): connected*, with the fields that changed and the client address, never a value.
+
+**Adding a provider.** Write a class in `poster/services/ai/providers/` (subclass `TextAIProvider`: `complete()` and `fetch_models()`) or `poster/services/imaging/providers/` (subclass `ImageAIProvider`: `generate_image()`, `edit_image()`, `test_connection()`), declare its `name`, `label` and `fields`, and add it to `TEXT_AI_PROVIDERS` or `IMAGE_AI_PROVIDERS` in the package's `factory.py`. The dashboard renders its fields, stores them encrypted, and the caption and image workflows use it through `TextProviderFactory` and `ImageProviderFactory`; nothing else changes.
+
+**Operations** (`python tools/migrate_settings.py …`): `generate-key` prints a new key; `migrate` creates the table and imports the environment; `status` lists each provider, its source and status (no secrets); `rotate` encrypts everything again under the first key of `SETTINGS_ENCRYPTION_KEY="new,old"` (then remove the old key); `sql` prints the table's SQL.
 
 ## Deploy to Vercel
 
 1. Add a Postgres database from the Vercel Marketplace (Supabase or Neon). The integration sets `POSTGRES_URL`, which Poster uses; `DATABASE_URL` takes precedence if you set both. Poster creates its tables (`poster_posts`, `poster_state`, `poster_activity`) on first use, with row level security turned on, so Supabase's public REST API cannot read them.
-2. Set the variables from `.env.example` in the Vercel project, including `META_ACCESS_TOKEN` and `CRON_SECRET` (a long random value, for example from `python -c "import secrets; print(secrets.token_urlsafe(32))"`).
-3. Set `POSTER_PASSWORD` to a long random value. Poster serves a public address only with a password: the browser asks for it once (any user name), and requests without it are refused.
+2. Set the variables from `.env.example` in the Vercel project, including `CRON_SECRET` (a long random value, for example from `python -c "import secrets; print(secrets.token_urlsafe(32))"`) and `SETTINGS_ENCRYPTION_KEY` (`python tools/migrate_settings.py generate-key`). The provider credentials (`GROQ_API_KEY`, `META_ACCESS_TOKEN`, …) can be set here too, or entered later in Credentials & Integrations.
+3. Set `POSTER_PASSWORD` to a long random value. Poster serves a public address only with a password: the browser asks for it once (any user name), and requests without it are refused. Optionally set `POSTER_ADMIN_PASSWORD` as well, so that only those who know it can see or change credentials.
 4. Facebook and Instagram fetch post images from `/api/media/image/` without the password, so Deployment Protection must stay off for those URLs, and for `/api/publish/due`.
 5. Set up the publisher (below).
 
 On Vercel, each request stops retrying after `POSTER_REQUEST_BUDGET` seconds (280 by default), before the function's 300-second limit in `vercel.json`. A Vercel Firewall rate-limit rule on `/api/` is a good addition.
+
+### Deployment notes for Credentials & Integrations
+
+- **Keep `SETTINGS_ENCRYPTION_KEY` safe and backed up**, like a database password. Without it, saved credentials cannot be decrypted: Poster then ignores them (the dashboard says so) and falls back to the environment. To change it, set `SETTINGS_ENCRYPTION_KEY="new,old"`, run `python tools/migrate_settings.py rotate` against the production database (or save each integration again), then remove the old key.
+- **Several instances.** Each server process reads the settings at most every 5 seconds (`API["settings"]["cache_seconds"]` in `config.py`); the instance that saved a change uses it at once, and the others within those seconds.
+- **Database.** The table is created on first use, like the others, with row level security on Postgres. `python tools/migrate_settings.py sql` prints it for a manual migration. If the database cannot be read, Poster keeps the settings it last read, or uses the environment.
+- **Rolling back** to a version without Credentials & Integrations is safe: it ignores the new table and reads the environment, so keep the environment variables of anything you need there.
 
 ### The publisher
 
@@ -79,8 +115,8 @@ Tests never reach the real services or read your `.env`: the upstream APIs are r
 
 ## Notes
 
-- The **Add images** card has three modes: **Upload** (drag and drop, browse or paste), **Generate with AI** (describe the image, pick a shape and how many images, up to the gallery's free slots, and Pollinations creates each one, a different image every time, adding it to the gallery as soon as it is ready) and **Edit with AI** (add a photo, describe the change, pick how many copies, and Pollinations makes each updated copy, a different one every time). Generated and edited images join the gallery exactly like uploads; the photo you edit is not changed or added, so you can try again or describe another change. Both need `POLLINATIONS_API_KEY` (free at enter.pollinations.ai); in Demo mode they draw a placeholder or tint the photo instead.
-- **Edit with AI** sends a copy of the photo shrunk to at most 1536 px (JPEG) through `/api/image/edit` to Pollinations' `/v1/images/edits`, using the model in `POLLINATIONS_EDIT_MODEL` (`kontext`, FLUX.1 Kontext, by default; any model that lists `/v1/images/edits` in gen.pollinations.ai/image/models works). An edit is billed per call and not cached, so it is retried only when Pollinations refuses it (HTTP 429/503), never after a timeout or another server error.
+- The **Add images** card has three modes: **Upload** (drag and drop, browse or paste), **Generate with AI** (describe the image, pick a shape and how many images, up to the gallery's free slots, and the image AI provider creates each one, a different image every time, adding it to the gallery as soon as it is ready) and **Edit with AI** (add a photo, describe the change, pick how many copies, and the provider makes each updated copy, a different one every time). Generated and edited images join the gallery exactly like uploads; the photo you edit is not changed or added, so you can try again or describe another change. Both need an image AI provider: Pollinations by default (`POLLINATIONS_API_KEY`, free at enter.pollinations.ai), or another one chosen in Credentials & Integrations; in Demo mode they draw a placeholder or tint the photo instead.
+- **Edit with AI** sends a copy of the photo shrunk to at most 1536 px (JPEG) through `/api/image/edit` to the image provider: with Pollinations, its `/v1/images/edits` and the edit model (`POLLINATIONS_EDIT_MODEL`, `kontext`, FLUX.1 Kontext, by default; any model that lists `/v1/images/edits` in gen.pollinations.ai/image/models works); with Stability AI, an SD 3.5 image-to-image; with Flux, a Kontext model; with OpenAI Images and Gemini Image, their own edit calls. An edit is billed per call and not cached, so it is retried only when the provider refuses it (HTTP 429/503), never after a timeout or another server error.
 - Facebook and Instagram fetch images only from public URLs, and they fetch them when the post is published, not when it is scheduled, so an image must stay reachable until then. Set `BLOB_READ_WRITE_TOKEN` to use a public Vercel Blob store, or configure another media host (for example a Cloudinary unsigned upload preset), or paste a public image URL per post in the editor.
 - Instagram takes JPEG images with an aspect ratio between 4:5 and 1.91:1, captions up to 2,200 characters and at most 30 hashtags, and every post needs an image. Poster refuses an Instagram post that breaks the caption rules or has no image when you schedule it; an image Instagram cannot use shows up as a failed post. Facebook posts can be text only. Instagram publishes at most 100 posts per account in 24 hours.
 - **Scheduled posts** lists the posts in Poster's queue (All, Upcoming or Published, 30 per page): scheduled, being published (`sending`), published (`sent`, with a link to the post) and failed (`error`, with Meta's reason). Posts made directly on Facebook or Instagram are not listed. The list reads the database alone, so it works before `META_ACCESS_TOKEN` is set. Demo mode keeps its simulated posts in memory for the tab. A post whose image is served by Poster (`<PUBLIC_BASE_URL>/api/media/image/<name>.jpg`) shows its stored Vercel Blob thumbnail instead of the full image.
@@ -91,5 +127,5 @@ Tests never reach the real services or read your `.env`: the upstream APIs are r
 - On Vercel, request bodies are capped at 4.5 MB, so the browser re-encodes images over 4 MB as smaller JPEGs before uploading them. PNG and WEBP images over 40 megapixels are refused, because they are decoded at full size.
 - Hashtags keep letters, digits, underscores and the combining marks of scripts such as Bengali, Hindi and Tamil (`#বাংলাদেশ`, `#हिन्दी`).
 - Server-side calls retry timeouts, network errors and HTTP 429/5xx up to three times (1 s, 2 s, 4 s), within the request's time budget. Scheduling sends a key with each post, so a schedule request sent again (after a lost answer) returns the posts already queued instead of adding them twice. The publisher retries a publish immediately only on 429/503, and later (after 2, 5, 15 and 30 minutes, five tries in all) on rate limits and temporary errors. When a publish's answer is lost, the post stays `sending`, and about ten minutes later the publisher looks for it on the Page or Instagram account (and checks the Instagram upload's status) before it tries again, so a post is not published twice. An expired or revoked token stops the run and leaves the posts queued.
-- Set `GROQ_MODELS` to limit which models the dashboard may use.
-- Keep `POSTER_HOST=127.0.0.1` unless you set `POSTER_PASSWORD`: anyone who can reach the server could otherwise use your Meta and Groq credentials.
+- Set *Available models* in Credentials & Integrations (`GROQ_MODELS` for Groq) to limit which models the dashboard may use. A model chosen in the browser for another provider is ignored after a switch: the new provider's default is used.
+- Keep `POSTER_HOST=127.0.0.1` unless you set `POSTER_PASSWORD`: anyone who can reach the server could otherwise use, and change, your credentials.

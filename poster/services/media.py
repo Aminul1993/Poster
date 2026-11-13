@@ -33,7 +33,8 @@ class MediaService(ConfiguredService):
 
     service = "Media host"
     unconfigured = "No media host is configured on the server"
-    setup_hint = "Set BLOB_READ_WRITE_TOKEN (Vercel Blob) or MEDIA_UPLOAD_ENDPOINT, or paste a public image URL in the editor."
+    setup_hint = ("Configure Blob storage in Settings → Credentials & Integrations (or set BLOB_READ_WRITE_TOKEN or "
+                  "MEDIA_UPLOAD_ENDPOINT), or paste a public image URL in the editor.")
 
     def __init__(self, http: HttpClient, config: Config) -> None:
         self.http = http
@@ -70,6 +71,25 @@ class MediaService(ConfiguredService):
         host = "Vercel Blob" if self.uses_blob else urlparse(self.endpoint).netloc if self.endpoint else ""
         return {"configured": self.configured, "problem": self.problem, "host": host,
                 "requestTimeout": browser_timeout(worst_case_seconds(self.timeout) + 10, self.budget)}
+
+    def validate(self, on_retry: RetryCallback) -> dict[str, Any]:
+        """Checks the media host without storing anything: Vercel Blob lists one file with the token; an upload
+        endpoint (which would keep a test upload) is checked by its configuration only."""
+        self.require_configured()
+        if not self.uses_blob:
+            return {"host": urlparse(self.endpoint).netloc, "detail": "The upload endpoint is configured. It is checked by the "
+                                                                    "first real upload, so nothing is stored now."}
+        headers = {key: value for key, value in self.blob_headers("").items() if key in (
+            "Authorization", "x-api-version", "x-vercel-blob-store-id")}
+        _, payload, text = retry_request(
+            lambda: self.http.request("GET", f"{self.blob_api_url}/?{urlencode({'limit': 1})}", service=self.service,
+                                      timeout=min(self.timeout, 30), headers=headers),
+            on_retry=on_retry,
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("blobs"), list):
+            raise ServiceError("Vercel Blob answered, but not with a list of files.", kind="parse", service=self.service,
+                               details=truncate(text, 300))
+        return {"host": "Vercel Blob", "detail": f"The token can read and write the Blob store {self.blob_store_id}."}
 
     def upload(self, filename: str, data: bytes, mimetype: str, on_retry: RetryCallback) -> str:
         """Uploads the original image to MEDIA_UPLOAD_ENDPOINT and returns its public URL."""

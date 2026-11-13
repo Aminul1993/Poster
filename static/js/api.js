@@ -103,17 +103,29 @@ export class ApiService {
   }
 
   /**
+   * GETs a server route (reads that change nothing).
    * @param {string} path
-   * @param {{json?: object, form?: FormData, timeoutMs?: number, signal?: AbortSignal, service?: string}} [options]
+   * @param {{timeoutMs?: number, signal?: AbortSignal, service?: string, headers?: Object<string, string>}} [options]
    * @returns {Promise<object>}
    * @throws {ApiError}
    */
-  async post(path, { json, form, timeoutMs = 60000, signal, service = 'Poster server' } = {}) {
+  get(path, options = {}) {
+    return this.post(path, { ...options, method: 'GET' });
+  }
+
+  /**
+   * @param {string} path
+   * @param {{json?: object, form?: FormData, timeoutMs?: number, signal?: AbortSignal, service?: string,
+   *          headers?: Object<string, string>, method?: 'GET'|'POST'}} [options] headers: extra request headers
+   * @returns {Promise<object>}
+   * @throws {ApiError}
+   */
+  async post(path, { json, form, timeoutMs = 60000, signal, service = 'Poster server', headers: extra = {}, method = 'POST' } = {}) {
     throwIfAborted(signal);
     if (navigator.onLine === false) {
       throw new ApiError('You are offline. Reconnect to the internet and try again.', { kind: 'offline', service });
     }
-    const headers = { Accept: 'application/json', 'X-Poster-Request': '1' };
+    const headers = { Accept: 'application/json', 'X-Poster-Request': '1', ...extra };
     let body = form;
     if (json !== undefined) {
       headers['Content-Type'] = 'application/json';
@@ -130,7 +142,7 @@ export class ApiService {
       let response;
       try {
         response = await fetch(path, {
-          method: 'POST', headers, body, signal: controller.signal, cache: 'no-store', credentials: 'same-origin'
+          method, headers, body: method === 'GET' ? undefined : body, signal: controller.signal, cache: 'no-store', credentials: 'same-origin'
         });
       } catch (error) {
         if (timedOut) throw this.#timeoutError(service, timeoutMs);
@@ -186,6 +198,7 @@ export class ApiService {
         details: typeof error.details === 'string' ? error.details : '',
         retries: Array.isArray(error.retries) ? error.retries : [],
         uncertain: error.uncertain === true,
+        admin: error.admin === true,
         fromServer: true
       });
     }

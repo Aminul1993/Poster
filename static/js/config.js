@@ -51,13 +51,14 @@ export const SERVER = (() => {
   const fallback = {
     version: '',
     mode: 'demo',
-    groq: { configured: false, problem: missing, model: 'qwen/qwen3.8-27b', models: [], host: '', timeout: 120, requestTimeout: 1000 },
+    groq: { configured: false, problem: missing, provider: 'groq', label: 'Groq', model: 'qwen/qwen3.8-27b', models: [], host: '', timeout: 120, requestTimeout: 1000 },
     social: {
       configured: false, problem: missing, tokenId: '', host: '', version: '', timeout: 30, requestTimeout: 160,
       database: { configured: false, problem: missing, kind: '' }, cronSecretSet: false
     },
     media: { configured: false, problem: missing, host: '', requestTimeout: 500 },
-    imageGen: { configured: false, problem: missing, host: '', aspects: {}, editModel: '', maxPromptChars: 1000, requestTimeout: 260 },
+    imageGen: { configured: false, problem: missing, provider: 'pollinations', label: 'Pollinations', host: '', aspects: {}, model: '', editModel: '', canEdit: true, maxPromptChars: 1000, requestTimeout: 260 },
+    integrations: { adminPassword: false, editable: false, problem: missing },
     limits: {},
     rules: FALLBACK_RULES
   };
@@ -71,12 +72,25 @@ export const SERVER = (() => {
       social: { ...fallback.social, ...parsed.social },
       media: { ...fallback.media, ...parsed.media },
       imageGen: { ...fallback.imageGen, ...parsed.imageGen },
+      integrations: { ...fallback.integrations, ...parsed.integrations },
       rules: { ...FALLBACK_RULES, ...parsed.rules }
     };
   } catch {
     return fallback;
   }
 })();
+
+/**
+ * Takes in a fresh /api/config after Credentials & Integrations changed a provider, so the dashboard follows
+ * the switch without a reload. SERVER keeps its identity (every module holds it); the rules never change.
+ * @param {object} fresh the server's configuration
+ */
+export function refreshServer(fresh) {
+  if (!fresh || typeof fresh !== 'object') return;
+  for (const key of ['groq', 'social', 'media', 'imageGen', 'integrations']) {
+    if (fresh[key] && typeof fresh[key] === 'object') SERVER[key] = { ...SERVER[key], ...fresh[key] };
+  }
+}
 
 /** The content rules the server applies too (see FALLBACK_RULES for their shape). */
 export const RULES = deepFreeze(SERVER.rules);
@@ -101,7 +115,12 @@ export const API_CONFIG = Object.freeze({
     activityClear: '/api/activity/clear',
     mediaUpload: '/api/media/upload',
     imageGenerate: '/api/image/generate',
-    imageEdit: '/api/image/edit'
+    imageEdit: '/api/image/edit',
+    serverConfig: '/api/config',
+    integrations: '/api/settings/integrations',
+    integrationsStatus: '/api/settings/status',
+    integrationsTest: '/api/settings/test',
+    textAiModels: '/api/settings/text-ai/models'
   }),
   /** Multipart field the server reads the image from. */
   mediaFileField: 'file',
@@ -111,7 +130,9 @@ export const API_CONFIG = Object.freeze({
     socialMs: SERVER.social.requestTimeout * 1000,
     mediaMs: SERVER.media.requestTimeout * 1000,
     imageGenMs: SERVER.imageGen.requestTimeout * 1000,
-    activityMs: 30000
+    activityMs: 30000,
+    /** Integration tests and saves: the server's own calls are bounded by their test timeouts and retries. */
+    integrationsMs: 120000
   }),
   retry: RULES.retry
 });

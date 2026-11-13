@@ -1,4 +1,6 @@
-"""In-memory stand-ins for Groq, Meta's Graph API, Vercel Blob, Cloudinary and Pollinations.
+"""In-memory stand-ins for the text AI providers (Groq, OpenAI, Anthropic, Gemini, Azure OpenAI), the image AI
+providers (Pollinations, OpenAI Images, Stability AI, Flux, Gemini Image), Meta's Graph API, Vercel Blob and
+Cloudinary.
 
 FakeUpstream replaces ``requests.Session.request``, so Poster's real HTTP client
 (timeouts, error classification, JSON parsing) runs unchanged against it.
@@ -27,6 +29,15 @@ BLOB_STORE = "teststore123"
 BLOB_PUBLIC_HOST = f"{BLOB_STORE}.public.blob.vercel-storage.com"
 CLOUDINARY_HOST = "upload.media.test"
 POLLINATIONS_HOST = "gen.pollinations.ai"
+OPENAI_HOST = "api.openai.com"
+ANTHROPIC_HOST = "api.anthropic.com"
+GEMINI_HOST = "generativelanguage.googleapis.com"
+AZURE_HOST = "poster-test.openai.azure.com"
+STABILITY_HOST = "api.stability.ai"
+BFL_HOST = "api.bfl.ai"
+BFL_DELIVERY_HOST = "delivery.eu.bfl.ai"
+# A key every fake provider refuses with HTTP 401, as a real one refuses a revoked key.
+BAD_KEY = "bad-key-0000000000000000"
 
 DEFAULT_REPLY = {
     "description": "A calm morning by the sea, with soft golden light on the water.",
@@ -205,6 +216,13 @@ class FakeUpstream:
         # The same for image edits; edited_image once they run out.
         self.edited_images: deque[bytes | int] = deque()
         self.edited_image = image_bytes("PNG", (64, 48), (240, 120, 180))
+        # Models each text AI provider's fake lists.
+        self.provider_models: dict[str, list[str]] = {
+            "openai": ["gpt-4.1-mini", "gpt-image-1"], "anthropic": ["claude-sonnet-5-5", "claude-haiku-5-5"],
+            "gemini": ["gemini-2.5-flash", "gemini-2.5-flash-image"]}
+        # Polls a Flux task answers Pending before it is Ready.
+        self.flux_pending = 1
+        self._flux_polls: dict[str, int] = {}
         self._failures: list[tuple[str, Callable[[Call], requests.Response]]] = []
 
     # -- scripting ------------------------------------------------------------------------------------------------
@@ -258,21 +276,117 @@ class FakeUpstream:
             fields = str((kwargs.get("params") or {}).get("fields", ""))
             return "meta.container" if "status_code" in fields else "meta.object"
         if host == BLOB_API_HOST:
-            return "blob.put"
+            return "blob.list" if method == "GET" else "blob.put"
         if host == BLOB_PUBLIC_HOST:
             return "blob.get"
         if host == CLOUDINARY_HOST:
             return "media.upload"
         if host == POLLINATIONS_HOST:
+            if path == "/image/models":
+                return "pollinations.models"
             return "pollinations.edit" if path == "/v1/images/edits" else "pollinations"
+        if host == OPENAI_HOST:
+            return {"/v1/chat/completions": "openai.chat", "/v1/models": "openai.models",
+                    "/v1/images/generations": "openai.images", "/v1/images/edits": "openai.edit"}.get(path, f"openai.{path}")
+        if host == ANTHROPIC_HOST:
+            return "anthropic.models" if path.startswith("/v1/models") else "anthropic.messages"
+        if host == GEMINI_HOST:
+            if path.endswith(":generateContent"):
+                return "gemini.image" if "image" in path else "gemini.generate"
+            return "gemini.models" if path.endswith("/models") else "gemini.model"
+        if host == AZURE_HOST:
+            return "azure.chat"
+        if host == STABILITY_HOST:
+            return "stability.account" if path == "/v1/user/account" else "stability.generate"
+        if host == BFL_HOST:
+            if path == "/v1/credits":
+                return "bfl.credits"
+            return "bfl.poll" if path == "/v1/get_result" else "bfl.submit"
+        if host == BFL_DELIVERY_HOST:
+            return "bfl.download"
         return f"unknown.{host}"
 
+    def chat_reply(self) -> str:
+        return self.groq_replies.popleft() if self.groq_replies else json.dumps(DEFAULT_REPLY)
+
+    @staticmethod
+    def key_of(call: Call) -> str:
+        """The API key a call carries, however its provider sends it."""
+        headers = call.kwargs.get("headers") or {}
+        for name in ("x-api-key", "x-goog-api-key", "api-key", "x-key"):
+            if headers.get(name):
+                return str(headers[name])
+        return str(headers.get("Authorization", "")).removeprefix("Bearer ")
+
+    def providers(self, call: Call) -> requests.Response | None:
+        """The text and image AI providers added with Credentials & Integrations."""
+        op, url = call.op, call.url
+        family = op.split(".")[0]
+        if family in ("openai", "anthropic", "gemini", "azure", "stability", "bfl") and op != "bfl.download" \
+                and self.key_of(call) == BAD_KEY:
+            return response(401, {"error": {"message": "Invalid API key"}}, url=url)
+        if op in ("openai.chat", "azure.chat"):
+            return response(200, {"choices": [{"message": {"role": "assistant", "content": self.chat_reply()}}]}, url=url)
+        if op in ("openai.models", "anthropic.models"):
+            return response(200, {"data": [{"id": m} for m in self.provider_models[family]]}, url=url)
+        if op == "anthropic.messages":
+            return response(200, {"type": "message", "content": [{"type": "text", "text": self.chat_reply()}]}, url=url)
+        if op == "gemini.generate":
+            return response(200, {"candidates": [{"content": {"role": "model", "parts": [{"text": self.chat_reply()}]}}]},
+                            url=url)
+        if op == "gemini.models":
+            return response(200, {"models": [{"name": f"models/{m}", "supportedGenerationMethods": ["generateContent"]}
+                                             for m in self.provider_models["gemini"]]}, url=url)
+        if op == "gemini.model":
+            return response(200, {"name": urlparse(url).path.split("/v1beta/")[-1]}, url=url)
+        if op == "gemini.image":
+            image = self.edited_image if "inline_data" in json.dumps(call.json) else self.generated_image
+            return response(200, {"candidates": [{"content": {"parts": [
+                {"text": "Here it is."}, {"inlineData": {"mimeType": "image/png", "data": base64.b64encode(image).decode()}}]}}]},
+                url=url)
+        if op in ("openai.images", "openai.edit"):
+            image = self.edited_image if op == "openai.edit" else self.generated_image
+            return response(200, {"created": 1, "data": [{"b64_json": base64.b64encode(image).decode()}]}, url=url)
+        if op == "stability.generate":
+            image = self.edited_image if "image" in (call.kwargs.get("files") or {}) else self.generated_image
+            return response(200, content=image, headers={"Content-Type": "image/png"}, url=url)
+        if op == "stability.account":
+            return response(200, {"id": "user-1", "organizations": []}, url=url)
+        if op == "bfl.credits":
+            return response(200, {"credits": 42.5}, url=url)
+        if op == "bfl.submit":
+            task = f"task{len(self._flux_polls) + 1}"
+            self._flux_polls[task] = 0
+            kind = "edit" if (call.json or {}).get("input_image") else "new"
+            return response(200, {"id": task, "polling_url": f"https://{BFL_HOST}/v1/get_result?id={task}&kind={kind}"},
+                            url=url)
+        if op == "bfl.poll":
+            query = parse_qs(urlparse(url).query)
+            task, kind = query["id"][0], query["kind"][0]
+            self._flux_polls[task] += 1
+            if self._flux_polls[task] <= self.flux_pending:
+                return response(200, {"id": task, "status": "Pending"}, url=url)
+            return response(200, {"id": task, "status": "Ready",
+                                  "result": {"sample": f"https://{BFL_DELIVERY_HOST}/{task}/{kind}.png?sig=abc"}}, url=url)
+        if op == "bfl.download":
+            image = self.edited_image if "/edit.png" in url else self.generated_image
+            return response(200, content=image, headers={"Content-Type": "image/png"}, url=url)
+        if op == "pollinations.models":
+            return response(200, [{"name": "flux", "supported_endpoints": ["/image"]},
+                                  {"name": "kontext", "supported_endpoints": ["/image", "/v1/images/edits"]},
+                                  {"name": "nanobanana", "supported_endpoints": ["/image", "/v1/images/edits"]}], url=url)
+        if op == "blob.list":
+            return response(200, {"blobs": [], "hasMore": False}, url=url)
+        return None
+
     def dispatch(self, call: Call) -> requests.Response:
+        answer = self.providers(call)
+        if answer is not None:
+            return answer
         if call.op == "groq.models":
             return response(200, {"object": "list", "data": [{"id": name} for name in self.groq_models]}, url=call.url)
         if call.op == "groq.chat":
-            reply = self.groq_replies.popleft() if self.groq_replies else json.dumps(DEFAULT_REPLY)
-            return response(200, {"choices": [{"message": {"role": "assistant", "content": reply}}]}, url=call.url)
+            return response(200, {"choices": [{"message": {"role": "assistant", "content": self.chat_reply()}}]}, url=call.url)
         if call.op.startswith("meta."):
             params = call.kwargs.get("params") or call.kwargs.get("data") or {}
             status, data = self.meta.handle(call.method, urlparse(call.url).path, dict(params))

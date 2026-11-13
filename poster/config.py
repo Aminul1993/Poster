@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -89,6 +90,16 @@ class _Env:
     def items(self, name: str) -> tuple[str, ...]:
         return tuple(dict.fromkeys(item.strip() for item in self.text(name).split(",") if item.strip()))
 
+    def matching(self, pattern: re.Pattern[str]) -> tuple[tuple[str, str], ...]:
+        """Every non-empty variable whose name matches ``pattern``, sorted by name."""
+        return tuple(sorted((key, value.strip()) for key, value in self.values.items() if pattern.fullmatch(key) and value.strip()))
+
+
+# Variables the AI and image providers added with Credentials & Integrations may fall back to
+# (OPENAI_API_KEY, ANTHROPIC_API_KEY, TEXT_AI_PROVIDER, ...). Groq, Pollinations, the media host and Meta keep
+# their own, older variables, which Config reads by name.
+PROVIDER_ENV_RE = re.compile(r"(TEXT_AI|IMAGE_AI|OPENAI|ANTHROPIC|GEMINI|AZURE_OPENAI|STABILITY|BFL)_[A-Z0-9_]+")
+
 
 @dataclass(frozen=True)
 class Config:
@@ -105,6 +116,10 @@ class Config:
     meta_graph_version: str = "v23.0"
     # With the app secret, every Graph API call carries an appsecret_proof.
     meta_app_secret: str = ""
+    # The Meta app the token belongs to (shown in Credentials & Integrations; the Graph API calls do not need it).
+    meta_app_id: str = ""
+    # The Facebook Pages Poster may post to (and their Instagram accounts); empty allows every Page the token manages.
+    meta_page_ids: tuple[str, ...] = ()
     # Postgres URL for the post queue; without one (local runs only), a SQLite file next to app.py.
     database_url: str = ""
     # Bearer token the scheduler sends to /api/publish/due.
@@ -118,6 +133,14 @@ class Config:
     pollinations_api_key: str = ""
     # The model that changes an uploaded image as described (see API["image_gen"]["edit_url"]).
     pollinations_edit_model: str = "kontext"
+    # Fernet key(s) that encrypt the credentials saved in Credentials & Integrations; comma-separated to rotate
+    # (the first encrypts, every one decrypts). Without it, credentials come from the environment only.
+    settings_encryption_key: str = ""
+    # Optional second password, for Credentials & Integrations only. Without it, whoever may use the dashboard
+    # (POSTER_PASSWORD, or a local address) administers it.
+    admin_password: str = ""
+    # Provider variables (see PROVIDER_ENV_RE), as (name, value) pairs.
+    provider_env: tuple[tuple[str, str], ...] = ()
     groq_timeout: int = 120
     meta_timeout: int = 30
     media_timeout: int = 120
@@ -132,6 +155,10 @@ class Config:
     request_budget: int = 0
     on_vercel: bool = False
     max_upload_bytes: int = 20 * 1024 * 1024
+
+    def env_value(self, name: str) -> str:
+        """A provider variable (see PROVIDER_ENV_RE), or ""."""
+        return dict(self.provider_env).get(name, "")
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None, *, env_file: Path | None = ENV_FILE) -> Config:
@@ -155,6 +182,8 @@ class Config:
             meta_graph_url=env.text("META_GRAPH_URL", "https://graph.facebook.com"),
             meta_graph_version=env.text("META_GRAPH_VERSION", "v23.0"),
             meta_app_secret=env.text("META_APP_SECRET"),
+            meta_app_id=env.text("META_APP_ID"),
+            meta_page_ids=env.items("META_PAGE_IDS"),
             # Vercel's Supabase and Neon integrations set POSTGRES_URL (the pooled connection).
             database_url=env.text("DATABASE_URL") or env.text("POSTGRES_URL"),
             cron_secret=env.text("CRON_SECRET"),
@@ -166,6 +195,9 @@ class Config:
             public_base_url=env.text("PUBLIC_BASE_URL"),
             pollinations_api_key=env.text("POLLINATIONS_API_KEY"),
             pollinations_edit_model=env.text("POLLINATIONS_EDIT_MODEL", "kontext"),
+            settings_encryption_key=env.text("SETTINGS_ENCRYPTION_KEY"),
+            admin_password=env.text("POSTER_ADMIN_PASSWORD"),
+            provider_env=env.matching(PROVIDER_ENV_RE),
             groq_timeout=env.number("GROQ_TIMEOUT", 120, 10, 600),
             meta_timeout=env.number("META_TIMEOUT", 30, 5, 120),
             media_timeout=env.number("MEDIA_TIMEOUT", 120, 10, 600),
@@ -262,6 +294,36 @@ API: dict[str, Any] = {
         "thumbnail_size": (400, 400),
         "thumbnail_quality": 60,
         "thumbnail_speed": 6,
+    },
+    "text_ai": {
+        # Default API addresses; each provider's settings may point elsewhere (a proxy, another region).
+        "openai_url": "https://api.openai.com/v1",
+        "anthropic_url": "https://api.anthropic.com/v1",
+        "anthropic_version": "2023-06-01",
+        "gemini_url": "https://generativelanguage.googleapis.com/v1beta",
+        "azure_api_version": "2024-10-21",
+        # Longest reply asked for (the post's JSON is far shorter); Anthropic requires a limit.
+        "max_tokens": 2048,
+        "test_timeout": 20,
+    },
+    "image_ai": {
+        "openai_url": "https://api.openai.com/v1",
+        "stability_url": "https://api.stability.ai",
+        "bfl_url": "https://api.bfl.ai",
+        "gemini_url": "https://generativelanguage.googleapis.com/v1beta",
+        # Flux (Black Forest Labs) renders in the background: Poster polls for the result this often.
+        "poll_seconds": 1.5,
+        "test_timeout": 20,
+        # How much image-to-image edits (Stability) may depart from the source image: 0 keeps it, 1 ignores it.
+        "edit_strength": 0.65,
+    },
+    "settings": {
+        # Seconds a server process reuses the integration settings it read before reading them again. Saving
+        # in this process takes effect at once; other processes (other Vercel instances) follow within this time.
+        "cache_seconds": 5,
+        # The kinds of integration Credentials & Integrations manages.
+        "types": ("text_ai", "image_ai", "storage", "meta"),
+        "max_value_chars": 4096,
     },
     "image_gen": {
         "url": "https://gen.pollinations.ai/image",

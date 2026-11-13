@@ -11,8 +11,9 @@ export class ApiError extends Error {
    *   fromServer: the Poster server classified this error (after its own retries)
    *   uncertain: the request failed, but may still have taken effect (a post may have been queued)
    *   retries: retries the server performed before giving up
+   *   admin: Credentials & Integrations refused the request for want of the administrator password
    */
-  constructor(message, { kind = 'unknown', status = 0, service = '', details = '', hint = '', fromServer = false, uncertain = false, retries = [], cause } = {}) {
+  constructor(message, { kind = 'unknown', status = 0, service = '', details = '', hint = '', fromServer = false, uncertain = false, retries = [], admin = false, cause } = {}) {
     super(message);
     this.name = 'ApiError';
     this.kind = kind;
@@ -23,6 +24,7 @@ export class ApiError extends Error {
     this.fromServer = fromServer;
     this.uncertain = uncertain;
     this.retries = retries;
+    this.admin = admin;
     if (cause !== undefined) this.cause = cause;
   }
 

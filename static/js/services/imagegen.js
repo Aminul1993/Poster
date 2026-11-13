@@ -39,11 +39,14 @@ export class ImageGenService {
   /** @returns {boolean} whether generateImage() can run */
   get available() { return SERVER.imageGen.configured; }
 
-  /** @throws {ApiError} kind "config" when the server has no Pollinations key */
+  /** @returns {boolean} whether editImage() can run: the active image provider edits images */
+  get canEdit() { return this.available && SERVER.imageGen.canEdit !== false; }
+
+  /** @throws {ApiError} kind "config" when the server has no image AI provider set up */
   assertConfigured() {
     if (!this.available) {
       throw new ApiError(`Image generation is not set up on the server: ${SERVER.imageGen.problem}`, {
-        kind: 'config', service: 'Pollinations', hint: 'Add POLLINATIONS_API_KEY to the .env file next to app.py and restart Poster.'
+        kind: 'config', service: SERVER.imageGen.label, hint: 'Set up an image AI provider in Settings → Credentials & Integrations.'
       });
     }
   }
@@ -59,7 +62,7 @@ export class ImageGenService {
   async generateImage(prompt, aspect, { signal, onRetry, number = 0 } = {}) {
     this.assertConfigured();
     const data = await this.api.callWithRetry(API_CONFIG.routes.imageGenerate, {
-      json: { prompt, aspect }, timeoutMs: API_CONFIG.timeouts.imageGenMs, signal, service: 'Pollinations', onRetry
+      json: { prompt, aspect }, timeoutMs: API_CONFIG.timeouts.imageGenMs, signal, service: SERVER.imageGen.label, onRetry
     });
     return generatedImageFile(ImageGenService.imageBytes(data), prompt, data.mimeType, 'ai', number);
   }
@@ -76,9 +79,12 @@ export class ImageGenService {
    */
   async editImage(file, prompt, { signal, onRetry, number = 0 } = {}) {
     this.assertConfigured();
+    if (!this.canEdit) {
+      throw new ApiError(`${SERVER.imageGen.label} cannot edit images.`, { kind: 'config', service: SERVER.imageGen.label, hint: 'Choose another image provider in Settings → Credentials & Integrations.' });
+    }
     const image = await encodeScaledJpeg(file, LIMITS.editMaxEdge, 0.9);
     const data = await this.api.callWithRetry(API_CONFIG.routes.imageEdit, {
-      json: { prompt, image }, timeoutMs: API_CONFIG.timeouts.imageGenMs, signal, service: 'Pollinations', onRetry
+      json: { prompt, image }, timeoutMs: API_CONFIG.timeouts.imageGenMs, signal, service: SERVER.imageGen.label, onRetry
     });
     return generatedImageFile(ImageGenService.imageBytes(data), prompt, data.mimeType, 'ai-edit', number);
   }
@@ -90,7 +96,7 @@ export class ImageGenService {
    */
   static imageBytes(data) {
     if (typeof data.image !== 'string' || !LIMITS.allowedTypes.includes(data.mimeType)) {
-      throw new ApiError('The Poster server returned no image.', { kind: 'parse', service: 'Pollinations' });
+      throw new ApiError('The Poster server returned no image.', { kind: 'parse', service: SERVER.imageGen.label });
     }
     const binary = atob(data.image);
     const bytes = new Uint8Array(binary.length);

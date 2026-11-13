@@ -1060,3 +1060,36 @@ kbd {
   .bulk-tag, kbd { border: 1px solid CanvasText; }
   .bulk-tag:has(input:checked) { outline: 2px solid Highlight; }
 }
+
+/* Settings → Credentials & Integrations: a wider drawer over Settings, one form per integration. */
+.drawer-wide { width: min(700px, 100%); }
+.int-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.int-head h3 { margin: 0; }
+.int-fields { display: flex; flex-direction: column; gap: 14px; }
+.int-fields:empty { display: none; }
+.int-section .field .hint a { color: var(--accent-text); font-weight: 600; }
+.int-section [data-role="provider-note"] a { color: var(--accent-text); font-weight: 600; margin-left: 2px; }
+.int-section .row-actions { gap: 8px; }
+.int-section .row-actions .btn-primary { margin-left: auto; }
+.int-times { margin-top: -4px; }
+.int-times:empty, .int-notice[hidden] { display: none; }
+.drawer-body > .int-notice { margin-top: 18px; }
+.int-pages { display: flex; flex-direction: column; gap: 14px; }
+.int-pages[hidden] { display: none; }
+.int-accounts { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text-2); display: grid; gap: 4px; }
+.int-accounts .hint { list-style: none; margin-left: -18px; }
+.int-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+.int-health { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.int-health th, .int-health td { padding: 9px 12px; text-align: left; border-top: 1px solid var(--border); vertical-align: middle; }
+.int-health thead th { border-top: 0; background: var(--surface-2); color: var(--muted); font-weight: 600; font-size: 12px; }
+.int-health tbody th { font-weight: 600; color: var(--text); }
+.int-health td { color: var(--text-2); }
+.int-health tbody:empty::after { content: "Loading…"; display: block; padding: 10px 12px; color: var(--muted); }
+#integrations-sections[hidden] { display: none; }
+@media (max-width: 560px) {
+  .int-section .row-actions .btn-primary { margin-left: 0; }
+  .int-health th, .int-health td { padding: 8px; }
+}
+@media (forced-colors: active) {
+  .int-table-wrap { border: 1px solid CanvasText; }
+}

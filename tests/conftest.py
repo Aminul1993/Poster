@@ -45,6 +45,13 @@ BASE_ENV: dict[str, str] = {
     "MEDIA_UPLOAD_PRESET": "",
     "POLLINATIONS_API_KEY": "test-pollinations-key",
     "POLLINATIONS_EDIT_MODEL": "",
+    # Credentials & Integrations. Without a key, credentials come from the environment alone (as before it existed).
+    "SETTINGS_ENCRYPTION_KEY": "",
+    "POSTER_ADMIN_PASSWORD": "",
+    "META_APP_ID": "",
+    "META_PAGE_IDS": "",
+    "TEXT_AI_PROVIDER": "",
+    "IMAGE_AI_PROVIDER": "",
     "GROQ_TIMEOUT": "",
     "META_TIMEOUT": "",
     "MEDIA_TIMEOUT": "",
@@ -93,7 +100,7 @@ def fresh_database() -> None:
 
         from poster.store import postgres_dsn
         with psycopg.connect(postgres_dsn(TEST_DATABASE_URL), autocommit=True) as connection:
-            connection.execute("DROP TABLE IF EXISTS poster_posts, poster_state, poster_activity")
+            connection.execute("DROP TABLE IF EXISTS poster_posts, poster_state, poster_activity, poster_integration_settings")
 
 
 @pytest.fixture(autouse=True)

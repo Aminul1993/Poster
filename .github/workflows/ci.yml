@@ -49,7 +49,7 @@ jobs:
       - name: Server tests (post queue on Postgres)
         env:
           POSTER_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
-        run: pytest tests/test_publisher.py tests/test_routes.py
+        run: pytest tests/test_publisher.py tests/test_routes.py tests/test_settings.py tests/test_providers.py
       - name: Browser tests
         run: |
           python -m playwright install --with-deps chromium

@@ -1,4 +1,5 @@
-/** GroqService: image analysis and copywriting through the Poster server. */
+/** GroqService: image analysis and copywriting through the Poster server, with whichever text AI provider is active there
+ * (named after Groq, the only one before providers could be switched). */
 import { API_CONFIG, SERVER } from '../config.js';
 import { ApiError, throwIfAborted } from '../errors.js';
 import { prepareAnalysisImage } from '../image.js';
@@ -26,8 +27,8 @@ export class GroqService {
   /** @throws {ApiError} kind "config" when the server has no Groq setup */
   assertConfigured() {
     if (!SERVER.groq.configured) {
-      throw new ApiError(`Groq is not set up on the server: ${SERVER.groq.problem}`, {
-        kind: 'config', service: 'Groq', hint: 'Add it to the .env file next to app.py and restart Poster.'
+      throw new ApiError(`${SERVER.groq.label} is not set up on the server: ${SERVER.groq.problem}`, {
+        kind: 'config', service: SERVER.groq.label, hint: 'Set it up in Settings → Credentials & Integrations.'
       });
     }
   }
@@ -40,6 +41,7 @@ export class GroqService {
   options(settings, item) {
     return {
       model: settings.model,
+      provider: settings.modelProvider,
       tone: settings.tone,
       language: item?.language || settings.language,
       extraInstructions: settings.extraInstructions,
@@ -57,7 +59,7 @@ export class GroqService {
     const s = settings ?? this.getSettings();
     this.assertConfigured();
     const data = await this.api.callWithRetry(API_CONFIG.routes.groqTest, {
-      json: this.options(s), timeoutMs: API_CONFIG.timeouts.testMs, signal, service: 'Groq', onRetry
+      json: this.options(s), timeoutMs: API_CONFIG.timeouts.testMs, signal, service: SERVER.groq.label, onRetry
     });
     return {
       models: Array.isArray(data.models) ? data.models.map(String) : [],
@@ -79,18 +81,18 @@ export class GroqService {
     try {
       image = await prepareAnalysisImage(item);
     } catch (error) {
-      throw new ApiError(`"${item.name}" could not be prepared for analysis: ${error.message}`, { kind: 'validation', service: 'Groq' });
+      throw new ApiError(`"${item.name}" could not be prepared for analysis: ${error.message}`, { kind: 'validation', service: SERVER.groq.label });
     }
     throwIfAborted(signal);
     const data = await this.api.callWithRetry(API_CONFIG.routes.groqGenerate, {
       json: { ...this.options(s, item), image, fileName: item.name },
       timeoutMs: API_CONFIG.timeouts.generateMs,
       signal,
-      service: 'Groq',
+      service: SERVER.groq.label,
       onRetry
     });
     if (!isPlainObject(data.content)) {
-      throw new ApiError('The Poster server returned no content.', { kind: 'parse', service: 'Groq' });
+      throw new ApiError('The Poster server returned no content.', { kind: 'parse', service: SERVER.groq.label });
     }
     // The server already validated the reply; normalising again guarantees the editor's exact shape.
     const result = this.validation.normalizeGeneratedContent(data.content, s);

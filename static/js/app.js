@@ -25,6 +25,7 @@ export const app = {
   /** @type {import('./store.js').ImageStore} */ store: null,
   /** @type {import('./scheduler.js').SchedulerService} */ scheduler: null,
   /** @type {import('./feed.js').PostsFeed} */ feed: null,
+  /** @type {import('./services/integrations.js').IntegrationsService} */ integrations: null,
   /** @type {import('./ui/controller.js').UIController} */ ui: null,
   /** @returns {import('./services/groq.js').GroqService} the service for the current mode */
   getGroq() { return this.settings.mode === 'demo' ? this.demoGroq : this.liveGroq; },
@@ -177,7 +178,8 @@ export function loadSettings() {
     return defaults;
   }
   app.settingsSource = 'storage';
-  return SettingsModel.normalize({ ...defaults, ...stored, channelIds: { ...defaults.channelIds, ...(isPlainObject(stored.channelIds) ? stored.channelIds : {}) } });
+  // Settings saved before the text AI provider could be switched chose a Groq model.
+  return SettingsModel.normalize({ ...defaults, ...stored, modelProvider: stored.modelProvider || 'groq', channelIds: { ...defaults.channelIds, ...(isPlainObject(stored.channelIds) ? stored.channelIds : {}) } });
 }
 
 /**

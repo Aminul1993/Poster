@@ -17,6 +17,9 @@ from poster.store import PostStore, Row
 
 log = logging.getLogger("poster")
 
+# IDs of the entries the server records itself; browsers may not send entries with such IDs.
+SERVER_ENTRY_PREFIX = "srv-"
+
 
 def stamp(value: datetime) -> str:
     """UTC to the millisecond, with a Z suffix (as JavaScript's toISOString writes it): every entry's time."""
@@ -42,7 +45,7 @@ class ActivityLog:
         """Adds an entry from the server itself. A database failure is only logged: recording must never stop
         the work it records."""
         rules = _rules()
-        entry = {"id": f"srv-{uuid.uuid4().hex}", "ts": stamp(datetime.now(UTC)), "level": level, "category": category,
+        entry = {"id": f"{SERVER_ENTRY_PREFIX}{uuid.uuid4().hex}", "ts": stamp(datetime.now(UTC)), "level": level, "category": category,
                  "message": truncate(message, rules["max_message_chars"]),
                  "details": truncate(details, rules["max_details_chars"]) if details else None}
         try:
@@ -60,8 +63,10 @@ class ActivityLog:
         rows = self.store.activity_page(chosen.get("levels", []), chosen.get("categories", []), offset, size + 1)
         return {"entries": [self.summary(row) for row in rows[:size]], "next": str(offset + size) if len(rows) > size else None}
 
-    def clear(self) -> dict[str, Any]:
-        return {"deleted": self.store.clear_activity()}
+    def clear(self, *, keep_audit: bool = False) -> dict[str, Any]:
+        """Deletes the entries; with ``keep_audit``, all but the server's record of changes to the integrations."""
+        return {"deleted": self.store.clear_activity(keep_prefix=f"{SERVER_ENTRY_PREFIX}%" if keep_audit else None,
+                                                     keep_category="settings")}
 
     @staticmethod
     def summary(row: Row) -> dict[str, Any]:

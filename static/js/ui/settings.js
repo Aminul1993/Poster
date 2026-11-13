@@ -197,11 +197,14 @@ export class SettingsView extends View {
    */
   renderServerInfo() {
     const row = (label, value, state = '') => el('div', {}, [el('dt', { text: label }), el('dd', { class: state ? `is-${state}` : '', text: value })]);
-    const note = (problem) => el('div', {}, [el('span', { class: 'server-note', text: `${problem} Set it in the .env file next to app.py, then restart Poster.` })]);
+    const note = (problem) => el('div', {}, [el('span', { class: 'server-note', text: `${problem} Set it up in Settings → Credentials & Integrations, or in the environment.` })]);
     const status = (service) => row('Status', service.configured ? 'Configured on the server' : 'Not configured', service.configured ? 'ok' : 'missing');
+    this.renderIntegrationsSummary();
     const o = SERVER.groq;
+    byId('set-groq-title-text').textContent = `Text AI · ${o.label || 'captions'}`;
     byId('groq-server-info').replaceChildren(...[
       status(o),
+      row('Provider', o.label || '—'),
       row('Endpoint', o.host || '—'),
       row('Default model', o.model || '—'),
       o.models?.length ? row('Allowed models', o.models.join(', ')) : null,
@@ -226,6 +229,48 @@ export class SettingsView extends View {
       m.host ? row('Host', m.host) : null,
       m.configured || !m.host ? null : note(m.problem)
     ].filter(Boolean));
+  }
+
+  /** One line per integration in the Settings drawer: its active provider, and whether it is ready. */
+  renderIntegrationsSummary() {
+    const line = (label, provider, configured) => el('div', {}, [
+      el('dt', { text: label }),
+      el('dd', { class: configured ? 'is-ok' : 'is-missing', text: `${provider} · ${configured ? 'ready' : 'not configured'}` })
+    ]);
+    const media = SERVER.media;
+    const problem = SERVER.integrations?.editable === false && SERVER.integrations.problem
+      ? el('div', {}, [el('span', { class: 'server-note', text: `${SERVER.integrations.problem} Credentials come from the environment until then.` })])
+      : null;
+    byId('integrations-summary').replaceChildren(...[
+      line('Text AI', SERVER.groq.label || 'Text AI', SERVER.groq.configured),
+      line('Image AI', SERVER.imageGen.label || 'Image AI', SERVER.imageGen.configured),
+      line('Blob storage', media.host || 'Media host', media.configured),
+      line('Facebook & Instagram', 'Meta', SERVER.social.metaConfigured ?? SERVER.social.configured),
+      problem
+    ].filter(Boolean));
+  }
+
+  /**
+   * After Credentials & Integrations changed a provider: the server's details again, and the model field
+   * follows the new provider's default unless the owner was editing it.
+   * @param {string} previousModel the model before the change
+   */
+  syncServer(previousModel) {
+    if (!byId('settings-dialog').open) return;
+    this.renderServerInfo();
+    const model = byId('set-model');
+    if (model.value === previousModel) model.value = this.settings.model;
+    model.placeholder = SERVER.groq.model || '';
+    // The snapshot follows the switch too, so the switch itself is not an unsaved change; the owner's edits still are.
+    try {
+      const base = JSON.parse(this.snapshot);
+      this.snapshot = JSON.stringify(SettingsModel.normalize({
+        ...base, modelProvider: this.settings.modelProvider, model: base.model === previousModel ? this.settings.model : base.model
+      }));
+    } catch {
+      this.snapshot = JSON.stringify(this.read().settings);
+    }
+    this.updateDirtyState();
   }
 
   /**
@@ -387,7 +432,7 @@ export class SettingsView extends View {
     const { settings } = this.read();
     const button = byId('test-groq');
     if (this.formMode() === 'demo') {
-      this.showTestResult('groq-test-result', 'info', 'Demo mode uses simulated AI, so no connection is needed. Switch the mode to Live to test your endpoint.');
+      this.showTestResult('groq-test-result', 'info', 'Demo mode uses simulated AI, so no connection is needed. Switch the mode to Live to test your provider.');
       return;
     }
     const check = this.validation.validateSettings(settings, { scope: 'groq', requireCredentials: true });
@@ -401,20 +446,20 @@ export class SettingsView extends View {
     try {
       const result = await this.app.liveGroq.testConnection({
         settings,
-        onRetry: ({ attempt, maxRetries, delayMs, error }) => this.notifier.log('warn', 'retry', `Groq test: retry ${attempt}/${maxRetries} in ${delayMs / 1000}s (${error.message})`)
+        onRetry: ({ attempt, maxRetries, delayMs, error }) => this.notifier.log('warn', 'retry', `${SERVER.groq.label} test: retry ${attempt}/${maxRetries} in ${delayMs / 1000}s (${error.message})`)
       });
       if (result.modelAvailable === false) {
         this.showTestResult('groq-test-result', 'error', `Connected to ${result.host}, but "${settings.model}" is not in its list of ${pluralize(result.models.length, 'model')}. Check the model name.`);
-        this.notifier.log('warn', 'settings', `Groq reachable, but model "${settings.model}" was not listed.`, result.models.slice(0, 20).join(', '));
+        this.notifier.log('warn', 'settings', `${SERVER.groq.label} reachable, but model "${settings.model}" was not listed.`, result.models.slice(0, 20).join(', '));
       } else {
         const detail = result.models.length ? `${pluralize(result.models.length, 'model')} available, including ${settings.model}.` : 'The model list is not available here; the first generation will confirm the model.';
         this.showTestResult('groq-test-result', 'ok', `Connected to ${result.host}. ${detail}`);
-        this.notifier.log('success', 'settings', `Groq connection test passed (${result.host}).`);
+        this.notifier.log('success', 'settings', `${SERVER.groq.label} connection test passed (${result.host}).`);
         if (settings.model === this.settings.model) { this.ui.health.groq = { state: 'ok' }; this.ui.renderHeader(); }
       }
     } catch (error) {
       this.showTestResult('groq-test-result', 'error', [error.message, error.hint].filter(Boolean).join(' '));
-      this.notifier.log('error', 'settings', `Groq connection test failed: ${error.message}`, error.hint || error.details || '');
+      this.notifier.log('error', 'settings', `${SERVER.groq.label} connection test failed: ${error.message}`, error.hint || error.details || '');
     } finally {
       this.setLoading(button, false);
     }

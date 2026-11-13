@@ -323,7 +323,7 @@ export class ValidationService {
 
     if (scope === 'all' || scope === 'groq') {
       if (live && !SERVER.groq.configured) {
-        errors.serverGroq = `Groq is not set up on the server: ${SERVER.groq.problem} Add it to the .env file next to app.py and restart Poster.`;
+        errors.serverGroq = `${SERVER.groq.label} is not set up on the server: ${SERVER.groq.problem} Set it up in Settings → Credentials & Integrations.`;
       }
       if (!s.model) errors.model = 'Enter a model name, for example qwen/qwen3.8-27b.';
       else if (!/^[\w.\-/:]{1,100}$/.test(s.model)) errors.model = 'Model names contain only letters, numbers and . - _ / : characters.';
@@ -332,7 +332,7 @@ export class ValidationService {
     }
 
     if ((scope === 'all' || scope === 'social') && live && !SERVER.social.configured) {
-      const message = `Facebook and Instagram are not set up on the server: ${SERVER.social.problem} Add it to the .env file next to app.py (on Vercel, to the project's environment variables) and restart Poster.`;
+      const message = `Facebook and Instagram are not set up on the server: ${SERVER.social.problem} Set them up in Settings → Credentials & Integrations.`;
       if (scope === 'social') errors.serverSocial = message;
       else warnings.push(`${message} Until then AI generation works, but scheduling does not.`);
     }

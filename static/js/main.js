@@ -9,7 +9,8 @@
  *   config, util, errors, time, settings  configuration and helpers
  *   storage, notify, validation, api       localStorage, notifications, checks, fetch
  *   activity                               the activity log, kept in the server's database
- *   services/groq, imagegen, social      the Poster server's /api routes
+ *   services/groq, imagegen, social,     the Poster server's /api routes
+ *   services/integrations                  (Credentials & Integrations: /api/settings)
  *   demo                                   simulated services for Demo mode
  *   store, scheduler, feed                 gallery state, bulk runs, the posts list
  *   ui/controller and ui/*                 one view per dashboard card
@@ -27,6 +28,7 @@ import { SchedulerService } from './scheduler.js';
 import { SocialService } from './services/social.js';
 import { ImageGenService } from './services/imagegen.js';
 import { GroqService } from './services/groq.js';
+import { IntegrationsService } from './services/integrations.js';
 import { StorageService } from './storage.js';
 import { ImageStore } from './store.js';
 import { UIController } from './ui/controller.js';
@@ -53,6 +55,7 @@ function bootstrap() {
   app.demoImageGen = new DemoImageGenService(deps);
   app.liveSocial = new SocialService(deps);
   app.demoSocial = new DemoSocialService(deps);
+  app.integrations = new IntegrationsService({ api: app.api });
   app.store = new ImageStore({ storage: app.storage });
   app.scheduler = new SchedulerService({
     storage: app.storage,

@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from flask import request
 
-from poster.activity import stamp
+from poster.activity import SERVER_ENTRY_PREFIX, stamp
 from poster.config import API, LANGUAGES, LIMITS, TONES, is_local_host
 from poster.errors import ServiceError, truncate
 from poster.imaging import sniff_image
@@ -210,6 +210,9 @@ def parse_activity_entries(value: Any) -> list[dict[str, Any]]:
         entry_id, level, category, message, details = (item.get(key) for key in ("id", "level", "category", "message", "details"))
         if not isinstance(entry_id, str) or not _ID_RE.fullmatch(entry_id):
             raise ServiceError("Log entry IDs contain only letters, numbers and . - _ : characters.", kind="validation")
+        if entry_id.startswith(SERVER_ENTRY_PREFIX):
+            # The server's own entries (the publisher, the settings audit) cannot be written by a browser.
+            raise ServiceError(f'Log entry IDs starting with "{SERVER_ENTRY_PREFIX}" are reserved for the server.', kind="validation")
         if level not in rules["levels"]:
             raise ServiceError(f'Log entry "level" must be one of: {", ".join(rules["levels"])}.', kind="validation")
         if not isinstance(category, str) or not _CATEGORY_RE.fullmatch(category):

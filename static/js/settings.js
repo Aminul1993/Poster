@@ -30,6 +30,8 @@ export const SettingsModel = {
       version: 3,
       mode: SERVER.mode === 'live' ? 'live' : 'demo',
       model: String(SERVER.groq.model || 'qwen/qwen3.8-27b').trim(),
+      /** The text AI provider the model was chosen for: another provider's model means nothing to the active one. */
+      modelProvider: String(SERVER.groq.provider || 'groq'),
       aiConcurrency: 2,
       tone: 'friendly',
       language: 'en',
@@ -46,7 +48,9 @@ export const SettingsModel = {
 
   /**
    * Coerces an arbitrary object into a complete, well-typed settings object.
-   * Unknown keys are dropped; invalid types fall back to defaults.
+   * Unknown keys are dropped; invalid types fall back to defaults. A model chosen for another text AI provider
+   * than the active one (`modelProvider`) gives way to the active provider's default model; without
+   * `modelProvider` (a form, an import) the model is taken as chosen for the active provider.
    * @param {object} input
    * @returns {object}
    */
@@ -61,10 +65,12 @@ export const SettingsModel = {
     const bool = (key) => (typeof src[key] === 'boolean' ? src[key] : d[key]);
     const ids = (list, fallback) => (Array.isArray(list) ? [...new Set(list.filter((v) => typeof v === 'string' && v.trim()).map((v) => v.trim()))] : fallback);
     const channelSrc = isPlainObject(src.channelIds) ? src.channelIds : {};
+    const chosenFor = typeof src.modelProvider === 'string' && src.modelProvider ? src.modelProvider : d.modelProvider;
     return {
       version: 3,
       mode: src.mode === 'live' || src.mode === 'demo' ? src.mode : d.mode,
-      model: str('model') || d.model,
+      model: (chosenFor === d.modelProvider && str('model')) || d.model,
+      modelProvider: d.modelProvider,
       aiConcurrency: int('aiConcurrency'),
       tone: Object.prototype.hasOwnProperty.call(TONES, src.tone) ? src.tone : d.tone,
       language: Object.prototype.hasOwnProperty.call(LANGUAGES, src.language) ? src.language : d.language,

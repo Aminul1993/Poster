@@ -156,7 +156,7 @@ export class ImageEditView extends View {
     const batch = progress && progress.total > 1;
 
     const button = byId('imgedit-button');
-    button.disabled = generating || full || !service.available;
+    button.disabled = generating || full || !service.canEdit;
     button.classList.toggle('is-loading', generating);
     byId('imgedit-button-label').textContent = generating
       ? (batch ? `Generating ${progress.done + 1} of ${progress.total}…` : 'Generating…')
@@ -164,14 +164,15 @@ export class ImageEditView extends View {
     byId('imgedit-cancel').hidden = !generating;
 
     const status = byId('imgedit-status');
-    status.classList.toggle('is-warning', !generating && (full || !service.available));
+    status.classList.toggle('is-warning', !generating && (full || !service.canEdit));
     if (generating && batch) status.textContent = `Changing copy ${progress.done + 1} of ${progress.total}. Each usually takes 10–40 seconds and joins the gallery when it is ready.`;
     else if (generating) status.textContent = 'Changing your image. This usually takes 10–40 seconds.';
-    else if (!service.available) status.textContent = `Image editing is not set up on the server: ${SERVER.imageGen.problem} Get a free key at enter.pollinations.ai, add it to the .env file next to app.py and restart Poster.`;
+    else if (!service.available) status.textContent = `Image editing is not set up on the server: ${SERVER.imageGen.problem} Set up an image AI provider in Settings → Credentials & Integrations.`;
+    else if (!service.canEdit) status.textContent = `${SERVER.imageGen.label} cannot edit images. Choose another image provider in Settings → Credentials & Integrations.`;
     else if (full) status.textContent = `The gallery is full (${LIMITS.maxImages} images). Remove an image to add an edited one.`;
     else if (this.ui.prefs.editCount > count) status.textContent = `The gallery has room for ${pluralize(count, 'more image')}, so ${count === 1 ? 'one is' : `${count} are`} made.`;
     else if (demo) status.textContent = 'Demo mode tints the photo and writes your description on it instead of calling the image AI.';
-    else status.textContent = `Pollinations (${SERVER.imageGen.editModel || 'kontext'}) makes ${count > 1 ? `${count} different updated copies` : 'an updated copy'} and adds ${count > 1 ? 'them' : 'it'} to the gallery; your photo stays as it is. Each edit is billed.`;
+    else status.textContent = `${SERVER.imageGen.label}${SERVER.imageGen.editModel ? ` (${SERVER.imageGen.editModel})` : ''} makes ${count > 1 ? `${count} different updated copies` : 'an updated copy'} and adds ${count > 1 ? 'them' : 'it'} to the gallery; your photo stays as it is. Each edit is billed.`;
   }
 
   /** @param {string} message empty hides the error @param {{invalid?: boolean}} [options] invalid marks the description field */

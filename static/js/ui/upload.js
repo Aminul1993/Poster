@@ -311,11 +311,11 @@ export class UploadView extends View {
     status.classList.toggle('is-warning', !generating && (full || !service.available));
     if (generating && progress && progress.total > 1) status.textContent = `Creating image ${progress.done + 1} of ${progress.total}. Each usually takes 5–30 seconds and joins the gallery when it is ready.`;
     else if (generating) status.textContent = 'Creating your image. This usually takes 5–30 seconds.';
-    else if (!service.available) status.textContent = `Image generation is not set up on the server: ${SERVER.imageGen.problem} Get a free key at enter.pollinations.ai, add it to the .env file next to app.py and restart Poster.`;
+    else if (!service.available) status.textContent = `Image generation is not set up on the server: ${SERVER.imageGen.problem} Set up an image AI provider in Settings → Credentials & Integrations.`;
     else if (full) status.textContent = `The gallery is full (${LIMITS.maxImages} images). Remove an image to generate another.`;
     else if (this.ui.prefs.imageCount > count) status.textContent = `The gallery has room for ${pluralize(count, 'more image')}, so ${count === 1 ? 'one is' : `${count} are`} made.`;
     else if (demo) status.textContent = `Demo mode draws ${count > 1 ? 'placeholders' : 'a placeholder'} instead of calling the image AI.`;
-    else status.textContent = `Images are created by Pollinations and added to the gallery like uploads. Each one is different${count > 1 ? ', from the same description' : ''}.`;
+    else status.textContent = `Images are created by ${SERVER.imageGen.label} and added to the gallery like uploads. Each one is different${count > 1 ? ', from the same description' : ''}.`;
     this.renderCollapse();
   }
 

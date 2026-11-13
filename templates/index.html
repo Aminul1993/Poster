@@ -92,7 +92,7 @@
       <svg class="icon"><use href="#i-play"/></svg><span id="mode-badge-label">Demo mode</span>
     </button>
     <span class="pill" id="pill-groq" data-state="demo" role="status">
-      <span class="dot" aria-hidden="true"></span><span class="pill-label">Groq</span><span class="pill-detail" id="pill-groq-detail">Demo</span>
+      <span class="dot" aria-hidden="true"></span><span class="pill-label" id="pill-groq-label">Text AI</span><span class="pill-detail" id="pill-groq-detail">Demo</span>
     </span>
     <span class="pill" id="pill-social" data-state="demo" role="status">
       <span class="dot" aria-hidden="true"></span><span class="pill-label">Facebook &amp; Instagram</span><span class="pill-detail" id="pill-social-detail">Demo</span>
@@ -612,9 +612,18 @@
         </div>
       </section>
 
+      <section class="settings-section" id="settings-integrations" aria-labelledby="set-integrations-title">
+        <h3 id="set-integrations-title"><svg class="icon"><use href="#i-key"/></svg>Credentials &amp; Integrations</h3>
+        <p class="section-desc">API keys and providers for text AI, image AI, blob storage and Facebook &amp; Instagram. They are kept encrypted on the server, and a switch takes effect at once, without a restart.</p>
+        <dl class="server-info" id="integrations-summary" aria-label="Active integrations"></dl>
+        <div class="row-actions">
+          <button type="button" class="btn btn-sm" id="open-integrations" aria-haspopup="dialog"><svg class="icon"><use href="#i-key"/></svg>Manage credentials &amp; integrations</button>
+        </div>
+      </section>
+
       <section class="settings-section" id="settings-groq" aria-labelledby="set-groq-title">
-        <h3 id="set-groq-title"><svg class="icon"><use href="#i-cpu"/></svg>Groq · AI generation</h3>
-        <p class="section-desc">Each image is shrunk in your browser and sent to the Poster server, which asks Groq to write the post. The Groq address and key are set on the server.</p>
+        <h3 id="set-groq-title"><svg class="icon"><use href="#i-cpu"/></svg><span id="set-groq-title-text">Text AI · captions</span></h3>
+        <p class="section-desc">Each image is shrunk in your browser and sent to the Poster server, which asks the text AI provider to write the post. The provider and its key are set in Credentials &amp; Integrations.</p>
         <dl class="server-info" id="groq-server-info" aria-label="Groq server configuration"></dl>
         <div class="field-row">
           <div class="field">
@@ -737,6 +746,148 @@
       </div>
     </footer>
   </form>
+</dialog>
+
+<!-- Settings → Credentials & Integrations -->
+<dialog class="drawer drawer-wide" id="integrations-dialog" aria-labelledby="integrations-title" aria-describedby="integrations-sub">
+  <div class="drawer-form">
+    <header class="drawer-header">
+      <div>
+        <h2 id="integrations-title">Credentials &amp; Integrations</h2>
+        <p class="card-sub" id="integrations-sub">Settings › Credentials &amp; Integrations</p>
+      </div>
+      <button type="button" class="btn btn-ghost btn-icon" id="close-integrations" aria-label="Close Credentials &amp; Integrations"><svg class="icon"><use href="#i-x"/></svg></button>
+    </header>
+
+    <div class="drawer-body" id="integrations-body">
+      <div class="inline-alert is-warning int-notice" id="integrations-notice" role="status" hidden>
+        <svg class="icon"><use href="#i-alert"/></svg>
+        <div><strong id="integrations-notice-title"></strong><div class="sub" id="integrations-notice-text"></div></div>
+      </div>
+
+      <form class="settings-section" id="integrations-admin" aria-labelledby="integrations-admin-title" novalidate hidden>
+        <h3 id="integrations-admin-title"><svg class="icon"><use href="#i-lock"/></svg>Administrator password</h3>
+        <p class="section-desc">Credentials &amp; Integrations needs the administrator password (POSTER_ADMIN_PASSWORD). It is kept in this tab's memory only.</p>
+        <div class="input-group">
+          <input class="input" id="integrations-admin-password" type="password" autocomplete="current-password" aria-label="Administrator password" aria-describedby="integrations-admin-password-error">
+          <button type="submit" class="btn btn-primary" id="integrations-admin-unlock"><svg class="icon"><use href="#i-key"/></svg>Unlock</button>
+        </div>
+        <p class="error-text" id="integrations-admin-password-error" hidden></p>
+      </form>
+
+      <section class="settings-section" id="integrations-health-section" aria-labelledby="integrations-health-title">
+        <div class="int-head">
+          <h3 id="integrations-health-title"><svg class="icon"><use href="#i-activity"/></svg>Health</h3>
+          <button type="button" class="btn btn-ghost btn-sm" id="integrations-refresh"><svg class="icon"><use href="#i-refresh"/></svg>Refresh</button>
+        </div>
+        <div class="int-table-wrap">
+          <table class="int-health" id="integrations-health">
+            <thead><tr><th scope="col">Service</th><th scope="col">Provider</th><th scope="col">Status</th><th scope="col">Last tested</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <div id="integrations-sections" hidden>
+      <form class="settings-section int-section" id="int-text-ai" data-type="text_ai" aria-labelledby="int-text-ai-title" novalidate>
+        <div class="int-head">
+          <h3 id="int-text-ai-title"><svg class="icon"><use href="#i-cpu"/></svg>Text AI</h3>
+          <span class="chip chip-neutral" data-role="badge">Not tested</span>
+        </div>
+        <p class="section-desc">Writes each post's captions, hashtags, category and engagement score from its image.</p>
+        <div class="field" data-role="provider-field">
+          <label class="label" for="int-text-ai-provider">Provider</label>
+          <select class="select" id="int-text-ai-provider" data-role="provider" aria-describedby="int-text-ai-provider-note"></select>
+          <p class="hint" id="int-text-ai-provider-note" data-role="provider-note"></p>
+        </div>
+        <div class="int-fields" data-role="fields"></div>
+        <div class="row-actions">
+          <button type="button" class="btn btn-sm" data-action="models"><svg class="icon"><use href="#i-list"/></svg>Fetch models</button>
+          <button type="button" class="btn btn-sm" data-action="test"><svg class="icon"><use href="#i-link"/></svg>Test connection</button>
+          <button type="submit" class="btn btn-sm btn-primary" data-action="save"><svg class="icon"><use href="#i-check"/></svg>Save</button>
+        </div>
+        <div class="test-result" data-role="result" role="status" hidden></div>
+        <p class="hint int-times" data-role="times"></p>
+      </form>
+      <form class="settings-section int-section" id="int-image-ai" data-type="image_ai" aria-labelledby="int-image-ai-title" novalidate>
+        <div class="int-head">
+          <h3 id="int-image-ai-title"><svg class="icon"><use href="#i-sparkles"/></svg>Image AI</h3>
+          <span class="chip chip-neutral" data-role="badge">Not tested</span>
+        </div>
+        <p class="section-desc">Generate with AI and Edit with AI, in the Add images card.</p>
+        <div class="field" data-role="provider-field">
+          <label class="label" for="int-image-ai-provider">Provider</label>
+          <select class="select" id="int-image-ai-provider" data-role="provider" aria-describedby="int-image-ai-provider-note"></select>
+          <p class="hint" id="int-image-ai-provider-note" data-role="provider-note"></p>
+        </div>
+        <div class="int-fields" data-role="fields"></div>
+        <div class="row-actions">
+          <button type="button" class="btn btn-sm" data-action="test"><svg class="icon"><use href="#i-link"/></svg>Test connection</button>
+          <button type="submit" class="btn btn-sm btn-primary" data-action="save"><svg class="icon"><use href="#i-check"/></svg>Save</button>
+        </div>
+        <div class="test-result" data-role="result" role="status" hidden></div>
+        <p class="hint int-times" data-role="times"></p>
+      </form>
+      <form class="settings-section int-section" id="int-storage" data-type="storage" aria-labelledby="int-storage-title" novalidate>
+        <div class="int-head">
+          <h3 id="int-storage-title"><svg class="icon"><use href="#i-database"/></svg>Blob storage</h3>
+          <span class="chip chip-neutral" data-role="badge">Not tested</span>
+        </div>
+        <p class="section-desc">Gives Facebook and Instagram a public URL for each image, which they fetch when the post is published.</p>
+        <div class="field" data-role="provider-field">
+          <label class="label" for="int-storage-provider">Provider name</label>
+          <select class="select" id="int-storage-provider" data-role="provider" aria-describedby="int-storage-provider-note"></select>
+          <p class="hint" id="int-storage-provider-note" data-role="provider-note"></p>
+        </div>
+        <div class="int-fields" data-role="fields"></div>
+        <div class="row-actions">
+          <button type="button" class="btn btn-sm" data-action="test"><svg class="icon"><use href="#i-check-circle"/></svg>Validate storage</button>
+          <button type="submit" class="btn btn-sm btn-primary" data-action="save"><svg class="icon"><use href="#i-check"/></svg>Save</button>
+        </div>
+        <div class="test-result" data-role="result" role="status" hidden></div>
+        <p class="hint int-times" data-role="times"></p>
+      </form>
+      <form class="settings-section int-section" id="int-meta" data-type="meta" aria-labelledby="int-meta-title" novalidate>
+        <div class="int-head">
+          <h3 id="int-meta-title"><svg class="icon"><use href="#i-layers"/></svg>Facebook &amp; Instagram</h3>
+          <span class="chip chip-neutral" data-role="badge">Not tested</span>
+        </div>
+        <p class="section-desc">A Meta system user token. Test the connection to list the Pages it manages and their Instagram accounts, then choose the ones Poster may post to.</p>
+        <div class="field" data-role="provider-field">
+          <label class="label" for="int-meta-provider">Integration</label>
+          <select class="select" id="int-meta-provider" data-role="provider" aria-describedby="int-meta-provider-note"></select>
+          <p class="hint" id="int-meta-provider-note" data-role="provider-note"></p>
+        </div>
+        <div class="int-fields" data-role="fields"></div>
+        <div class="int-pages" data-role="pages" hidden>
+          <fieldset class="field">
+            <legend class="label"><span>Connected Pages</span><span class="counter" data-role="pages-count"></span></legend>
+            <div class="channel-list" data-role="page-list"></div>
+            <p class="hint">None chosen allows every Page the token manages.</p>
+          </fieldset>
+          <div class="field">
+            <span class="label">Connected Instagram accounts</span>
+            <ul class="int-accounts" data-role="accounts"></ul>
+          </div>
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn btn-sm" data-action="test"><svg class="icon"><use href="#i-link"/></svg>Test connection</button>
+          <button type="button" class="btn btn-sm" data-action="reconnect"><svg class="icon"><use href="#i-refresh"/></svg>Reconnect</button>
+          <button type="submit" class="btn btn-sm btn-primary" data-action="save"><svg class="icon"><use href="#i-check"/></svg>Save</button>
+        </div>
+        <div class="test-result" data-role="result" role="status" hidden></div>
+        <p class="hint int-times" data-role="times"></p>
+      </form>
+      </div>
+    </div>
+
+    <footer class="drawer-footer">
+      <span class="hint" id="integrations-footer" aria-live="polite"></span>
+      <div class="row-actions">
+        <button type="button" class="btn" id="done-integrations">Done</button>
+      </div>
+    </footer>
+  </div>
 </dialog>
 
 <!-- Confirmation / choice dialog -->

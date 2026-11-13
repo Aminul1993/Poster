@@ -1,4 +1,8 @@
-"""The Flask app: dashboard page, JSON API, static assets, security headers and error handling."""
+"""The Flask app: dashboard page, JSON API, static assets, security headers and error handling.
+
+Credentials & Integrations has its own blueprint (poster/routes/settings.py). The services the routes use are
+in app.extensions["poster"] (poster/context.py); the AI, media and Meta clients there follow the integration
+settings as they change."""
 
 from __future__ import annotations
 
@@ -12,7 +16,6 @@ import secrets
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -22,17 +25,19 @@ from werkzeug.exceptions import HTTPException, NotFound
 
 from poster import validation
 from poster.activity import ActivityLog
-from poster.auth import require_login
+from poster.auth import admin_refusal, require_login
 from poster.config import API, APP_VERSION, BASE_DIR, LANGUAGES, LIMITS, TONES, Config, check_url, is_local_host
 from poster.content import FALLBACK_TAGS, STOP_WORDS
+from poster.context import Services, run, services
 from poster.errors import ServiceError
 from poster.http import HttpClient
 from poster.imaging import IMAGE_EXTENSIONS, sniff_image
 from poster.retry import RetryLog, time_budget
-from poster.services.groq import GroqService
-from poster.services.imagegen import ImageGenService
-from poster.services.media import MediaService
+from poster.routes.settings import bp as settings_bp
+from poster.services.ai import TextProviderFactory
+from poster.services.imaging import ImageProviderFactory
 from poster.services.meta import MetaService
+from poster.services.settings_service import SettingsService
 from poster.services.social import SocialService, UrlMapper
 from poster.store import PostStore
 
@@ -52,23 +57,7 @@ _REQUEST_ID_RE = re.compile(r"[\w.:-]{1,64}")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
 IMMUTABLE = "public, max-age=31536000, s-maxage=31536000, immutable"
 
-
-@dataclass(frozen=True)
-class Services:
-    """The app's configuration and service clients, kept in app.extensions["poster"]."""
-
-    config: Config
-    groq: GroqService
-    social: SocialService
-    activity: ActivityLog
-    media: MediaService
-    image_gen: ImageGenService
-    # Content hash of static/, so asset URLs change whenever a file does and can be cached forever.
-    asset_version: str
-
-
-def services() -> Services:
-    return cast(Services, current_app.extensions["poster"])
+__all__ = ["Services", "create_app", "run", "services"]
 
 
 def asset_version(directory: Path) -> str:
@@ -91,12 +80,20 @@ def create_app(config: Config | None = None, *, http: HttpClient | None = None) 
     app.json.sort_keys = False  # type: ignore[attr-defined]
     store = PostStore(config)
     activity = ActivityLog(store)
+    settings = SettingsService(config, store, activity)
+    client = http
+
+    def meta() -> MetaService:
+        return settings.cached(("meta",), lambda: MetaService(client, settings.effective_config()))
+
     app.extensions["poster"] = Services(
-        config=config, groq=GroqService(http, config),
-        social=SocialService(MetaService(http, config), store, activity, cron_secret=config.cron_secret), activity=activity,
-        media=MediaService(http, config), image_gen=ImageGenService(http, config), asset_version=asset_version(STATIC_DIR),
+        config=config, http=http, settings=settings, text_ai=TextProviderFactory(settings, http),
+        image_ai=ImageProviderFactory(settings, http),
+        social=SocialService(meta, store, activity, cron_secret=config.cron_secret), activity=activity,
+        asset_version=asset_version(STATIC_DIR),
     )
     app.register_blueprint(bp)
+    app.register_blueprint(settings_bp)
     return app
 
 
@@ -118,6 +115,9 @@ def server_config() -> dict[str, Any]:
         "social": s.social.public_info(),
         "media": s.media.public_info(),
         "imageGen": s.image_gen.public_info(),
+        # Credentials & Integrations: whether it asks for POSTER_ADMIN_PASSWORD, and whether it can save here.
+        "integrations": {"adminPassword": bool(s.config.admin_password), "editable": s.settings.editable_problem is None,
+                         "problem": s.settings.editable_problem},
         "limits": {"maxImageBytes": LIMITS["max_image_bytes"], "maxUploadBytes": s.config.max_upload_bytes,
                    "maxChannels": LIMITS["max_channels"]},
         # One source of truth for rules the browser applies too (validation, Demo mode, the posts list).
@@ -227,7 +227,7 @@ def handle_unexpected(error: Exception) -> Any:
 
 def public_base_url() -> str:
     """This server's public https:// address. Facebook and Instagram fetch post images from it (see media_image)."""
-    configured = services().config.public_base_url
+    configured = services().settings.effective_config().public_base_url
     if configured:
         problem = check_url(configured, "PUBLIC_BASE_URL", https_only=True)
         if problem:
@@ -237,7 +237,8 @@ def public_base_url() -> str:
         raise ServiceError("Facebook and Instagram fetch post images from this server, which is running on a local address "
                            "they cannot reach.",
                            kind="config", service="Media host",
-                           hint="Deploy Poster (for example to Vercel), or set PUBLIC_BASE_URL to a public https:// address of this server.")
+                           hint="Deploy Poster (for example to Vercel), or set the Public URL of Blob storage in Settings → "
+                                "Credentials & Integrations (PUBLIC_BASE_URL) to a public https:// address of this server.")
     return f"https://{request.host}"
 
 
@@ -248,7 +249,7 @@ def served_image_mapper(make: Callable[[str, str], str]) -> UrlMapper | None:
     media = services().media
     if not media.uses_blob or not media.configured:
         return None
-    bases = (services().config.public_base_url, f"https://{request.host}")
+    bases = (services().settings.effective_config().public_base_url, f"https://{request.host}")
     prefixes = [f"{base.rstrip('/')}{MEDIA_IMAGE_PATH}" for base in bases if base]
 
     def find(url: str) -> str | None:
@@ -271,18 +272,6 @@ def stored_thumbnails() -> UrlMapper | None:
 def served_as_jpeg() -> UrlMapper | None:
     """The .jpg URL of an image this server serves: Instagram takes JPEG only."""
     return served_image_mapper(lambda prefix, name: f"{prefix}{name}.jpg")
-
-
-def run(label: str, action: Callable[[RetryLog], dict[str, Any]]) -> Any:
-    """Runs a service action within the request's time budget and attaches its retry log to the response or error."""
-    retries = RetryLog(label)
-    try:
-        with time_budget(services().config.request_budget):
-            result = action(retries)
-    except ServiceError as error:
-        error.retries = list(retries)
-        raise
-    return jsonify({**result, "retries": list(retries)})
 
 
 def log_safe(value: Any, limit: int = 200) -> str:
@@ -310,6 +299,7 @@ def assets(version: str, filename: str) -> Any:
 
 @bp.get("/api/health")
 def health() -> Any:
+    # Public (no password), so it says whether each integration is ready, never which provider it uses.
     s = services()
     return jsonify(status="ok", version=APP_VERSION, groq=s.groq.configured, social=s.social.configured,
                    database=s.social.store.configured, media=s.media.configured, imageGen=s.image_gen.configured)
@@ -321,8 +311,12 @@ def config_endpoint() -> Any:
 
 
 def generation_options(body: dict[str, Any]) -> Any:
-    groq = services().groq
-    return validation.parse_generation_options(body, default_model=groq.default_model, allowed_models=groq.allowed_models)
+    """The browser's options for the active text AI provider. A model chosen while another provider was active
+    (a tab opened before the switch) means nothing to this one, so its default model is used instead."""
+    text_ai = services().groq
+    if body.get("provider") and body.get("provider") != text_ai.name:
+        body = {**body, "model": None}
+    return validation.parse_generation_options(body, default_model=text_ai.default_model, allowed_models=text_ai.allowed_models)
 
 
 @bp.post("/api/groq/test")
@@ -430,8 +424,10 @@ def activity_list() -> Any:
 
 @bp.post("/api/activity/clear")
 def activity_clear() -> Any:
-    """Deletes every activity log entry."""
-    return run("Activity", lambda _retries: services().activity.clear())
+    """Deletes every activity log entry. With POSTER_ADMIN_PASSWORD, the settings audit stays unless an administrator
+    clears it (sending the administrator password)."""
+    keep_audit = admin_refusal(services().config) is not None
+    return run("Activity", lambda _retries: services().activity.clear(keep_audit=keep_audit))
 
 
 @bp.get("/api/publish/due")
@@ -503,8 +499,11 @@ def media_image(filename: str) -> Any:
 
 def log_startup(app: Flask) -> None:
     s = cast(Services, app.extensions["poster"])
-    named: tuple[tuple[str, Any], ...] = (("Groq", s.groq), ("Meta", s.social.meta), ("Database", s.social.store),
-                                          ("Media host", s.media), ("Pollinations", s.image_gen))
+    named: tuple[tuple[str, Any], ...] = ((f"Text AI ({s.groq.label})", s.groq), ("Meta", s.social.meta),
+                                          ("Database", s.social.store), ("Media host", s.media),
+                                          (f"Image AI ({s.image_gen.label})", s.image_gen))
+    if s.settings.box.problem:
+        log.warning("Credentials & Integrations: %s Credentials come from the environment only.", s.settings.box.problem)
     for name, service in named:
         if service.configured:
             log.info("%s: configured", name)

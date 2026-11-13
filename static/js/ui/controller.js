@@ -7,6 +7,7 @@
 import { saveSettings, showToast } from '../app.js';
 import { LANGUAGES, LIMITS, SERVER, STORAGE_KEYS, TIMING } from '../config.js';
 import { POST_FILTERS } from '../services/social.js';
+import { SettingsModel } from '../settings.js';
 import { hasContent, isReady, needsTime } from '../store.js';
 import { $, formatDuration, icon, pluralize } from '../util.js';
 import { BulkEditView } from './bulk.js';
@@ -15,6 +16,7 @@ import { MOD_KEY, byId, hasFiles } from './dom.js';
 import { EditorView } from './editor.js';
 import { GalleryView } from './gallery.js';
 import { ImageEditView } from './imageedit.js';
+import { IntegrationsView } from './integrations.js';
 import { LogView } from './log.js';
 import { OperationsView } from './operations.js';
 import { Orchestrator } from './orchestrator.js';
@@ -37,6 +39,7 @@ export class UIController {
     this.posts = new PostsView(this);
     this.log = new LogView(this);
     this.settingsView = new SettingsView(this);
+    this.integrations = new IntegrationsView(this);
     this.orchestrator = new Orchestrator(this);
     this.health = { groq: null, social: null };
     this.lastStorageToast = 0;
@@ -70,6 +73,7 @@ export class UIController {
     this.posts.bind();
     this.log.bind();
     this.settingsView.bind();
+    this.integrations.bind();
     this.bindGlobal();
     this.bindShortcuts();
     this.bindServices();
@@ -83,6 +87,8 @@ export class UIController {
 
   /** @param {string} [sectionId] @param {{title: string, message: string}} [reason] shown in the drawer */
   openSettings(sectionId, reason) { this.settingsView.open(sectionId, reason); }
+  /** Settings → Credentials & Integrations, on top of the Settings drawer when it is open. */
+  openIntegrations() { return this.integrations.open(); }
   confirm(options) { return this.dialogs.confirm(options); }
   choose(options) { return this.dialogs.choose(options); }
   renderEditor() { this.editor.render(); }
@@ -165,8 +171,9 @@ export class UIController {
       pill.dataset.state = state.state;
       byId(`${id}-detail`).textContent = state.detail;
       pill.title = state.title;
-      pill.setAttribute('aria-label', `${id === 'pill-groq' ? 'Groq' : 'Facebook & Instagram'}: ${state.detail}. ${state.title}`);
+      pill.setAttribute('aria-label', `${id === 'pill-groq' ? SERVER.groq.label : 'Facebook & Instagram'}: ${state.detail}. ${state.title}`);
     };
+    byId('pill-groq-label').textContent = SERVER.groq.label || 'Text AI';
     setPill('pill-groq', this.groqState());
     setPill('pill-social', this.socialState());
     byId('pill-network').hidden = navigator.onLine !== false;
@@ -426,7 +433,10 @@ export class UIController {
   /** Banner for errors that need user action (auth, configuration, network). */
   showServiceErrorBanner(error) {
     const service = error.service || 'Service';
-    const section = service === 'Groq' ? 'settings-groq' : service === 'Media host' ? 'settings-media' : 'settings-social';
+    // Publishing errors name Meta, the database or the publisher; generation errors name the text AI provider.
+    const section = service === 'Media host' ? 'settings-media'
+      : ['Meta', 'Database', 'Publisher'].includes(service) ? 'settings-social'
+        : service === 'Settings' ? 'settings-integrations' : 'settings-groq';
     const actions = [{ label: 'Open settings', onClick: () => this.openSettings(section) }];
     if (this.settings.mode === 'live') actions.push({ label: 'Use Demo mode', onClick: () => this.setMode('demo'), primary: true });
     this.notifier.banner(`service-${service.toLowerCase().replace(/\W+/g, '-')}`, {
@@ -472,10 +482,10 @@ export class UIController {
         title: 'You are in Demo mode',
         message: ready
           ? 'AI captions and publishing are simulated. The server is configured, so you can switch to Live mode whenever you are ready.'
-          : 'AI captions and publishing are simulated, so you can try everything safely. To go live, add GROQ_API_KEY and META_ACCESS_TOKEN to the .env file next to app.py and restart Poster.',
+          : 'AI captions and publishing are simulated, so you can try everything safely. To go live, set up a text AI provider and the Meta token in Settings → Credentials & Integrations (or in the environment).',
         actions: ready
           ? [{ label: 'Switch to Live mode', onClick: () => this.setMode('live') }]
-          : [{ label: 'Open settings', onClick: () => this.openSettings() }]
+          : [{ label: 'Set up credentials', onClick: () => { this.openSettings('settings-integrations'); this.openIntegrations(); } }]
       });
       return;
     }
@@ -517,7 +527,7 @@ export class UIController {
       return;
     }
     for (const id of ['service-groq', 'service-meta', 'service-database', 'service-media-host']) this.notifier.clearBanner(id);
-    showToast(mode === 'demo' ? 'Demo mode: AI and publishing are simulated.' : 'Live mode: requests go to Groq, and posts to Facebook and Instagram.', 'info', { title: `Switched to ${mode === 'demo' ? 'Demo' : 'Live'} mode` });
+    showToast(mode === 'demo' ? 'Demo mode: AI and publishing are simulated.' : `Live mode: requests go to ${SERVER.groq.label}, and posts to Facebook and Instagram.`, 'info', { title: `Switched to ${mode === 'demo' ? 'Demo' : 'Live'} mode` });
   }
 
   /**
@@ -531,13 +541,34 @@ export class UIController {
     return this.confirm({
       title: 'Switch to Live mode?',
       message: [
-        `Captions will come from ${settings.model} on Groq, and scheduled posts are published for real on ${channels.length ? channels.join(', ') : 'the channels you choose in Settings → Facebook & Instagram'}.`,
+        `Captions will come from ${settings.model} on ${SERVER.groq.label}, and scheduled posts are published for real on ${channels.length ? channels.join(', ') : 'the channels you choose in Settings → Facebook & Instagram'}.`,
         rehearsed ? `${pluralize(rehearsed, 'post')} scheduled in Demo mode ${rehearsed === 1 ? 'was' : 'were'} never queued, so ${rehearsed === 1 ? 'it' : 'they'} can be scheduled for real.` : ''
       ].filter(Boolean).join('\n\n'),
       confirmLabel: 'Switch to Live',
       symbol: 'zap',
       focusCancel: true
     });
+  }
+
+  /**
+   * Called after Credentials & Integrations saved a change (SERVER already holds the server's new configuration):
+   * a model chosen for the previous text AI provider gives way to the new provider's default, and everything
+   * that shows a provider or its state is drawn again. No reload, no restart.
+   */
+  onIntegrationsChanged() {
+    const current = this.settings;
+    const next = SettingsModel.normalize(current);
+    this.health.groq = null;
+    this.health.social = null;
+    if (next.model !== current.model || next.modelProvider !== current.modelProvider) {
+      const result = saveSettings(next);
+      if (result.ok && next.model !== current.model) {
+        this.notifier.log('info', 'settings', `The text AI provider changed, so the model is now ${next.model} (${SERVER.groq.label}'s default).`);
+      }
+    }
+    this.settingsView.syncServer(current.model);
+    this.renderAll();
+    this.updateModeBanner();
   }
 
   /** Called by saveSettings() after settings change. */

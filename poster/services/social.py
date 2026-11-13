@@ -43,15 +43,26 @@ class SocialService(ConfiguredService):
     service = "Meta"
     unconfigured = "Facebook and Instagram are not set up on the server"
 
-    def __init__(self, meta: MetaService, store: PostStore, activity: ActivityLog, *, cron_secret: str = "") -> None:
-        self.meta = meta
+    def __init__(self, meta: MetaService | Callable[[], MetaService], store: PostStore, activity: ActivityLog, *,
+                 cron_secret: str = "") -> None:
+        """``meta`` is the Graph API client, or a callable that returns the current one: the Meta credentials can
+        change while Poster runs (Credentials & Integrations), and every use then gets the new client."""
+        self._meta = meta
         self.store = store
         self.activity = activity
         self.cron_secret = cron_secret
-        self.problem = meta.problem or store.problem
+
+    @property
+    def meta(self) -> MetaService:
+        return self._meta if isinstance(self._meta, MetaService) else self._meta()
+
+    @property
+    def problem(self) -> str | None:  # type: ignore[override]
+        return self.meta.problem or self.store.problem
 
     def public_info(self) -> dict[str, Any]:
-        return {**self.meta.public_info(), "configured": self.configured, "problem": self.problem,
+        meta = self.meta
+        return {**meta.public_info(), "configured": self.configured, "problem": self.problem, "metaConfigured": meta.configured,
                 "database": self.store.public_info(), "cronSecretSet": bool(self.cron_secret)}
 
     # -- scheduling -----------------------------------------------------------------------------------------------

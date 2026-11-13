@@ -1,5 +1,6 @@
 /** Starts generation and scheduling runs: pre-flight checks, confirmations, then SchedulerService. */
 import { showToast } from '../app.js';
+import { SERVER } from '../config.js';
 import { instagramProblem } from '../services/social.js';
 import { countedResult, hasContent } from '../store.js';
 import { TimeZoneUtil } from '../time.js';
@@ -36,7 +37,7 @@ export class Orchestrator extends View {
     if (settings.mode === 'live') {
       const check = this.validation.validateSettings(settings, { scope: 'groq', requireCredentials: true });
       if (!check.valid) {
-        this.ui.openSettings('settings-groq', { title: 'Groq is not configured', message: Object.values(check.errors)[0] });
+        this.ui.openSettings('settings-groq', { title: `${SERVER.groq.label} is not configured`, message: Object.values(check.errors)[0] });
         return null;
       }
       if (!this.ensureOnline()) return null;

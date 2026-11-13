@@ -156,6 +156,9 @@ export class DemoImageGenService extends ImageGenService {
 
   get available() { return true; }
 
+  /** Demo mode tints the photo itself, whichever image provider the server has. */
+  get canEdit() { return true; }
+
   /** @returns {Promise<File>} a gradient with the description written on it */
   async generateImage(prompt, aspect, { signal, number = 0 } = {}) {
     await sleep(900 + (hashString(prompt) % 900), signal);

@@ -71,6 +71,25 @@ SCHEMA = (
         details TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS poster_activity_ts ON poster_activity (ts)",
+    # Credentials & Integrations: one row per provider whose settings were saved (or whose status was recorded).
+    # encrypted_config is a Fernet token of the provider's settings (see crypto.py), "" when the environment holds
+    # them. is_active marks the provider each type uses; source is "admin" (saved in the dashboard) or "env"
+    # (imported from the environment, which stays in charge until the settings are saved in the dashboard).
+    """CREATE TABLE IF NOT EXISTS poster_integration_settings (
+        id TEXT PRIMARY KEY,
+        provider_type TEXT NOT NULL,
+        provider_name TEXT NOT NULL,
+        encrypted_config TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'admin',
+        is_active INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'untested',
+        last_tested_at TEXT,
+        last_successful_connection TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (provider_type, provider_name)
+    )""",
 )
 DATABASE_ERRORS: tuple[type[Exception], ...] = (sqlite3.Error, psycopg.Error) if psycopg is not None else (sqlite3.Error,)
 # Supabase serves tables in the public schema over its REST API. Row level security without policies shuts
@@ -79,12 +98,17 @@ POSTGRES_ONLY = (
     "ALTER TABLE poster_posts ENABLE ROW LEVEL SECURITY",
     "ALTER TABLE poster_state ENABLE ROW LEVEL SECURITY",
     "ALTER TABLE poster_activity ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE poster_integration_settings ENABLE ROW LEVEL SECURITY",
 )
 # The posts table's columns. Statements name columns only from this set, and pass every value as a parameter.
 COLUMNS = frozenset({"id", "request_key", "channel_id", "service", "channel_name", "text", "media_url", "due_at", "status",
                      "attempts", "retry_at", "claimed_at", "checked_at", "container_id", "remote_id", "permalink", "error", "created_at",
                      "sent_at"})
 ACTIVITY_COLUMNS = ("id", "ts", "level", "category", "message", "details")
+SETTINGS_COLUMNS = frozenset({"id", "provider_type", "provider_name", "encrypted_config", "source", "is_active", "status",
+                              "last_tested_at", "last_successful_connection", "error_message", "created_at", "updated_at"})
+# What saving a provider's settings may change on a row that already exists.
+SETTINGS_SAVED = ("encrypted_config", "source", "status", "error_message", "updated_at")
 
 
 def iso(value: datetime) -> str:
@@ -328,9 +352,62 @@ class PostStore:
             return db.query(f"SELECT * FROM poster_activity {'WHERE ' + where if where else ''} "  # noqa: S608
                             "ORDER BY ts DESC, id DESC LIMIT %s OFFSET %s", (*levels, *categories, limit, offset))
 
-    def clear_activity(self) -> int:
+    def clear_activity(self, *, keep_prefix: str | None = None, keep_category: str = "") -> int:
+        """Deletes the activity log; with ``keep_prefix``, all but the entries whose ID matches it (a LIKE
+        pattern) in ``keep_category``."""
         with self.session() as db:
-            return len(db.query("DELETE FROM poster_activity RETURNING id"))
+            if keep_prefix is None:
+                return len(db.query("DELETE FROM poster_activity RETURNING id"))
+            return len(db.query("DELETE FROM poster_activity WHERE NOT (id LIKE %s AND category = %s) RETURNING id",
+                                (keep_prefix, keep_category)))
+
+    # -- integration settings -----------------------------------------------------------------------------------------
+
+    def settings_rows(self, provider_type: str | None = None) -> list[Row]:
+        """The saved integration settings (encrypted), of one type or of all."""
+        with self.session() as db:
+            if provider_type is None:
+                return db.query("SELECT * FROM poster_integration_settings ORDER BY provider_type, provider_name")
+            return db.query("SELECT * FROM poster_integration_settings WHERE provider_type = %s ORDER BY provider_name",
+                            (provider_type,))
+
+    def save_setting(self, row: Row) -> Row:
+        """Adds a provider's settings, or replaces the stored ones (SETTINGS_SAVED) when the provider has a row."""
+        unknown = set(row) - SETTINGS_COLUMNS
+        if unknown:
+            raise ValueError(f"Unknown settings fields: {', '.join(sorted(unknown))}")
+        updates = ", ".join(f"{name} = excluded.{name}" for name in SETTINGS_SAVED if name in row)
+        with self.session() as db:
+            rows = db.query(f"INSERT INTO poster_integration_settings ({', '.join(row)}) VALUES ({marks(len(row))}) "  # noqa: S608
+                            f"ON CONFLICT (provider_type, provider_name) DO UPDATE SET {updates} RETURNING *", tuple(row.values()))
+        return rows[0]
+
+    def add_setting(self, row: Row) -> bool:
+        """Adds a provider's row unless it has one. Returns whether it was added (two servers importing the
+        environment at once add it once)."""
+        unknown = set(row) - SETTINGS_COLUMNS
+        if unknown:
+            raise ValueError(f"Unknown settings fields: {', '.join(sorted(unknown))}")
+        with self.session() as db:
+            rows = db.query(f"INSERT INTO poster_integration_settings ({', '.join(row)}) VALUES ({marks(len(row))}) "  # noqa: S608
+                            "ON CONFLICT (provider_type, provider_name) DO NOTHING RETURNING id", tuple(row.values()))
+        return bool(rows)
+
+    def activate_setting(self, provider_type: str, provider_name: str) -> bool:
+        """Makes one provider the active one of its type, in a single statement. False when it has no row."""
+        with self.session() as db:
+            rows = db.query("UPDATE poster_integration_settings SET is_active = CASE WHEN provider_name = %s THEN 1 ELSE 0 END "
+                            "WHERE provider_type = %s RETURNING provider_name, is_active", (provider_name, provider_type))
+        return any(row["provider_name"] == provider_name for row in rows)
+
+    def update_setting(self, provider_type: str, provider_name: str, **fields: Any) -> None:
+        """Changes a provider's row (its status after a test, or its re-encrypted settings)."""
+        unknown = set(fields) - SETTINGS_COLUMNS
+        if unknown:
+            raise ValueError(f"Unknown settings fields: {', '.join(sorted(unknown))}")
+        with self.session() as db:
+            db.query(f"UPDATE poster_integration_settings SET {', '.join(f'{name} = %s' for name in fields)} "  # noqa: S608
+                     "WHERE provider_type = %s AND provider_name = %s", (*fields.values(), provider_type, provider_name))
 
     # -- state ----------------------------------------------------------------------------------------------------
 
